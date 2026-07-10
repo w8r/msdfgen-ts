@@ -1,0 +1,13 @@
+{
+  "font": "/Users/alexander.milevski/Projects/msdfgen-ts/test/fonts/PTSerif-Regular.ttf",
+  "charSpec": "233",
+  "size": 48,
+  "width": 48,
+  "height": 48,
+  "channels": 3,
+  "pxrange": 4,
+  "scale": 40,
+  "tx": 0.1,
+  "ty": 0.35,
+  "cli": "/Users/alexander.milevski/Projects/msdfgen-ts/tools/msdfgen-ref/build/msdfgen msdf -font /Users/alexander.milevski/Projects/msdfgen-ts/test/fonts/PTSerif-Regular.ttf 233 -o /Users/alexander.milevski/Projects/msdfgen-ts/test/golden/ptserif/U00E9_48px/bitmap.fl32 -format fl32 -dimensions 48 48 -pxrange 4 -scale 40 -translate 0.100000 0.350000 -emnormalize -exportshape /Users/alexander.milevski/Projects/msdfgen-ts/test/golden/ptserif/U00E9_48px/shape.txt -scanline"
+}

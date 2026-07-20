@@ -24,7 +24,7 @@ class ShapeDescReader {
     const t = this.text;
     while (this.pos < t.length) {
       const c = t[this.pos]!;
-      if (c === ' ' || c === '\t' || c === '\r' || c === '\n') this.pos++;
+      if (c === " " || c === "\t" || c === "\r" || c === "\n") this.pos++;
       else break;
     }
   }
@@ -32,13 +32,13 @@ class ShapeDescReader {
   /** Read the next non-whitespace character (advances past it). EOF = ''. */
   readChar(): string {
     this.skipWS();
-    return this.pos < this.text.length ? this.text[this.pos++]! : '';
+    return this.pos < this.text.length ? this.text[this.pos++]! : "";
   }
 
   /** Peek the next non-whitespace character (does NOT advance). EOF = ''. */
   peekChar(): string {
     this.skipWS();
-    return this.pos < this.text.length ? this.text[this.pos]! : '';
+    return this.pos < this.text.length ? this.text[this.pos]! : "";
   }
 
   /**
@@ -52,30 +52,39 @@ class ShapeDescReader {
     const t = this.text;
     // Attempt to parse a floating-point number
     let i = this.pos;
-    if (i < t.length && t[i] === '-') i++;
+    if (i < t.length && t[i] === "-") i++;
     const start = i;
-    while (i < t.length && (t[i]! >= '0' && t[i]! <= '9' || t[i] === '.')) i++;
-    if (i === start) { this.pos = saved; return null; } // no digits
-    if (i < t.length && (t[i] === 'e' || t[i] === 'E')) {
+    while (i < t.length && ((t[i]! >= "0" && t[i]! <= "9") || t[i] === ".")) i++;
+    if (i === start) {
+      this.pos = saved;
+      return null;
+    } // no digits
+    if (i < t.length && (t[i] === "e" || t[i] === "E")) {
       i++;
-      if (i < t.length && (t[i] === '+' || t[i] === '-')) i++;
-      while (i < t.length && t[i]! >= '0' && t[i]! <= '9') i++;
+      if (i < t.length && (t[i] === "+" || t[i] === "-")) i++;
+      while (i < t.length && t[i]! >= "0" && t[i]! <= "9") i++;
     }
     const x = parseFloat(t.slice(this.pos, i));
     this.pos = i;
     this.skipWS();
-    if (this.pos >= t.length || t[this.pos] !== ',') { this.pos = saved; return null; }
+    if (this.pos >= t.length || t[this.pos] !== ",") {
+      this.pos = saved;
+      return null;
+    }
     this.pos++; // consume ','
     this.skipWS();
     let j = this.pos;
-    if (j < t.length && t[j] === '-') j++;
+    if (j < t.length && t[j] === "-") j++;
     const start2 = j;
-    while (j < t.length && (t[j]! >= '0' && t[j]! <= '9' || t[j] === '.')) j++;
-    if (j === start2) { this.pos = saved; return null; }
-    if (j < t.length && (t[j] === 'e' || t[j] === 'E')) {
+    while (j < t.length && ((t[j]! >= "0" && t[j]! <= "9") || t[j] === ".")) j++;
+    if (j === start2) {
+      this.pos = saved;
+      return null;
+    }
+    if (j < t.length && (t[j] === "e" || t[j] === "E")) {
       j++;
-      if (j < t.length && (t[j] === '+' || t[j] === '-')) j++;
-      while (j < t.length && t[j]! >= '0' && t[j]! <= '9') j++;
+      if (j < t.length && (t[j] === "+" || t[j] === "-")) j++;
+      while (j < t.length && t[j]! >= "0" && t[j]! <= "9") j++;
     }
     const y = parseFloat(t.slice(this.pos, j));
     this.pos = j;
@@ -99,7 +108,7 @@ function parseContour(r: ShapeDescReader): EdgeSegment[] {
   const firstCoord = r.readCoord();
   if (firstCoord === null) {
     // Empty contour — consume '}'
-    if (r.peekChar() === '}') r.readChar();
+    if (r.peekChar() === "}") r.readChar();
     return edges;
   }
 
@@ -109,7 +118,10 @@ function parseContour(r: ShapeDescReader): EdgeSegment[] {
   const startY = p0y;
 
   // Control-point scratch (at most 2 control points per edge)
-  let c1x = 0, c1y = 0, c2x = 0, c2y = 0;
+  let c1x = 0,
+    c1y = 0,
+    c2x = 0,
+    c2y = 0;
 
   // Main loop: each iteration consumes one ';' + edge descriptor + endpoint.
   // Matches the C++ while((c = readChar) != '}') loop.
@@ -117,8 +129,8 @@ function parseContour(r: ShapeDescReader): EdgeSegment[] {
   while (true) {
     // The loop starts expecting a ';' separator.
     const sep = r.readChar();
-    if (sep === '}' || sep === '') break; // end of contour or stream
-    if (sep !== ';') break; // malformed — just exit
+    if (sep === "}" || sep === "") break; // end of contour or stream
+    if (sep !== ";") break; // malformed — just exit
 
     // After the ';', try to read a coordinate directly (LINEAR edge with no descriptor).
     const directCoord = r.readCoord();
@@ -132,12 +144,13 @@ function parseContour(r: ShapeDescReader): EdgeSegment[] {
 
     // Not a coordinate: read the edge descriptor character (color, '#', or '(').
     const dc = r.readChar();
-    if (dc === '}' || dc === '') break;
+    if (dc === "}" || dc === "") break;
 
-    if (dc === '#') {
+    if (dc === "#") {
       // Close edge: p[0] → start, LINEAR.
       edges.push(new EdgeSegment(LINEAR, p0x, p0y, startX, startY, 0, 0, 0, 0));
-      p0x = startX; p0y = startY;
+      p0x = startX;
+      p0y = startY;
       continue;
     }
 
@@ -146,49 +159,61 @@ function parseContour(r: ShapeDescReader): EdgeSegment[] {
     let controlPoints = 0;
 
     let nextC = dc;
-    if (dc === 'c' || dc === 'C' || dc === 'm' || dc === 'M' ||
-        dc === 'y' || dc === 'Y' || dc === 'w' || dc === 'W') {
+    if (
+      dc === "c" ||
+      dc === "C" ||
+      dc === "m" ||
+      dc === "M" ||
+      dc === "y" ||
+      dc === "Y" ||
+      dc === "w" ||
+      dc === "W"
+    ) {
       // Read the char after the color letter.
       nextC = r.readChar();
     }
 
-    if (nextC === ';') {
+    if (nextC === ";") {
       // Color letter followed directly by ';': no control points, go to end.
       goto_finish_edge: {
         const ep = r.readCoord();
         if (ep !== null) {
           edges.push(new EdgeSegment(LINEAR, p0x, p0y, ep[0], ep[1], 0, 0, 0, 0));
-          p0x = ep[0]; p0y = ep[1];
+          p0x = ep[0];
+          p0y = ep[1];
           break goto_finish_edge;
         }
         // readCoord failed: might be '#'
         const ec = r.readChar();
-        if (ec === '#') {
+        if (ec === "#") {
           edges.push(new EdgeSegment(LINEAR, p0x, p0y, startX, startY, 0, 0, 0, 0));
-          p0x = startX; p0y = startY;
+          p0x = startX;
+          p0y = startY;
         }
       }
       continue;
     }
 
-    if (nextC === '(') {
+    if (nextC === "(") {
       // Read control points.
       const ctrl1 = r.readCoord();
       if (ctrl1 !== null) {
-        c1x = ctrl1[0]; c1y = ctrl1[1];
+        c1x = ctrl1[0];
+        c1y = ctrl1[1];
         controlPoints = 1;
         const after = r.peekChar();
-        if (after === ';') {
+        if (after === ";") {
           r.readChar(); // consume ';'
           const ctrl2 = r.readCoord();
           if (ctrl2 !== null) {
-            c2x = ctrl2[0]; c2y = ctrl2[1];
+            c2x = ctrl2[0];
+            c2y = ctrl2[1];
             controlPoints = 2;
           }
         }
       }
       // Consume ')'
-      if (r.peekChar() === ')') r.readChar();
+      if (r.peekChar() === ")") r.readChar();
     }
 
     // Read ';' separator before the destination.
@@ -199,11 +224,13 @@ function parseContour(r: ShapeDescReader): EdgeSegment[] {
     const ep = r.readCoord();
     let epx: number, epy: number;
     if (ep !== null) {
-      epx = ep[0]; epy = ep[1];
+      epx = ep[0];
+      epy = ep[1];
     } else {
       const ec = r.readChar();
-      if (ec === '#') {
-        epx = startX; epy = startY;
+      if (ec === "#") {
+        epx = startX;
+        epy = startY;
       } else {
         break; // malformed
       }
@@ -221,7 +248,8 @@ function parseContour(r: ShapeDescReader): EdgeSegment[] {
         edges.push(new EdgeSegment(CUBIC, p0x, p0y, c1x, c1y, c2x, c2y, epx, epy));
         break;
     }
-    p0x = epx; p0y = epy;
+    p0x = epx;
+    p0y = epy;
 
     // If endpoint is the start, close the contour.
     if (epx === startX && epy === startY && ep === null) {
@@ -252,22 +280,22 @@ export function parseShapeDesc(text: string): Shape {
   r.skipWS();
 
   // Optional header: @y-up | @y-down | @invert-y
-  if (r.peekChar() === '@') {
+  if (r.peekChar() === "@") {
     r.readChar(); // consume '@'
-    if (text.startsWith('y-down', r['pos'])) {
+    if (text.startsWith("y-down", r["pos"])) {
       inverseYAxis = true;
-      r['pos'] += 6;
-    } else if (text.startsWith('y-up', r['pos'])) {
+      r["pos"] += 6;
+    } else if (text.startsWith("y-up", r["pos"])) {
       inverseYAxis = false;
-      r['pos'] += 4;
-    } else if (text.startsWith('invert-y', r['pos'])) {
+      r["pos"] += 4;
+    } else if (text.startsWith("invert-y", r["pos"])) {
       inverseYAxis = true;
-      r['pos'] += 8;
+      r["pos"] += 8;
     }
   }
 
   // Parse contour blocks { ... }
-  while (r.peekChar() === '{') {
+  while (r.peekChar() === "{") {
     r.readChar(); // consume '{'
     contours.push(parseContour(r));
   }
@@ -281,11 +309,11 @@ export function parseShapeDesc(text: string): Shape {
  * Format a number with up to 12 significant digits, matching C++ %.12g.
  */
 function fmtG12(v: number): string {
-  if (v === 0) return '0';
+  if (v === 0) return "0";
   let s = v.toPrecision(12);
   // Strip trailing zeros after decimal point (mimicking %g behaviour)
-  if (s.includes('.') && !s.includes('e')) {
-    s = s.replace(/\.?0+$/, '');
+  if (s.includes(".") && !s.includes("e")) {
+    s = s.replace(/\.?0+$/, "");
   }
   return s;
 }
@@ -305,29 +333,31 @@ function fmtCoord(x: number, y: number): string {
  */
 export function serializeShape(shape: Shape): string {
   const lines: string[] = [];
-  lines.push(shape.inverseYAxis ? '@y-down' : '@y-up');
+  lines.push(shape.inverseYAxis ? "@y-down" : "@y-up");
 
   for (const contour of shape.contours) {
-    lines.push('{');
+    lines.push("{");
     if (contour.length > 0) {
       for (const seg of contour) {
-        lines.push('\t' + fmtCoord(seg.p0x, seg.p0y) + ';');
+        lines.push("\t" + fmtCoord(seg.p0x, seg.p0y) + ";");
         switch (seg.type) {
           case LINEAR:
             // No control points written for linear edges.
             break;
           case QUADRATIC:
-            lines.push('\t\t(' + fmtCoord(seg.p1x, seg.p1y) + ');');
+            lines.push("\t\t(" + fmtCoord(seg.p1x, seg.p1y) + ");");
             break;
           default: // CUBIC
-            lines.push('\t\t(' + fmtCoord(seg.p1x, seg.p1y) + '; ' + fmtCoord(seg.p2x, seg.p2y) + ');');
+            lines.push(
+              "\t\t(" + fmtCoord(seg.p1x, seg.p1y) + "; " + fmtCoord(seg.p2x, seg.p2y) + ");",
+            );
             break;
         }
       }
-      lines.push('\t#');
+      lines.push("\t#");
     }
-    lines.push('}');
+    lines.push("}");
   }
 
-  return lines.join('\n') + '\n';
+  return lines.join("\n") + "\n";
 }

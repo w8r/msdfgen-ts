@@ -163,8 +163,8 @@ export class EdgeSegment {
       }
       case QUADRATIC: {
         // mix(p1-p0, p2-p1, t); if zero -> p2-p0
-        const tx = (this.p1x - this.p0x) + t * ((this.p2x - this.p1x) - (this.p1x - this.p0x));
-        const ty = (this.p1y - this.p0y) + t * ((this.p2y - this.p1y) - (this.p1y - this.p0y));
+        const tx = this.p1x - this.p0x + t * (this.p2x - this.p1x - (this.p1x - this.p0x));
+        const ty = this.p1y - this.p0y + t * (this.p2y - this.p1y - (this.p1y - this.p0y));
         if (tx !== 0 || ty !== 0) {
           out[0] = tx;
           out[1] = ty;
@@ -182,8 +182,10 @@ export class EdgeSegment {
         const d12y = this.p2y - this.p1y;
         const d23x = this.p3x - this.p2x;
         const d23y = this.p3y - this.p2y;
-        const tx = (d01x + t * (d12x - d01x)) + t * ((d12x + t * (d23x - d12x)) - (d01x + t * (d12x - d01x)));
-        const ty = (d01y + t * (d12y - d01y)) + t * ((d12y + t * (d23y - d12y)) - (d01y + t * (d12y - d01y)));
+        const tx =
+          d01x + t * (d12x - d01x) + t * (d12x + t * (d23x - d12x) - (d01x + t * (d12x - d01x)));
+        const ty =
+          d01y + t * (d12y - d01y) + t * (d12y + t * (d23y - d12y) - (d01y + t * (d12y - d01y)));
         if (tx !== 0 || ty !== 0) {
           out[0] = tx;
           out[1] = ty;
@@ -300,7 +302,17 @@ export class EdgeSegment {
         return [
           new EdgeSegment(CUBIC, this.p0x, this.p0y, c0c1x, c0c1y, c0c2x, c0c2y, pa[0]!, pa[1]!),
           new EdgeSegment(CUBIC, pa[0]!, pa[1]!, c1c1x, c1c1y, c1c2x, c1c2y, pb[0]!, pb[1]!),
-          new EdgeSegment(CUBIC, pb[0]!, pb[1]!, m1223_23x, m1223_23y, c2c2x, c2c2y, this.p3x, this.p3y),
+          new EdgeSegment(
+            CUBIC,
+            pb[0]!,
+            pb[1]!,
+            m1223_23x,
+            m1223_23y,
+            c2c2x,
+            c2c2y,
+            this.p3x,
+            this.p3y,
+          ),
         ];
       }
     }

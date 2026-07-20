@@ -62,20 +62,20 @@ function loadFixtures(): GoldenFixture[] {
     }
 
     // Determine font file from any meta.json in this font's fixtures.
-    let fontFile = '';
+    let fontFile = "";
     const glyphDirs = readdirSync(fontDir);
 
     // Prefer 32px fixtures (to deduplicate — shape is size-independent).
-    const dirs32 = glyphDirs.filter((d) => d.endsWith('_32px'));
+    const dirs32 = glyphDirs.filter((d) => d.endsWith("_32px"));
     if (dirs32.length === 0) continue;
 
     for (const glyphDir of dirs32) {
       const fixDir = resolve(fontDir, glyphDir);
-      const metaPath = resolve(fixDir, 'meta.json');
-      const shapePath = resolve(fixDir, 'shape.txt');
+      const metaPath = resolve(fixDir, "meta.json");
+      const shapePath = resolve(fixDir, "shape.txt");
       if (!existsSync(metaPath) || !existsSync(shapePath)) continue;
 
-      const meta = JSON.parse(readFileSync(metaPath, 'utf8')) as {
+      const meta = JSON.parse(readFileSync(metaPath, "utf8")) as {
         font: string;
         charSpec: string;
       };
@@ -83,7 +83,7 @@ function loadFixtures(): GoldenFixture[] {
       // Resolve font file relative to test/fonts/
       if (!fontFile) {
         const absFont = meta.font;
-        fontFile = resolve(FONTS_DIR, absFont.split('/').pop()!);
+        fontFile = resolve(FONTS_DIR, absFont.split("/").pop()!);
       }
 
       // Parse glyph index from charSpec.
@@ -91,19 +91,19 @@ function loadFixtures(): GoldenFixture[] {
       // Icon fonts: charSpec is "g<N>" (e.g. "g1").
       let glyphId: number;
       const cs = meta.charSpec;
-      if (cs.startsWith('g')) {
+      if (cs.startsWith("g")) {
         glyphId = parseInt(cs.slice(1), 10);
       } else {
         // charSpec is codepoint; we resolve glyphId when we have the font.
         // Store codepoint as negative to distinguish later.
-        glyphId = -(parseInt(cs, 10));
+        glyphId = -parseInt(cs, 10);
       }
 
       const key = `${fontId}:${glyphId}`;
       if (seen.has(key)) continue;
       seen.add(key);
 
-      const shapeText = readFileSync(shapePath, 'utf8');
+      const shapeText = readFileSync(shapePath, "utf8");
       fixtures.push({ fontId, fontFile, glyphId, shapeText });
     }
   }
@@ -115,9 +115,12 @@ function loadFixtures(): GoldenFixture[] {
 
 function typeName(type: number): string {
   switch (type) {
-    case LINEAR: return 'LINEAR';
-    case QUADRATIC: return 'QUADRATIC';
-    default: return 'CUBIC';
+    case LINEAR:
+      return "LINEAR";
+    case QUADRATIC:
+      return "QUADRATIC";
+    default:
+      return "CUBIC";
   }
 }
 
@@ -149,16 +152,16 @@ function compareShapes(ours: Shape, golden: Shape): string | null {
 
 function comparePoints(ci: number, ei: number, os: EdgeSegment, gs: EdgeSegment): string | null {
   const pairs: Array<[string, number, number]> = [
-    ['p0x', os.p0x, gs.p0x],
-    ['p0y', os.p0y, gs.p0y],
-    ['p1x', os.p1x, gs.p1x],
-    ['p1y', os.p1y, gs.p1y],
+    ["p0x", os.p0x, gs.p0x],
+    ["p0y", os.p0y, gs.p0y],
+    ["p1x", os.p1x, gs.p1x],
+    ["p1y", os.p1y, gs.p1y],
   ];
   if (os.type === QUADRATIC || os.type === CUBIC) {
-    pairs.push(['p2x', os.p2x, gs.p2x], ['p2y', os.p2y, gs.p2y]);
+    pairs.push(["p2x", os.p2x, gs.p2x], ["p2y", os.p2y, gs.p2y]);
   }
   if (os.type === CUBIC) {
-    pairs.push(['p3x', os.p3x, gs.p3x], ['p3y', os.p3y, gs.p3y]);
+    pairs.push(["p3x", os.p3x, gs.p3x], ["p3y", os.p3y, gs.p3y]);
   }
   for (const [name, ov, gv] of pairs) {
     const diff = Math.abs(ov - gv);
@@ -186,7 +189,7 @@ function getFont(fontFile: string): Font {
   return f;
 }
 
-describe('Gate 2a — shape normalization vs exportshape goldens', () => {
+describe("Gate 2a — shape normalization vs exportshape goldens", () => {
   // Group fixtures by fontId for better output
   const byFont = new Map<string, GoldenFixture[]>();
   for (const fix of fixtures) {
@@ -199,17 +202,16 @@ describe('Gate 2a — shape normalization vs exportshape goldens', () => {
     describe(fontId, () => {
       for (const fix of fontFixtures) {
         // Determine a human-readable glyph label
-        const glyphLabel = fix.glyphId < 0
-          ? `U+${(-fix.glyphId).toString(16).toUpperCase().padStart(4, '0')}`
-          : `g${fix.glyphId}`;
+        const glyphLabel =
+          fix.glyphId < 0
+            ? `U+${(-fix.glyphId).toString(16).toUpperCase().padStart(4, "0")}`
+            : `g${fix.glyphId}`;
 
         it(`${glyphLabel} shape matches golden`, () => {
           const font = getFont(fix.fontFile);
 
           // Resolve glyph index: negative = codepoint
-          const glyphId = fix.glyphId < 0
-            ? font.glyphId(-fix.glyphId)
-            : fix.glyphId;
+          const glyphId = fix.glyphId < 0 ? font.glyphId(-fix.glyphId) : fix.glyphId;
 
           // Build our shape
           const shape = font.shape(glyphId);
@@ -222,7 +224,7 @@ describe('Gate 2a — shape normalization vs exportshape goldens', () => {
           // Glyphs with no outline (space, .notdef) may have 0 contours in both.
           // The golden might still have contours if it's a special glyph. Allow 0=0.
           const err = compareShapes(shape, golden);
-          expect(err, `[${fontId}/${glyphLabel}] ${err ?? ''}`).toBeNull();
+          expect(err, `[${fontId}/${glyphLabel}] ${err ?? ""}`).toBeNull();
         });
       }
     });

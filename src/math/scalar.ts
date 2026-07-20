@@ -53,7 +53,7 @@ export function mix(a: number, b: number, t: number): number {
  * @returns Sign of n.
  */
 export function sign(n: number): number {
-  return (+(n > 0)) - (+(n < 0));
+  return +(n > 0) - +(n < 0);
 }
 
 /**
@@ -63,7 +63,7 @@ export function sign(n: number): number {
  * @returns 1 if n >= 0, -1 if n < 0.
  */
 export function nonZeroSign(n: number): number {
-  return 2 * (+(n > 0)) - 1;
+  return 2 * +(n > 0) - 1;
 }
 
 /**

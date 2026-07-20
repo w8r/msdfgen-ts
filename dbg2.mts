@@ -4,7 +4,7 @@ function decompose(d: number): { neg: boolean; mant: bigint; exp: number } {
   const buf = new ArrayBuffer(8);
   new Float64Array(buf)[0] = d;
   const bits = new BigUint64Array(buf)[0]!;
-  const neg = (bits >> 63n) === 1n;
+  const neg = bits >> 63n === 1n;
   const rawExp = Number((bits >> 52n) & 0x7ffn);
   const rawMant = bits & 0xfffffffffffffn;
   if (rawExp === 0) {
@@ -37,7 +37,10 @@ function roundToDouble(sign: bigint, n: bigint, s: number): number {
     const half = 1n << BigInt(shift - 1);
     if (rem > half || (rem === half && (mant & 1n) === 1n)) {
       mant += 1n;
-      if (mant >= (1n << 53n)) { mant >>= 1n; exp2 += 1; }
+      if (mant >= 1n << 53n) {
+        mant >>= 1n;
+        exp2 += 1;
+      }
     }
   } else {
     mant = n << BigInt(-shift);
@@ -47,7 +50,9 @@ function roundToDouble(sign: bigint, n: bigint, s: number): number {
 }
 
 function fma(x: number, y: number, z: number): number {
-  const ax = toExact(x), ay = toExact(y), az = toExact(z);
+  const ax = toExact(x),
+    ay = toExact(y),
+    az = toExact(z);
   // product x*y = (ax.sign*ay.sign) * (ax.num*ay.num) * 2^(ax.exp+ay.exp)
   const psign = ax.sign * ay.sign;
   const pnum = ax.num * ay.num;
@@ -55,7 +60,9 @@ function fma(x: number, y: number, z: number): number {
   // add z: bring to common exponent
   let sign: bigint, num: bigint, exp: number;
   if (az.num === 0n) {
-    sign = psign; num = pnum; exp = pexp;
+    sign = psign;
+    num = pnum;
+    exp = pexp;
   } else {
     const commonExp = Math.min(pexp, az.exp);
     const pShifted = (psign < 0n ? -pnum : pnum) << BigInt(pexp - commonExp);
@@ -70,11 +77,16 @@ function fma(x: number, y: number, z: number): number {
 }
 
 const inv = 1 / 1000;
-const p0x = 43 * inv, p0y = 450 * inv;
-const p1x = 29 * inv, p1y = 455 * inv;
-const p2x = 15 * inv, p2y = 460 * inv;
-const ax = p1x - p0x, ay = p1y - p0y;
-const bx = p2x - p1x, by = p2y - p1y;
+const p0x = 43 * inv,
+  p0y = 450 * inv;
+const p1x = 29 * inv,
+  p1y = 455 * inv;
+const p2x = 15 * inv,
+  p2y = 460 * inv;
+const ax = p1x - p0x,
+  ay = p1y - p0y;
+const bx = p2x - p1x,
+  by = p2y - p1y;
 
 console.log("naive cross =", ax * by - ay * bx);
 // crossProduct(a,b) = a.x*b.y - a.y*b.x

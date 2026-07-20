@@ -88,16 +88,22 @@ const _ccoPts = new Float64Array(16);
  * @returns    Curve order: 1=linear, 2=quadratic, 3=cubic.
  */
 function fillCps(seg: EdgeSegment, buf: Float64Array, off: number): number {
-  buf[off]     = seg.p0x; buf[off + 1] = seg.p0y;
-  buf[off + 2] = seg.p1x; buf[off + 3] = seg.p1y;
+  buf[off] = seg.p0x;
+  buf[off + 1] = seg.p0y;
+  buf[off + 2] = seg.p1x;
+  buf[off + 3] = seg.p1y;
   switch (seg.type) {
-    case LINEAR:    return 1;
+    case LINEAR:
+      return 1;
     case QUADRATIC:
-      buf[off + 4] = seg.p2x; buf[off + 5] = seg.p2y;
+      buf[off + 4] = seg.p2x;
+      buf[off + 5] = seg.p2y;
       return 2;
     default: // CUBIC
-      buf[off + 4] = seg.p2x; buf[off + 5] = seg.p2y;
-      buf[off + 6] = seg.p3x; buf[off + 7] = seg.p3y;
+      buf[off + 4] = seg.p2x;
+      buf[off + 5] = seg.p2y;
+      buf[off + 6] = seg.p3x;
+      buf[off + 7] = seg.p3y;
       return 3;
   }
 }
@@ -113,25 +119,34 @@ function fillCps(seg: EdgeSegment, buf: Float64Array, off: number): number {
  */
 function simplifyDeg(buf: Float64Array, off: number, order: number): number {
   if (order === 3) {
-    const p0x = buf[off]!;     const p0y = buf[off + 1]!;
-    const p1x = buf[off + 2]!; const p1y = buf[off + 3]!;
-    const p2x = buf[off + 4]!; const p2y = buf[off + 5]!;
-    const p3x = buf[off + 6]!; const p3y = buf[off + 7]!;
+    const p0x = buf[off]!;
+    const p0y = buf[off + 1]!;
+    const p1x = buf[off + 2]!;
+    const p1y = buf[off + 3]!;
+    const p2x = buf[off + 4]!;
+    const p2y = buf[off + 5]!;
+    const p3x = buf[off + 6]!;
+    const p3y = buf[off + 7]!;
     // C++ condition: (p[1]==p[0]||p[1]==p[3]) && (p[2]==p[0]||p[2]==p[3])
     if (
-      (p1x === p0x && p1y === p0y || p1x === p3x && p1y === p3y) &&
-      (p2x === p0x && p2y === p0y || p2x === p3x && p2y === p3y)
+      ((p1x === p0x && p1y === p0y) || (p1x === p3x && p1y === p3y)) &&
+      ((p2x === p0x && p2y === p0y) || (p2x === p3x && p2y === p3y))
     ) {
-      buf[off + 2] = p3x; buf[off + 3] = p3y; // collapse to linear p0→p3
+      buf[off + 2] = p3x;
+      buf[off + 3] = p3y; // collapse to linear p0→p3
       order = 1;
     }
   }
   if (order === 2) {
-    const p0x = buf[off]!;     const p0y = buf[off + 1]!;
-    const p1x = buf[off + 2]!; const p1y = buf[off + 3]!;
-    const p2x = buf[off + 4]!; const p2y = buf[off + 5]!;
+    const p0x = buf[off]!;
+    const p0y = buf[off + 1]!;
+    const p1x = buf[off + 2]!;
+    const p1y = buf[off + 3]!;
+    const p2x = buf[off + 4]!;
+    const p2y = buf[off + 5]!;
     if ((p1x === p0x && p1y === p0y) || (p1x === p2x && p1y === p2y)) {
-      buf[off + 2] = p2x; buf[off + 3] = p2y;
+      buf[off + 2] = p2x;
+      buf[off + 3] = p2y;
       order = 1;
     }
   }
@@ -187,23 +202,33 @@ function convergentCurveOrdering(prevEdge: EdgeSegment, curEdge: EdgeSegment): n
   // b1..b3 symmetrically for curEdge
   // ─────────────────────────────────────────────────────────────────────
 
-  let a1x = 0, a1y = 0, a2x = 0, a2y = 0, a3x = 0, a3y = 0;
-  let b1x = 0, b1y = 0, b2x = 0, b2y = 0, b3x = 0, b3y = 0;
+  let a1x = 0,
+    a1y = 0,
+    a2x = 0,
+    a2y = 0,
+    a3x = 0,
+    a3y = 0;
+  let b1x = 0,
+    b1y = 0,
+    b2x = 0,
+    b2y = 0,
+    b3x = 0,
+    b3y = 0;
 
   if (aOrd >= 1) {
-    a1x = pts[(aOrd - 1) * 2]!     - cx;
+    a1x = pts[(aOrd - 1) * 2]! - cx;
     a1y = pts[(aOrd - 1) * 2 + 1]! - cy;
   }
   if (aOrd >= 2) {
-    const d01x = pts[(aOrd - 2) * 2]!     - pts[(aOrd - 1) * 2]!;
+    const d01x = pts[(aOrd - 2) * 2]! - pts[(aOrd - 1) * 2]!;
     const d01y = pts[(aOrd - 2) * 2 + 1]! - pts[(aOrd - 1) * 2 + 1]!;
     a2x = d01x - a1x;
     a2y = d01y - a1y;
   }
   if (aOrd >= 3) {
-    const d12x = pts[(aOrd - 3) * 2]!     - pts[(aOrd - 2) * 2]!;
+    const d12x = pts[(aOrd - 3) * 2]! - pts[(aOrd - 2) * 2]!;
     const d12y = pts[(aOrd - 3) * 2 + 1]! - pts[(aOrd - 2) * 2 + 1]!;
-    const d01x = pts[(aOrd - 2) * 2]!     - pts[(aOrd - 1) * 2]!;
+    const d01x = pts[(aOrd - 2) * 2]! - pts[(aOrd - 1) * 2]!;
     const d01y = pts[(aOrd - 2) * 2 + 1]! - pts[(aOrd - 1) * 2 + 1]!;
     // a3 uses the a2 value BEFORE a2 *= 3
     a3x = d12x - d01x - a2x;
@@ -234,8 +259,10 @@ function convergentCurveOrdering(prevEdge: EdgeSegment, curEdge: EdgeSegment): n
     b2y *= 3;
   }
 
-  a1x *= aOrd; a1y *= aOrd;
-  b1x *= bOrd; b1y *= bOrd;
+  a1x *= aOrd;
+  a1y *= aOrd;
+  b1x *= bOrd;
+  b1y *= bOrd;
 
   // ── ordering decision ──────────────────────────────────────────────────
   const a1nz = a1x !== 0 || a1y !== 0;
@@ -263,13 +290,33 @@ function convergentCurveOrdering(prevEdge: EdgeSegment, curEdge: EdgeSegment): n
   // At least one first derivative is zero (degenerate curve at corner).
   // If prevEdge is non-degenerate but curEdge is, swap and negate result.
   let s = 1;
-  let la1x = a1x, la1y = a1y, la2x = a2x, la2y = a2y, la3x = a3x, la3y = a3y;
-  let lb1x = b1x, lb1y = b1y, lb2x = b2x, lb2y = b2y, lb3x = b3x, lb3y = b3y;
+  let la1x = a1x,
+    la1y = a1y,
+    la2x = a2x,
+    la2y = a2y,
+    la3x = a3x,
+    la3y = a3y;
+  let lb1x = b1x,
+    lb1y = b1y,
+    lb2x = b2x,
+    lb2y = b2y,
+    lb3x = b3x,
+    lb3y = b3y;
 
   if (a1nz) {
     // prevEdge non-degenerate, curEdge degenerate — swap
-    la1x = b1x; la1y = b1y; la2x = b2x; la2y = b2y; la3x = b3x; la3y = b3y;
-    lb1x = a1x; lb1y = a1y; lb2x = a2x; lb2y = a2y; lb3x = a3x; lb3y = a3y;
+    la1x = b1x;
+    la1y = b1y;
+    la2x = b2x;
+    la2y = b2y;
+    la3x = b3x;
+    la3y = b3y;
+    lb1x = a1x;
+    lb1y = a1y;
+    lb2x = a2x;
+    lb2y = a2y;
+    lb3x = a3x;
+    lb3y = a3y;
     s = -1;
   }
 
@@ -277,12 +324,12 @@ function convergentCurveOrdering(prevEdge: EdgeSegment, curEdge: EdgeSegment): n
     // Degenerate "before" corner, non-degenerate "after".
     const d25 = cross(la3x, la3y, lb1x, lb1y);
     if (d25) return s * sign(d25);
-    const d3  = cross(la2x, la2y, lb2x, lb2y);
-    if (d3)  return s * sign(d3);
+    const d3 = cross(la2x, la2y, lb2x, lb2y);
+    if (d3) return s * sign(d3);
     const d35 = cross(la3x, la3y, lb2x, lb2y);
     if (d35) return s * sign(d35);
-    const d4  = cross(la2x, la2y, lb3x, lb3y);
-    if (d4)  return s * sign(d4);
+    const d4 = cross(la2x, la2y, lb3x, lb3y);
+    if (d4) return s * sign(d4);
     return s * sign(cross(la3x, la3y, lb3x, lb3y));
   }
 
@@ -309,7 +356,13 @@ function convergentCurveOrdering(prevEdge: EdgeSegment, curEdge: EdgeSegment): n
  * @param vx      Adjustment direction x.
  * @param vy      Adjustment direction y.
  */
-function deconvergeEdge(contour: Contour, idx: number, param: number, vx: number, vy: number): void {
+function deconvergeEdge(
+  contour: Contour,
+  idx: number,
+  param: number,
+  vx: number,
+  vy: number,
+): void {
   let seg = contour[idx]!;
   if (seg.type === QUADRATIC) {
     const cubic = seg.convertToCubic();
@@ -375,7 +428,7 @@ export function normalizeShape(shape: Shape): void {
       for (let i = 0; i < n; i++) {
         const prevIdx = (i + n - 1) % n;
         const prevEdge = contour[prevIdx]!;
-        const curEdge  = contour[i]!;
+        const curEdge = contour[i]!;
 
         prevEdge.direction(1, _nsPrevDir);
         curEdge.direction(0, _nsCurDir);

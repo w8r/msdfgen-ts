@@ -201,9 +201,11 @@ function _buildContour(
     const next = raw[(i + 1) % n]!;
     expanded.push(curr);
     if (!curr.onCurve && !next.onCurve) {
+      // Implied on-curve midpoint. Use integer truncation to match FreeType's
+      // integer arithmetic:  mid = (a + b) / 2  (C integer division = trunc).
       expanded.push({
-        x: (curr.x + next.x) * 0.5,
-        y: (curr.y + next.y) * 0.5,
+        x: Math.trunc((curr.x + next.x) / 2),
+        y: Math.trunc((curr.y + next.y) / 2),
         onCurve: true,
       });
     }

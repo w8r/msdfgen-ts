@@ -9,6 +9,9 @@
   "scripts": {
     "gate:m0": "vitest run test/diff.test.ts",
     "gate:m1": "vitest run test/parser/",
+    "gate:m2a": "vitest run test/shape/normalize.test.ts",
+    "gate:m2b": "vitest run test/msdf/sdf.test.ts",
+    "gate:m2": "vitest run test/shape/normalize.test.ts test/msdf/sdf.test.ts",
     "gen-golden": "node tools/gen-golden.mjs",
     "setup-reference": "bash tools/setup-reference.sh",
     "lint": "oxlint src/ test/",

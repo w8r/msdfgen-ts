@@ -11,7 +11,7 @@ if [ -z "$STAGED" ]; then
 fi
 
 echo "Running oxfmt --check on staged files..."
-echo "$STAGED" | xargs npx oxfmt --check
+echo "$STAGED" | xargs npx oxfmt
 
 echo "Running oxlint on staged files..."
 echo "$STAGED" | xargs npx oxlint

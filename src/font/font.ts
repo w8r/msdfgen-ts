@@ -4,7 +4,7 @@ import { type HheaTable, parseHhea } from "./tables/hhea.js";
 import { type HMetric, parseHmtx } from "./tables/hmtx.js";
 import { parseLoca } from "./tables/loca.js";
 import { parseMaxp } from "./tables/maxp.js";
-import { parseGlyph } from "./tables/glyf.js";
+import { parseGlyph, parseGlyphRaw, type RawGlyph } from "./tables/glyf.js";
 import { type KernMap, parseKern } from "./tables/kern.js";
 import { type TableMap, parseSfnt } from "./sfnt.js";
 import { type Shape } from "../shape/shape.js";
@@ -157,7 +157,27 @@ export class Font {
     const glyfSize = glyfEnd - glyfOffset;
 
     return parseGlyph(this._buffer, glyfRec.offset, glyfOffset, glyfSize, (componentId) =>
-      this.shape(componentId),
+      this._glyphRaw(componentId),
+    );
+  }
+
+  /**
+   * Parses a glyph to its raw (pre-midpoint) outline, used as the composite
+   * recursion primitive so implied midpoints are expanded only on the final
+   * merged outline (matching FreeType).
+   * @internal
+   */
+  private _glyphRaw(glyphId: number): RawGlyph {
+    const glyfRec = this._tables.get("glyf");
+    if (!glyfRec) return [];
+
+    const locaOffsets = this._loca;
+    const glyfOffset = locaOffsets[glyphId] ?? 0;
+    const glyfEnd = locaOffsets[glyphId + 1] ?? glyfOffset;
+    const glyfSize = glyfEnd - glyfOffset;
+
+    return parseGlyphRaw(this._buffer, glyfRec.offset, glyfOffset, glyfSize, (componentId) =>
+      this._glyphRaw(componentId),
     );
   }
 }

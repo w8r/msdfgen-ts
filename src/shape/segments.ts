@@ -9,12 +9,61 @@
  *  - Never add conditional fields; always initialise every field in the same order.
  */
 
+import { solveQuadratic, solveCubic, sign, nonZeroSign, mix } from "../math/scalar.js";
+
 /** Segment type tags — match C++ msdfgen's EdgeType enum. */
 export const LINEAR = 0 as const;
 export const QUADRATIC = 1 as const;
 export const CUBIC = 2 as const;
 
 export type SegmentType = typeof LINEAR | typeof QUADRATIC | typeof CUBIC;
+
+/**
+ * Reusable output for {@link EdgeSegment.signedDistance}.  Allocated once per
+ * generator call (or module scope) and passed in — the hot per-pixel loop must
+ * never allocate.  Mirrors C++ msdfgen's `SignedDistance` plus the by-reference
+ * `param` out-value returned from `EdgeSegment::signedDistance`.
+ */
+export interface SignedDistanceResult {
+  /** Signed distance (sign from edge winding). */
+  distance: number;
+  /** Alignment term, used to break ties between edges (`|cosθ|` at endpoints). */
+  dot: number;
+  /** Nearest-point parameter t (may lie outside [0,1] for endpoint regions). */
+  param: number;
+}
+
+/**
+ * Compares two signed distances the way msdfgen's `SignedDistance::operator<`
+ * does: smaller absolute distance wins; ties broken by the smaller `dot`.
+ * port of core/SignedDistance.hpp: operator<
+ *
+ * @param aDist Candidate distance.
+ * @param aDot Candidate dot.
+ * @param bDist Incumbent distance.
+ * @param bDot Incumbent dot.
+ * @returns True when (aDist,aDot) is closer than (bDist,bDot).
+ */
+export function signedDistanceLess(
+  aDist: number,
+  aDot: number,
+  bDist: number,
+  bDot: number,
+): boolean {
+  const aa = aDist < 0 ? -aDist : aDist;
+  const ba = bDist < 0 ? -bDist : bDist;
+  return aa < ba || (aa === ba && aDot < bDot);
+}
+
+/** Number of evenly spaced starting points for the cubic Newton search.
+ *  port of core/edge-segments.h: MSDFGEN_CUBIC_SEARCH_STARTS */
+const CUBIC_SEARCH_STARTS = 4;
+/** Maximum Newton refinement steps per cubic search start.
+ *  port of core/edge-segments.h: MSDFGEN_CUBIC_SEARCH_STEPS */
+const CUBIC_SEARCH_STEPS = 4;
+
+/** Scratch root buffer for equation solvers (module-scope, single-threaded). */
+const _roots = [0, 0, 0];
 
 /**
  * A single curve segment within a contour.
@@ -314,6 +363,424 @@ export class EdgeSegment {
             this.p3y,
           ),
         ];
+      }
+    }
+  }
+
+  /**
+   * Computes the signed distance from `origin` to this segment, writing the
+   * result (distance, alignment dot, nearest parameter) into `out`.
+   * port of core/edge-segments.cpp:
+   *   LinearSegment / QuadraticSegment / CubicSegment ::signedDistance
+   *
+   * The sign follows the edge winding via `nonZeroSign(crossProduct(...))`.
+   * Hot path: uses only local number variables and the module-scope root buffer.
+   *
+   * @param ox Query point x (shape space).
+   * @param oy Query point y (shape space).
+   * @param out Reusable result object (mutated).
+   */
+  signedDistance(ox: number, oy: number, out: SignedDistanceResult): void {
+    switch (this.type) {
+      case LINEAR: {
+        const p0x = this.p0x,
+          p0y = this.p0y,
+          p1x = this.p1x,
+          p1y = this.p1y;
+        const aqx = ox - p0x,
+          aqy = oy - p0y;
+        const abx = p1x - p0x,
+          aby = p1y - p0y;
+        const abLen2 = abx * abx + aby * aby;
+        const param = (aqx * abx + aqy * aby) / abLen2;
+        // eq = p[param > .5] - origin
+        const useEnd = param > 0.5;
+        const ex = (useEnd ? p1x : p0x) - ox;
+        const ey = (useEnd ? p1y : p0y) - oy;
+        const endpointDistance = Math.sqrt(ex * ex + ey * ey);
+        if (param > 0 && param < 1) {
+          const abLen = Math.sqrt(abLen2);
+          // dot(ab.getOrthonormal(false), aq) = crossProduct(aq, ab)/|ab|
+          const orthoDistance = (aqx * aby - aqy * abx) / abLen;
+          if (Math.abs(orthoDistance) < endpointDistance) {
+            out.distance = orthoDistance;
+            out.dot = 0;
+            out.param = param;
+            return;
+          }
+        }
+        // C++: nonZeroSign(crossProduct(aq, ab)) where aq = origin-p[0]
+        // crossProduct(aq, ab) = aqx*aby - aqy*abx (uniform for all param values)
+        const cross = aqx * aby - aqy * abx;
+        out.distance = nonZeroSign(cross) * endpointDistance;
+        // dot = |dot(ab.normalize(), eq.normalize())|
+        const abLen = Math.sqrt(abLen2);
+        out.dot =
+          endpointDistance === 0 || abLen === 0
+            ? 0
+            : Math.abs((abx * ex + aby * ey) / (abLen * endpointDistance));
+        out.param = param;
+        return;
+      }
+      case QUADRATIC: {
+        const p0x = this.p0x,
+          p0y = this.p0y,
+          p1x = this.p1x,
+          p1y = this.p1y,
+          p2x = this.p2x,
+          p2y = this.p2y;
+        const qax = p0x - ox,
+          qay = p0y - oy;
+        const abx = p1x - p0x,
+          aby = p1y - p0y;
+        const brx = p2x - p1x - abx,
+          bry = p2y - p1y - aby;
+        const a = brx * brx + bry * bry;
+        const b = 3 * (abx * brx + aby * bry);
+        const c = 2 * (abx * abx + aby * aby) + (qax * brx + qay * bry);
+        const d = qax * abx + qay * aby;
+        const solutions = solveCubic(_roots, a, b, c, d);
+
+        // epDir = direction(0) = ab (nonzero for a real quadratic)
+        let epDirx = abx,
+          epDiry = aby;
+        const qaLen = Math.sqrt(qax * qax + qay * qay);
+        let minDistance = nonZeroSign(epDirx * qay - epDiry * qax) * qaLen;
+        let param = -(qax * epDirx + qay * epDiry) / (epDirx * epDirx + epDiry * epDiry);
+        {
+          const bqx = p2x - ox,
+            bqy = p2y - oy;
+          const distB = Math.sqrt(bqx * bqx + bqy * bqy);
+          if (distB < Math.abs(minDistance)) {
+            // epDir = direction(1) = p2 - p1
+            epDirx = p2x - p1x;
+            epDiry = p2y - p1y;
+            minDistance = nonZeroSign(epDirx * bqy - epDiry * bqx) * distB;
+            // param = dot(origin - p1, epDir)/dot(epDir,epDir)
+            param =
+              ((ox - p1x) * epDirx + (oy - p1y) * epDiry) /
+              (epDirx * epDirx + epDiry * epDiry);
+          }
+        }
+        for (let i = 0; i < solutions; ++i) {
+          const t = _roots[i]!;
+          if (t > 0 && t < 1) {
+            // qe = qa + 2t*ab + t²*br
+            const qex = qax + 2 * t * abx + t * t * brx;
+            const qey = qay + 2 * t * aby + t * t * bry;
+            const distance = Math.sqrt(qex * qex + qey * qey);
+            if (distance <= Math.abs(minDistance)) {
+              // dir = ab + t*br
+              const dirx = abx + t * brx;
+              const diry = aby + t * bry;
+              minDistance = nonZeroSign(dirx * qey - diry * qex) * distance;
+              param = t;
+            }
+          }
+        }
+
+        if (param >= 0 && param <= 1) {
+          out.distance = minDistance;
+          out.dot = 0;
+          out.param = param;
+          return;
+        }
+        out.distance = minDistance;
+        out.param = param;
+        if (param < 0.5) {
+          // |dot(direction(0).normalize(), qa.normalize())|
+          const dl = Math.sqrt(abx * abx + aby * aby);
+          out.dot = qaLen === 0 || dl === 0 ? 0 : Math.abs((abx * qax + aby * qay) / (dl * qaLen));
+        } else {
+          const d1x = p2x - p1x,
+            d1y = p2y - p1y;
+          const bqx = p2x - ox,
+            bqy = p2y - oy;
+          const dl = Math.sqrt(d1x * d1x + d1y * d1y);
+          const bl = Math.sqrt(bqx * bqx + bqy * bqy);
+          out.dot = dl === 0 || bl === 0 ? 0 : Math.abs((d1x * bqx + d1y * bqy) / (dl * bl));
+        }
+        return;
+      }
+      default: {
+        // CUBIC
+        const p0x = this.p0x,
+          p0y = this.p0y,
+          p1x = this.p1x,
+          p1y = this.p1y,
+          p2x = this.p2x,
+          p2y = this.p2y,
+          p3x = this.p3x,
+          p3y = this.p3y;
+        const qax = p0x - ox,
+          qay = p0y - oy;
+        const abx = p1x - p0x,
+          aby = p1y - p0y;
+        const brx = p2x - p1x - abx,
+          bry = p2y - p1y - aby;
+        const asx = p3x - p2x - (p2x - p1x) - brx;
+        const asy = p3y - p2y - (p2y - p1y) - bry;
+
+        // epDir = direction(0)
+        let epDirx = abx,
+          epDiry = aby;
+        if (epDirx === 0 && epDiry === 0) {
+          epDirx = p2x - p0x;
+          epDiry = p2y - p0y;
+        }
+        const qaLen = Math.sqrt(qax * qax + qay * qay);
+        let minDistance = nonZeroSign(epDirx * qay - epDiry * qax) * qaLen;
+        let param = -(qax * epDirx + qay * epDiry) / (epDirx * epDirx + epDiry * epDiry);
+        {
+          const bqx = p3x - ox,
+            bqy = p3y - oy;
+          const distB = Math.sqrt(bqx * bqx + bqy * bqy);
+          if (distB < Math.abs(minDistance)) {
+            // epDir = direction(1)
+            let e1x = p3x - p2x,
+              e1y = p3y - p2y;
+            if (e1x === 0 && e1y === 0) {
+              e1x = p3x - p1x;
+              e1y = p3y - p1y;
+            }
+            epDirx = e1x;
+            epDiry = e1y;
+            minDistance = nonZeroSign(epDirx * bqy - epDiry * bqx) * distB;
+            // param = dot(epDir - (p3-origin), epDir)/dot(epDir,epDir)
+            param =
+              ((epDirx - bqx) * epDirx + (epDiry - bqy) * epDiry) /
+              (epDirx * epDirx + epDiry * epDiry);
+          }
+        }
+        for (let i = 0; i <= CUBIC_SEARCH_STARTS; ++i) {
+          let t = (1 / CUBIC_SEARCH_STARTS) * i;
+          let qex = qax + 3 * t * abx + 3 * t * t * brx + t * t * t * asx;
+          let qey = qay + 3 * t * aby + 3 * t * t * bry + t * t * t * asy;
+          let d1x = 3 * abx + 6 * t * brx + 3 * t * t * asx;
+          let d1y = 3 * aby + 6 * t * bry + 3 * t * t * asy;
+          let d2x = 6 * brx + 6 * t * asx;
+          let d2y = 6 * bry + 6 * t * asy;
+          let improvedT =
+            t - (qex * d1x + qey * d1y) / (d1x * d1x + d1y * d1y + (qex * d2x + qey * d2y));
+          if (improvedT > 0 && improvedT < 1) {
+            let remainingSteps = CUBIC_SEARCH_STEPS;
+            do {
+              t = improvedT;
+              qex = qax + 3 * t * abx + 3 * t * t * brx + t * t * t * asx;
+              qey = qay + 3 * t * aby + 3 * t * t * bry + t * t * t * asy;
+              d1x = 3 * abx + 6 * t * brx + 3 * t * t * asx;
+              d1y = 3 * aby + 6 * t * bry + 3 * t * t * asy;
+              if (!--remainingSteps) break;
+              d2x = 6 * brx + 6 * t * asx;
+              d2y = 6 * bry + 6 * t * asy;
+              improvedT =
+                t - (qex * d1x + qey * d1y) / (d1x * d1x + d1y * d1y + (qex * d2x + qey * d2y));
+            } while (improvedT > 0 && improvedT < 1);
+            const distance = Math.sqrt(qex * qex + qey * qey);
+            if (distance < Math.abs(minDistance)) {
+              minDistance = nonZeroSign(d1x * qey - d1y * qex) * distance;
+              param = t;
+            }
+          }
+        }
+
+        if (param >= 0 && param <= 1) {
+          out.distance = minDistance;
+          out.dot = 0;
+          out.param = param;
+          return;
+        }
+        out.distance = minDistance;
+        out.param = param;
+        if (param < 0.5) {
+          let dx = abx,
+            dy = aby;
+          if (dx === 0 && dy === 0) {
+            dx = p2x - p0x;
+            dy = p2y - p0y;
+          }
+          const dl = Math.sqrt(dx * dx + dy * dy);
+          out.dot = qaLen === 0 || dl === 0 ? 0 : Math.abs((dx * qax + dy * qay) / (dl * qaLen));
+        } else {
+          let dx = p3x - p2x,
+            dy = p3y - p2y;
+          if (dx === 0 && dy === 0) {
+            dx = p3x - p1x;
+            dy = p3y - p1y;
+          }
+          const bqx = p3x - ox,
+            bqy = p3y - oy;
+          const dl = Math.sqrt(dx * dx + dy * dy);
+          const bl = Math.sqrt(bqx * bqx + bqy * bqy);
+          out.dot = dl === 0 || bl === 0 ? 0 : Math.abs((dx * bqx + dy * bqy) / (dl * bl));
+        }
+        return;
+      }
+    }
+  }
+
+  /**
+   * Computes the x-coordinates where a horizontal scanline at height `y`
+   * crosses this segment, together with the vertical crossing direction.
+   * port of core/edge-segments.cpp:
+   *   LinearSegment / QuadraticSegment / CubicSegment ::scanlineIntersections
+   *
+   * @param y Scanline height (shape space).
+   * @param xOut Output array (length >= 3) — crossing x-coordinates.
+   * @param dyOut Output array (length >= 3) — crossing directions (±1).
+   * @returns Number of crossings written (0..3).
+   */
+  scanlineIntersections(y: number, xOut: number[], dyOut: number[]): number {
+    switch (this.type) {
+      case LINEAR: {
+        const p0y = this.p0y,
+          p1y = this.p1y;
+        if ((y >= p0y && y < p1y) || (y >= p1y && y < p0y)) {
+          const param = (y - p0y) / (p1y - p0y);
+          xOut[0] = mix(this.p0x, this.p1x, param);
+          dyOut[0] = sign(p1y - p0y);
+          return 1;
+        }
+        return 0;
+      }
+      case QUADRATIC: {
+        const p0x = this.p0x,
+          p0y = this.p0y,
+          p1x = this.p1x,
+          p1y = this.p1y,
+          p2x = this.p2x,
+          p2y = this.p2y;
+        let total = 0;
+        let nextDY = y > p0y ? 1 : -1;
+        xOut[total] = p0x;
+        if (p0y === y) {
+          if (p0y < p1y || (p0y === p1y && p0y < p2y)) dyOut[total++] = 1;
+          else nextDY = 1;
+        }
+        {
+          const abx = p1x - p0x,
+            aby = p1y - p0y;
+          const brx = p2x - p1x - abx,
+            bry = p2y - p1y - aby;
+          const solutions = solveQuadratic(_roots, bry, 2 * aby, p0y - y);
+          // Sort the first two solutions ascending.
+          if (solutions >= 2 && _roots[0]! > _roots[1]!) {
+            const tmp = _roots[0]!;
+            _roots[0] = _roots[1]!;
+            _roots[1] = tmp;
+          }
+          for (let i = 0; i < solutions && total < 2; ++i) {
+            const t = _roots[i]!;
+            if (t >= 0 && t <= 1) {
+              xOut[total] = p0x + 2 * t * abx + t * t * brx;
+              if (nextDY * (aby + t * bry) >= 0) {
+                dyOut[total++] = nextDY;
+                nextDY = -nextDY;
+              }
+            }
+          }
+        }
+        if (p2y === y) {
+          if (nextDY > 0 && total > 0) {
+            --total;
+            nextDY = -1;
+          }
+          if ((p2y < p1y || (p2y === p1y && p2y < p0y)) && total < 2) {
+            xOut[total] = p2x;
+            if (nextDY < 0) {
+              dyOut[total++] = -1;
+              nextDY = 1;
+            }
+          }
+        }
+        if (nextDY !== (y >= p2y ? 1 : -1)) {
+          if (total > 0) --total;
+          else {
+            if (Math.abs(p2y - y) < Math.abs(p0y - y)) xOut[total] = p2x;
+            dyOut[total++] = nextDY;
+          }
+        }
+        return total;
+      }
+      default: {
+        // CUBIC
+        const p0x = this.p0x,
+          p0y = this.p0y,
+          p1x = this.p1x,
+          p1y = this.p1y,
+          p2x = this.p2x,
+          p2y = this.p2y,
+          p3x = this.p3x,
+          p3y = this.p3y;
+        let total = 0;
+        let nextDY = y > p0y ? 1 : -1;
+        xOut[total] = p0x;
+        if (p0y === y) {
+          if (p0y < p1y || (p0y === p1y && (p0y < p2y || (p0y === p2y && p0y < p3y))))
+            dyOut[total++] = 1;
+          else nextDY = 1;
+        }
+        {
+          const ax = p3x - 3 * p2x + 3 * p1x - p0x;
+          const ay = p3y - 3 * p2y + 3 * p1y - p0y;
+          const bx = 3 * p2x - 6 * p1x + 3 * p0x;
+          const by = 3 * p2y - 6 * p1y + 3 * p0y;
+          const cx = 3 * p1x - 3 * p0x;
+          const cy = 3 * p1y - 3 * p0y;
+          const solutions = solveCubic(_roots, ay, by, cy, p0y - y);
+          // Sort solutions ascending (up to 3).
+          if (solutions >= 2) {
+            if (_roots[0]! > _roots[1]!) {
+              const t = _roots[0]!;
+              _roots[0] = _roots[1]!;
+              _roots[1] = t;
+            }
+            if (solutions >= 3 && _roots[1]! > _roots[2]!) {
+              const t = _roots[1]!;
+              _roots[1] = _roots[2]!;
+              _roots[2] = t;
+              if (_roots[0]! > _roots[1]!) {
+                const t2 = _roots[0]!;
+                _roots[0] = _roots[1]!;
+                _roots[1] = t2;
+              }
+            }
+          }
+          for (let i = 0; i < solutions && total < 3; ++i) {
+            const t = _roots[i]!;
+            if (t >= 0 && t <= 1) {
+              xOut[total] = ((ax * t + bx) * t + cx) * t + p0x;
+              if (nextDY * ((3 * ay * t + 2 * by) * t + cy) >= 0) {
+                dyOut[total++] = nextDY;
+                nextDY = -nextDY;
+              }
+            }
+          }
+        }
+        if (p3y === y) {
+          if (nextDY > 0 && total > 0) {
+            --total;
+            nextDY = -1;
+          }
+          if (
+            (p3y < p2y || (p3y === p2y && (p3y < p1y || (p3y === p1y && p3y < p0y)))) &&
+            total < 3
+          ) {
+            xOut[total] = p3x;
+            if (nextDY < 0) {
+              dyOut[total++] = -1;
+              nextDY = 1;
+            }
+          }
+        }
+        if (nextDY !== (y >= p3y ? 1 : -1)) {
+          if (total > 0) --total;
+          else {
+            if (Math.abs(p3y - y) < Math.abs(p0y - y)) xOut[total] = p3x;
+            dyOut[total++] = nextDY;
+          }
+        }
+        return total;
       }
     }
   }

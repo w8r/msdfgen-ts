@@ -27,6 +27,26 @@ import { EdgeSegment, LINEAR, QUADRATIC } from "../../shape/segments.js";
 import { type Contour } from "../../shape/contour.js";
 import { type Shape } from "../../shape/shape.js";
 
+/**
+ * A single raw outline point in font units, before implied on-curve midpoints
+ * are inserted.  Composite transforms operate on these raw points so that
+ * midpoint expansion happens on the final merged integer outline — exactly as
+ * FreeType's FT_Outline_Decompose does after assembling all components.
+ * @internal
+ */
+interface RawPoint {
+  x: number;
+  y: number;
+  onCurve: boolean;
+}
+
+/**
+ * A glyph as a list of raw contours (arrays of RawPoint), in font units, with
+ * no implied midpoints inserted yet.  This is the intermediate representation
+ * shared by simple and composite glyph parsing and by the composite recursion.
+ */
+export type RawGlyph = RawPoint[][];
+
 // ── Simple glyph flags ────────────────────────────────────────────────────────
 const ON_CURVE_POINT = 0x01;
 const X_SHORT_VECTOR = 0x02;
@@ -59,7 +79,8 @@ const USE_MY_METRICS = 0x0200;
  *   (from the `loca` table).
  * @param glyphSize Size in bytes of this glyph entry (loca[i+1] - loca[i]).
  *   If 0, the glyph has no outline (space, empty glyph).
- * @param getGlyphShape Callback to parse a component glyph (for composites).
+ * @param getGlyphRaw Callback returning the raw (pre-midpoint) outline of a
+ *   component glyph, used when assembling composite glyphs.
  * @returns {Shape} Parsed outline in font units (y-up). Empty shape if no outline.
  */
 export function parseGlyph(
@@ -67,11 +88,40 @@ export function parseGlyph(
   glyfTableOffset: number,
   glyphOffset: number,
   glyphSize: number,
-  getGlyphShape: (glyphId: number) => Shape,
+  getGlyphRaw: (glyphId: number) => RawGlyph,
 ): Shape {
-  if (glyphSize === 0) {
-    return { contours: [], inverseYAxis: false };
+  const rawContours = parseGlyphRaw(buffer, glyfTableOffset, glyphOffset, glyphSize, getGlyphRaw);
+
+  // Expand implied midpoints and build EdgeSegments — now on the final merged
+  // (and, for composites, transformed) integer outline, matching FreeType.
+  const contours: Contour[] = [];
+  for (const raw of rawContours) {
+    const contour = _buildContourFromRaw(raw);
+    if (contour.length > 0) contours.push(contour);
   }
+  return { contours, inverseYAxis: false };
+}
+
+/**
+ * Parses a glyph to its raw outline (contours of RawPoint, no implied midpoints).
+ * Recurses through composite components, applying each component's transform to
+ * the raw points before merging.
+ *
+ * @param buffer Full font buffer.
+ * @param glyfTableOffset Byte offset of the `glyf` table within buffer.
+ * @param glyphOffset Byte offset of this glyph within the `glyf` table.
+ * @param glyphSize Size in bytes of this glyph entry; 0 = no outline.
+ * @param getGlyphRaw Callback returning the raw outline of a component glyph.
+ * @returns {RawGlyph} Raw contours in font units.
+ */
+export function parseGlyphRaw(
+  buffer: ArrayBuffer,
+  glyfTableOffset: number,
+  glyphOffset: number,
+  glyphSize: number,
+  getGlyphRaw: (glyphId: number) => RawGlyph,
+): RawGlyph {
+  if (glyphSize === 0) return [];
 
   const absOffset = glyfTableOffset + glyphOffset;
   const r = new BinaryReader(buffer, absOffset);
@@ -81,17 +131,17 @@ export function parseGlyph(
   r.skip(8);
 
   if (numberOfContours >= 0) {
-    return _parseSimpleGlyph(r, numberOfContours);
+    return _parseSimpleGlyphRaw(r, numberOfContours);
   } else {
-    return _parseCompositeGlyph(buffer, r, glyfTableOffset, getGlyphShape);
+    return _parseCompositeGlyphRaw(buffer, r, glyfTableOffset, getGlyphRaw);
   }
 }
 
 // ── Simple glyph ─────────────────────────────────────────────────────────────
 
 /** @internal */
-function _parseSimpleGlyph(r: BinaryReader, numberOfContours: number): Shape {
-  if (numberOfContours === 0) return { contours: [], inverseYAxis: false };
+function _parseSimpleGlyphRaw(r: BinaryReader, numberOfContours: number): RawGlyph {
+  if (numberOfContours === 0) return [];
 
   // endPtsOfContours: last point index (inclusive) for each contour
   const endPts = new Array<number>(numberOfContours);
@@ -143,59 +193,67 @@ function _parseSimpleGlyph(r: BinaryReader, numberOfContours: number): Shape {
     ys[i] = cur;
   }
 
-  // ── build contours ───────────────────────────────────────────────────────
-  const contours: Contour[] = [];
+  // ── build raw contours (no midpoint expansion yet) ───────────────────────
+  const contours: RawGlyph = [];
   let ptStart = 0;
   for (let ci = 0; ci < numberOfContours; ci++) {
     const ptEnd = endPts[ci] ?? 0;
-    const contour = _buildContour(flags, xs, ys, ptStart, ptEnd);
+    const contour = _extractRawContour(flags, xs, ys, ptStart, ptEnd);
     if (contour.length > 0) contours.push(contour);
     ptStart = ptEnd + 1;
   }
 
-  return { contours, inverseYAxis: false };
+  return contours;
 }
 
 /**
- * Builds a closed Contour from raw TrueType point data.
- *
- * Resolves implied on-curve midpoints and handles contours that start on an
- * off-curve point. The result is a cyclic sequence of EdgeSegments where every
- * off-curve control point is surrounded by on-curve endpoints.
- *
+ * Extracts the raw points (with on/off-curve flags) of one contour from the
+ * decoded flag/coordinate arrays.  No implied midpoints are inserted here.
  * @internal
  */
-function _buildContour(
+function _extractRawContour(
   flags: Uint8Array,
   xs: Float64Array,
   ys: Float64Array,
   startIdx: number,
   endIdx: number,
-): Contour {
+): RawPoint[] {
   const n = endIdx - startIdx + 1;
   if (n <= 0) return [];
-
-  // ── Step 1: expand implied on-curve midpoints ────────────────────────────
-  // A point is on-curve iff (flags[i] & ON_CURVE_POINT) !== 0.
-  // Between two consecutive off-curve points, insert an implicit on-curve at
-  // the midpoint. The wrap-around (last ↔ first) is also checked.
-
-  interface RawPt {
-    x: number;
-    y: number;
-    onCurve: boolean;
-  }
-  const raw: RawPt[] = [];
-
+  const raw: RawPoint[] = [];
   for (let i = 0; i < n; i++) {
     const fi = flags[startIdx + i] ?? 0;
     const xi = xs[startIdx + i] ?? 0;
     const yi = ys[startIdx + i] ?? 0;
     raw.push({ x: xi, y: yi, onCurve: (fi & ON_CURVE_POINT) !== 0 });
   }
+  return raw;
+}
+
+/**
+ * Builds a closed Contour from a raw (pre-midpoint) contour.
+ *
+ * Resolves implied on-curve midpoints and handles contours that start on an
+ * off-curve point. The result is a cyclic sequence of EdgeSegments where every
+ * off-curve control point is surrounded by on-curve endpoints.
+ *
+ * For composite glyphs, `raw` must already be in the final merged, transformed
+ * coordinate space so that midpoint truncation matches FreeType, which expands
+ * midpoints only after assembling all components.
+ *
+ * @internal
+ */
+function _buildContourFromRaw(raw: RawPoint[]): Contour {
+  const n = raw.length;
+  if (n <= 0) return [];
+
+  // ── Step 1: expand implied on-curve midpoints ────────────────────────────
+  // A point is on-curve iff onCurve is true.
+  // Between two consecutive off-curve points, insert an implicit on-curve at
+  // the midpoint. The wrap-around (last ↔ first) is also checked.
 
   // Expand midpoints
-  const expanded: RawPt[] = [];
+  const expanded: RawPoint[] = [];
   for (let i = 0; i < n; i++) {
     const curr = raw[i]!;
     const next = raw[(i + 1) % n]!;
@@ -260,13 +318,13 @@ function _buildContour(
 // ── Composite glyph ───────────────────────────────────────────────────────────
 
 /** @internal */
-function _parseCompositeGlyph(
+function _parseCompositeGlyphRaw(
   buffer: ArrayBuffer,
   r: BinaryReader,
   glyfTableOffset: number,
-  getGlyphShape: (glyphId: number) => Shape,
-): Shape {
-  const allContours: Contour[] = [];
+  getGlyphRaw: (glyphId: number) => RawGlyph,
+): RawGlyph {
+  const allContours: RawGlyph = [];
 
   let flags = 0;
   do {
@@ -314,70 +372,59 @@ function _parseCompositeGlyph(
       yy = r.f2dot14();
     }
 
-    // ── fetch and transform component outlines ────────────────────────────
-    const componentShape = getGlyphShape(componentGlyphId);
-    const transformed = _transformShape(componentShape, xx, yx, xy, yy, tx, ty);
-    for (const c of transformed.contours) allContours.push(c);
+    // ── fetch and transform component raw outlines ────────────────────────
+    // Transform is applied to RAW points (before midpoint expansion) so the
+    // merged integer outline matches what FreeType decomposes.
+    const componentRaw = getGlyphRaw(componentGlyphId);
+    const transformed = _transformRawGlyph(componentRaw, xx, yx, xy, yy, tx, ty);
+    for (const c of transformed) allContours.push(c);
   } while (flags & MORE_COMPONENTS);
 
-  return { contours: allContours, inverseYAxis: false };
+  return allContours;
 }
 
 /**
- * Applies a 2×2 matrix + translation to all points in a Shape.
+ * Rounds a transformed coordinate to the nearest integer, ties away from zero,
+ * matching FreeType's FT_MulFix-based FT_Outline_Transform (which produces
+ * integer FT_Pos coordinates for NO_SCALE outlines).
+ * @internal
+ */
+function _roundCoord(v: number): number {
+  return v >= 0 ? Math.floor(v + 0.5) : Math.ceil(v - 0.5);
+}
+
+/**
+ * Applies a 2×2 matrix + translation to all raw points of a glyph, rounding to
+ * integer font units (as FreeType does for composite components).
  * | xx yx |   | x |   | tx |
  * | xy yy | × | y | + | ty |
  * @internal
  */
-function _transformShape(
-  shape: Shape,
+function _transformRawGlyph(
+  glyph: RawGlyph,
   xx: number,
   yx: number,
   xy: number,
   yy: number,
   tx: number,
   ty: number,
-): Shape {
+): RawGlyph {
   const isIdentity = xx === 1 && yx === 0 && xy === 0 && yy === 1 && tx === 0 && ty === 0;
-  if (isIdentity) return shape;
+  if (isIdentity) return glyph;
 
-  const transformed: Contour[] = shape.contours.map((contour) =>
-    contour.map((seg) => _transformSegment(seg, xx, yx, xy, yy, tx, ty)),
+  const isTranslation = xx === 1 && yx === 0 && xy === 0 && yy === 1;
+  return glyph.map((contour) =>
+    contour.map((p) => {
+      if (isTranslation) {
+        // Pure integer translation — no rounding needed, keeps values exact.
+        return { x: p.x + tx, y: p.y + ty, onCurve: p.onCurve };
+      }
+      return {
+        x: _roundCoord(xx * p.x + yx * p.y + tx),
+        y: _roundCoord(xy * p.x + yy * p.y + ty),
+        onCurve: p.onCurve,
+      };
+    }),
   );
-  return { contours: transformed, inverseYAxis: shape.inverseYAxis };
 }
 
-/** @internal */
-function _transformPt(
-  x: number,
-  y: number,
-  xx: number,
-  yx: number,
-  xy: number,
-  yy: number,
-  tx: number,
-  ty: number,
-): [number, number] {
-  return [xx * x + yx * y + tx, xy * x + yy * y + ty];
-}
-
-/** @internal */
-function _transformSegment(
-  seg: EdgeSegment,
-  xx: number,
-  yx: number,
-  xy: number,
-  yy: number,
-  tx: number,
-  ty: number,
-): EdgeSegment {
-  // All segment points (start, control, end) are transformed with the full
-  // affine matrix + translation. For zero-valued unused fields (e.g. p2 for
-  // LINEAR = 0), the transform produces (tx, ty) — harmless since those fields
-  // are ignored during rendering.
-  const [p0x, p0y] = _transformPt(seg.p0x, seg.p0y, xx, yx, xy, yy, tx, ty);
-  const [p1x, p1y] = _transformPt(seg.p1x, seg.p1y, xx, yx, xy, yy, tx, ty);
-  const [p2x, p2y] = _transformPt(seg.p2x, seg.p2y, xx, yx, xy, yy, tx, ty);
-  const [p3x, p3y] = _transformPt(seg.p3x, seg.p3y, xx, yx, xy, yy, tx, ty);
-  return new EdgeSegment(seg.type, p0x, p0y, p1x, p1y, p2x, p2y, p3x, p3y);
-}

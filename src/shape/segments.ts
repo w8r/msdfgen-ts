@@ -458,8 +458,7 @@ export class EdgeSegment {
             minDistance = nonZeroSign(epDirx * bqy - epDiry * bqx) * distB;
             // param = dot(origin - p1, epDir)/dot(epDir,epDir)
             param =
-              ((ox - p1x) * epDirx + (oy - p1y) * epDiry) /
-              (epDirx * epDirx + epDiry * epDiry);
+              ((ox - p1x) * epDirx + (oy - p1y) * epDiry) / (epDirx * epDirx + epDiry * epDiry);
           }
         }
         for (let i = 0; i < solutions; ++i) {

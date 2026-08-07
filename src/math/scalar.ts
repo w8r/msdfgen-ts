@@ -69,7 +69,7 @@ export function crossFMA(ax: number, ay: number, bx: number, by: number): number
   const ax2 = ax - ax1;
   const by1 = cb - (cb - by);
   const by2 = by - by1;
-  const e = ax2 * by2 - (((p - ax1 * by1) - ax2 * by1) - ax1 * by2);
+  const e = ax2 * by2 - (p - ax1 * by1 - ax2 * by1 - ax1 * by2);
   // fma(ax, by, -t) = (p - t) + e, with the low-order term added last.
   return p - t + e;
 }

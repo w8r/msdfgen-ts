@@ -19,12 +19,7 @@
 
 import { type Shape } from "../shape/shape.js";
 import { type SignedDistanceResult, signedDistanceLess } from "../shape/segments.js";
-import {
-  Scanline,
-  computeShapeScanline,
-  type FillRule,
-  FILL_NONZERO,
-} from "../shape/scanline.js";
+import { Scanline, computeShapeScanline, type FillRule, FILL_NONZERO } from "../shape/scanline.js";
 
 /**
  * Parameters for {@link generateSDF}.  Mirror msdfgen's projection + range:
@@ -71,18 +66,33 @@ function _contourWinding(contour: import("../shape/contour.js").Contour): number
 
   if (n === 1) {
     const e = contour[0]!;
-    e.point(0, _pt);       const ax = _pt[0]!, ay = _pt[1]!;
-    e.point(1 / 3, _pt);   const bx = _pt[0]!, by = _pt[1]!;
-    e.point(2 / 3, _pt);   const cx = _pt[0]!, cy = _pt[1]!;
+    e.point(0, _pt);
+    const ax = _pt[0]!,
+      ay = _pt[1]!;
+    e.point(1 / 3, _pt);
+    const bx = _pt[0]!,
+      by = _pt[1]!;
+    e.point(2 / 3, _pt);
+    const cx = _pt[0]!,
+      cy = _pt[1]!;
     total += ax * by - ay * bx;
     total += bx * cy - by * cx;
     total += cx * ay - cy * ax;
   } else if (n === 2) {
-    const e0 = contour[0]!, e1 = contour[1]!;
-    e0.point(0, _pt);   const ax = _pt[0]!, ay = _pt[1]!;
-    e0.point(0.5, _pt); const bx = _pt[0]!, by = _pt[1]!;
-    e1.point(0, _pt);   const cx = _pt[0]!, cy = _pt[1]!;
-    e1.point(0.5, _pt); const dx = _pt[0]!, dy = _pt[1]!;
+    const e0 = contour[0]!,
+      e1 = contour[1]!;
+    e0.point(0, _pt);
+    const ax = _pt[0]!,
+      ay = _pt[1]!;
+    e0.point(0.5, _pt);
+    const bx = _pt[0]!,
+      by = _pt[1]!;
+    e1.point(0, _pt);
+    const cx = _pt[0]!,
+      cy = _pt[1]!;
+    e1.point(0.5, _pt);
+    const dx = _pt[0]!,
+      dy = _pt[1]!;
     total += ax * by - ay * bx;
     total += bx * cy - by * cx;
     total += cx * dy - cy * dx;
@@ -91,11 +101,14 @@ function _contourWinding(contour: import("../shape/contour.js").Contour): number
     // General case: shoelace over start points of each edge.
     // Start from the last edge's start point (wraps around).
     const last = contour[n - 1]!;
-    let prevX = last.p0x, prevY = last.p0y;
+    let prevX = last.p0x,
+      prevY = last.p0y;
     for (let i = 0; i < n; i++) {
-      const curX = contour[i]!.p0x, curY = contour[i]!.p0y;
+      const curX = contour[i]!.p0x,
+        curY = contour[i]!.p0y;
       total += prevX * curY - prevY * curX;
-      prevX = curX; prevY = curY;
+      prevX = curX;
+      prevY = curY;
     }
   }
 
@@ -124,22 +137,37 @@ function _overlapCombine(
   nc: number,
 ): number {
   // shapeEdgeSelector: min-abs over ALL contours.
-  let shapeDist = -Infinity, shapeDot = 0;
+  let shapeDist = -Infinity,
+    shapeDot = 0;
   // innerEdgeSelector: min-abs from positive-winding contours with dist >= 0.
-  let innerDist = -Infinity, innerDot = 0;
+  let innerDist = -Infinity,
+    innerDot = 0;
   // outerEdgeSelector: min-abs from negative-winding contours with dist <= 0.
-  let outerDist = -Infinity, outerDot = 0;
+  let outerDist = -Infinity,
+    outerDot = 0;
 
   for (let i = 0; i < nc; i++) {
-    const d = cDist[i]!, dot = cDot[i]!;
-    if (signedDistanceLess(d, dot, shapeDist, shapeDot)) { shapeDist = d; shapeDot = dot; }
+    const d = cDist[i]!,
+      dot = cDot[i]!;
+    if (signedDistanceLess(d, dot, shapeDist, shapeDot)) {
+      shapeDist = d;
+      shapeDot = dot;
+    }
     const w = windings[i]!;
-    if (w > 0 && d >= 0 && signedDistanceLess(d, dot, innerDist, innerDot)) { innerDist = d; innerDot = dot; }
-    if (w < 0 && d <= 0 && signedDistanceLess(d, dot, outerDist, outerDot)) { outerDist = d; outerDot = dot; }
+    if (w > 0 && d >= 0 && signedDistanceLess(d, dot, innerDist, innerDot)) {
+      innerDist = d;
+      innerDot = dot;
+    }
+    if (w < 0 && d <= 0 && signedDistanceLess(d, dot, outerDist, outerDot)) {
+      outerDist = d;
+      outerDot = dot;
+    }
   }
 
   // Unused after merge — kept only to silence unused-variable lint.
-  void shapeDot; void innerDot; void outerDot;
+  void shapeDot;
+  void innerDot;
+  void outerDot;
 
   let distance = -Infinity;
   let winding = 0;
@@ -224,7 +252,8 @@ export function generateSDF(shape: Shape, params: SdfParams, out: Float32Array):
       // Per-contour nearest signed distance (TrueDistanceSelector per contour).
       for (let ci = 0; ci < nc; ci++) {
         const contour = contours[ci]!;
-        let minDist = -Infinity, minDot = 0;
+        let minDist = -Infinity,
+          minDot = 0;
         for (let ei = 0; ei < contour.length; ei++) {
           contour[ei]!.signedDistance(px, py, _sd);
           if (signedDistanceLess(_sd.distance, _sd.dot, minDist, minDot)) {

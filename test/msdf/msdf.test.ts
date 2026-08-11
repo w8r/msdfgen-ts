@@ -1,15 +1,12 @@
 /**
- * Gate 2b — single-channel SDF golden comparison.
+ * Gate 3 — MSDF golden comparison.
  *
  * For every golden fixture in test/golden/:
- *   1. Call the msdfgen reference binary: `sdf -shapedesc shape.txt`
- *      with the same projection params from meta.json → 1-channel FL32.
- *   2. Parse shape.txt via parseShapeDesc + normalizeShape.
- *   3. Call our generateSDF(shape, params, out).
- *   4. compareBitmaps(ref, ours, width, height, 1): maxAbsDiff <= 1e-4.
- *
- * The shapedesc approach isolates the SDF algorithm from font-parsing
- * differences: the shape is exactly what the reference uses.
+ *   1. Call the msdfgen reference binary with `msdf -shapedesc shape.txt -scanline`
+ *      and the projection params from meta.json → 3-channel FL32.
+ *   2. Parse shape.txt → normalizeShape → edgeColoringSimple.
+ *   3. generateMSDF → distanceSignCorrection → msdfErrorCorrection.
+ *   4. compareBitmaps(ref, ours, width, height, 3): maxAbsDiff <= 1e-4.
  *
  * NEVER modify test/golden/** — only the human regenerates fixtures.
  */
@@ -20,7 +17,9 @@ import { fileURLToPath } from "url";
 import { tmpdir } from "os";
 import { execFileSync } from "child_process";
 import { describe, it, expect, beforeAll } from "vitest";
-import { generateSDF } from "../../src/msdf/sdf.js";
+import { generateMSDF } from "../../src/msdf/generate.js";
+import { edgeColoringSimple } from "../../src/msdf/edge-coloring.js";
+import { distanceSignCorrection, msdfErrorCorrection } from "../../src/msdf/error-correction.js";
 import { normalizeShape } from "../../src/shape/normalize.js";
 import { parseShapeDesc } from "../utils/shapedesc.js";
 import { compareBitmaps, fl32FromBuffer } from "../utils/compare.js";
@@ -28,11 +27,11 @@ import { compareBitmaps, fl32FromBuffer } from "../utils/compare.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const GOLDEN_DIR = resolve(__dirname, "../golden");
 const BINARY = resolve(__dirname, "../../tools/msdfgen-ref/build/msdfgen");
-const TMP_DIR = resolve(tmpdir(), "msdfgen-ts-sdf-test");
+const TMP_DIR = resolve(tmpdir(), "msdfgen-ts-msdf-test");
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-interface SdfFixture {
+interface MsdfFixture {
   fontId: string;
   glyphKey: string;
   width: number;
@@ -46,8 +45,8 @@ interface SdfFixture {
 
 // ── Fixture loading ──────────────────────────────────────────────────────────
 
-function loadFixtures(): SdfFixture[] {
-  const fixtures: SdfFixture[] = [];
+function loadFixtures(): MsdfFixture[] {
+  const fixtures: MsdfFixture[] = [];
 
   for (const fontId of readdirSync(GOLDEN_DIR)) {
     const fontDir = resolve(GOLDEN_DIR, fontId);
@@ -63,8 +62,6 @@ function loadFixtures(): SdfFixture[] {
       const metaPath = resolve(fixDir, "meta.json");
       const shapePath = resolve(fixDir, "shape.txt");
       if (!existsSync(metaPath) || !existsSync(shapePath)) continue;
-
-      // Extract size from dir name, e.g. "U0021_32px" or "g1_32px".
       if (!/_\d+px$/.test(glyphKey)) continue;
 
       const meta = JSON.parse(readFileSync(metaPath, "utf8")) as {
@@ -93,16 +90,15 @@ function loadFixtures(): SdfFixture[] {
   return fixtures;
 }
 
-// ── Reference SDF via binary ─────────────────────────────────────────────────
+// ── Reference MSDF via binary ─────────────────────────────────────────────────
 
 /**
- * Runs the msdfgen binary with `sdf -shapedesc` to produce a 1-channel SDF
- * reference bitmap.  The shape file is already em-normalized (exported by
- * gen-golden), so no -emnormalize flag is needed.
+ * Runs the msdfgen binary with `msdf -shapedesc -scanline` to produce a 3-channel
+ * MSDF reference bitmap.
  *
- * @returns Flat Float32Array of length width*height (1 channel, y-up).
+ * @returns Flat Float32Array of length width*height*3 (3 channels, y-up).
  */
-function referenceSDFFromShapeDesc(
+function referenceMSDF(
   shapePath: string,
   width: number,
   height: number,
@@ -115,7 +111,7 @@ function referenceSDFFromShapeDesc(
   execFileSync(
     BINARY,
     [
-      "sdf",
+      "msdf",
       "-shapedesc",
       shapePath,
       "-o",
@@ -137,36 +133,33 @@ function referenceSDFFromShapeDesc(
     { stdio: ["ignore", "ignore", "pipe"] },
   );
   const raw = readFileSync(outPath);
-  const fl32 = fl32FromBuffer(raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength));
-  if (fl32.channels !== 1) {
-    throw new Error(`Expected 1-channel SDF output, got ${fl32.channels} channels (${outPath})`);
+  const fl32 = fl32FromBuffer(raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer);
+  if (fl32.channels !== 3) {
+    throw new Error(`Expected 3-channel MSDF output, got ${fl32.channels} channels (${outPath})`);
   }
   return fl32.data;
 }
 
-// ── Tests ────────────────────────────────────────────────────────────────────
+// ── Tests ─────────────────────────────────────────────────────────────────────
 
-describe("generateSDF — golden comparison", () => {
+describe("generateMSDF — golden comparison", () => {
   beforeAll(() => {
     mkdirSync(TMP_DIR, { recursive: true });
   });
 
   if (!existsSync(BINARY)) {
     it.skip("msdfgen binary not found — run: npm run setup-reference", () => {});
-    // eslint-disable-next-line no-useless-return
     return;
   }
 
   if (!existsSync(GOLDEN_DIR)) {
     it.skip("test/golden/ not found — run: npm run gen-golden", () => {});
-    // eslint-disable-next-line no-useless-return
     return;
   }
 
   const fixtures = loadFixtures();
   if (fixtures.length === 0) {
     it.skip("no fixtures found in test/golden/", () => {});
-    // eslint-disable-next-line no-useless-return
     return;
   }
 
@@ -176,7 +169,7 @@ describe("generateSDF — golden comparison", () => {
 
       let refData: Float32Array;
       try {
-        refData = referenceSDFFromShapeDesc(
+        refData = referenceMSDF(
           fix.shapePath,
           fix.width,
           fix.height,
@@ -190,39 +183,33 @@ describe("generateSDF — golden comparison", () => {
         try {
           unlinkSync(tmpOut);
         } catch {
-          /* ignore — file may not exist if binary failed */
+          /* ignore */
         }
       }
 
-      // Parse shape from shapedesc (already em-normalized) and normalize.
       const shapeText = readFileSync(fix.shapePath, "utf8");
-      const { shape } = parseShapeDesc(shapeText);
+      const { shape, colorsSpecified } = parseShapeDesc(shapeText);
       normalizeShape(shape);
+      if (!colorsSpecified) edgeColoringSimple(shape, 3.0, 0n);
 
-      // Generate our SDF.
-      const out = new Float32Array(fix.width * fix.height);
-      generateSDF(
-        shape,
-        {
-          width: fix.width,
-          height: fix.height,
-          scale: fix.scale,
-          tx: fix.tx,
-          ty: fix.ty,
-          pxrange: fix.pxrange,
-        },
-        out,
-      );
+      // Use the same 6-decimal tx/ty precision as the C++ reference binary CLI call,
+      // so that floating-point coordinates match exactly and edge tiebreakers agree.
+      const tx6 = parseFloat(fix.tx.toFixed(6));
+      const ty6 = parseFloat(fix.ty.toFixed(6));
 
-      const result = compareBitmaps(refData!, out, fix.width, fix.height, 1);
+      const out = new Float32Array(fix.width * fix.height * 3);
+      generateMSDF(shape, fix.width, fix.height, fix.scale, tx6, ty6, fix.pxrange, out);
+      distanceSignCorrection(out, shape, fix.width, fix.height, fix.scale, tx6, ty6);
+      msdfErrorCorrection(out, shape, fix.width, fix.height, fix.scale, tx6, ty6, fix.pxrange);
+
+      const result = compareBitmaps(refData!, out, fix.width, fix.height, 3);
       if (!result.pass) {
         const t = result.worstTexel;
         expect.fail(
-          `maxAbsDiff=${result.maxAbsDiff.toExponential(3)} ` +
-            `at texel (${t?.x ?? "?"},${t?.y ?? "?"}) — tolerance 1e-4`,
+          `[${fix.fontId}/${fix.glyphKey}] maxAbsDiff=${result.maxAbsDiff.toFixed(6)} > 1e-4` +
+          (t ? ` worst at (${t.x},${t.y}) ch${t.channel}` : ""),
         );
       }
-      expect(result.pass).toBe(true);
     });
   }
 });

@@ -12,6 +12,7 @@
     "gate:m2a": "vitest run test/shape/normalize.test.ts",
     "gate:m2b": "vitest run test/msdf/sdf.test.ts",
     "gate:m2": "vitest run test/shape/normalize.test.ts test/msdf/sdf.test.ts",
+    "gate:m3": "vitest run test/msdf/msdf.test.ts",
     "gen-golden": "node tools/gen-golden.mjs",
     "setup-reference": "bash tools/setup-reference.sh",
     "build": "vite build",

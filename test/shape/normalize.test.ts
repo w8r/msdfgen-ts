@@ -219,7 +219,7 @@ describe("Gate 2a — shape normalization vs exportshape goldens", () => {
           normalizeShape(shape);
 
           // Parse golden shape (ignoring colours)
-          const golden = parseShapeDesc(fix.shapeText);
+          const { shape: golden } = parseShapeDesc(fix.shapeText);
 
           // Glyphs with no outline (space, .notdef) may have 0 contours in both.
           // The golden might still have contours if it's a special glyph. Allow 0=0.

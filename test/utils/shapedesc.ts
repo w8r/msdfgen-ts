@@ -99,10 +99,11 @@ class ShapeDescReader {
  * port of core/shape-description.cpp: readContour (FILE template)
  *
  * @param r Reader positioned after '{'.
- * @returns Array of EdgeSegments forming the closed contour.
+ * @returns Object with edge segments and whether any color letters were found.
  */
-function parseContour(r: ShapeDescReader): EdgeSegment[] {
+function parseContour(r: ShapeDescReader): { edges: EdgeSegment[]; colorsSpecified: boolean } {
   const edges: EdgeSegment[] = [];
+  let colorsSpecified = false;
 
   // Read the start point of the first edge.
   const firstCoord = r.readCoord();
@@ -148,37 +149,33 @@ function parseContour(r: ShapeDescReader): EdgeSegment[] {
 
     if (dc === "#") {
       // Close edge: p[0] → start, LINEAR.
-      edges.push(new EdgeSegment(LINEAR, p0x, p0y, startX, startY, 0, 0, 0, 0));
+      const closeEdge = new EdgeSegment(LINEAR, p0x, p0y, startX, startY, 0, 0, 0, 0);
+      edges.push(closeEdge);
       p0x = startX;
       p0y = startY;
       continue;
     }
 
     // At this point dc is a color letter (c/m/y/w) or '('.
-    // Colour letters are skipped (no colour tracking in M2).
+    // Read the color letter and map to EdgeColor bitmask.
+    // port of core/shape-description.cpp: readContour — color letter handling
+    let edgeColor = 7; // WHITE = default
     let controlPoints = 0;
 
     let nextC = dc;
-    if (
-      dc === "c" ||
-      dc === "C" ||
-      dc === "m" ||
-      dc === "M" ||
-      dc === "y" ||
-      dc === "Y" ||
-      dc === "w" ||
-      dc === "W"
-    ) {
-      // Read the char after the color letter.
-      nextC = r.readChar();
-    }
+    if (dc === "c" || dc === "C") { edgeColor = 6; colorsSpecified = true; nextC = r.readChar(); } // CYAN
+    else if (dc === "m" || dc === "M") { edgeColor = 5; colorsSpecified = true; nextC = r.readChar(); } // MAGENTA
+    else if (dc === "y" || dc === "Y") { edgeColor = 3; colorsSpecified = true; nextC = r.readChar(); } // YELLOW
+    else if (dc === "w" || dc === "W") { edgeColor = 7; colorsSpecified = true; nextC = r.readChar(); } // WHITE
 
     if (nextC === ";") {
       // Color letter followed directly by ';': no control points, go to end.
       goto_finish_edge: {
         const ep = r.readCoord();
         if (ep !== null) {
-          edges.push(new EdgeSegment(LINEAR, p0x, p0y, ep[0], ep[1], 0, 0, 0, 0));
+          const fwdEdge = new EdgeSegment(LINEAR, p0x, p0y, ep[0], ep[1], 0, 0, 0, 0);
+          fwdEdge.color = edgeColor;
+          edges.push(fwdEdge);
           p0x = ep[0];
           p0y = ep[1];
           break goto_finish_edge;
@@ -186,7 +183,9 @@ function parseContour(r: ShapeDescReader): EdgeSegment[] {
         // readCoord failed: might be '#'
         const ec = r.readChar();
         if (ec === "#") {
-          edges.push(new EdgeSegment(LINEAR, p0x, p0y, startX, startY, 0, 0, 0, 0));
+          const closeEdge2 = new EdgeSegment(LINEAR, p0x, p0y, startX, startY, 0, 0, 0, 0);
+          closeEdge2.color = edgeColor;
+          edges.push(closeEdge2);
           p0x = startX;
           p0y = startY;
         }
@@ -236,18 +235,21 @@ function parseContour(r: ShapeDescReader): EdgeSegment[] {
       }
     }
 
-    // Create edge based on number of control points.
+    // Create edge based on number of control points, preserving the color letter.
+    let newEdge: EdgeSegment;
     switch (controlPoints) {
       case 0:
-        edges.push(new EdgeSegment(LINEAR, p0x, p0y, epx, epy, 0, 0, 0, 0));
+        newEdge = new EdgeSegment(LINEAR, p0x, p0y, epx, epy, 0, 0, 0, 0);
         break;
       case 1:
-        edges.push(new EdgeSegment(QUADRATIC, p0x, p0y, c1x, c1y, epx, epy, 0, 0));
+        newEdge = new EdgeSegment(QUADRATIC, p0x, p0y, c1x, c1y, epx, epy, 0, 0);
         break;
       default:
-        edges.push(new EdgeSegment(CUBIC, p0x, p0y, c1x, c1y, c2x, c2y, epx, epy));
+        newEdge = new EdgeSegment(CUBIC, p0x, p0y, c1x, c1y, c2x, c2y, epx, epy);
         break;
     }
+    newEdge.color = edgeColor;
+    edges.push(newEdge);
     p0x = epx;
     p0y = epy;
 
@@ -260,22 +262,25 @@ function parseContour(r: ShapeDescReader): EdgeSegment[] {
     void sep2; // suppress unused warning
   }
 
-  return edges;
+  return { edges, colorsSpecified };
 }
 
 /**
  * Parses a shapedesc string (as written by msdfgen -exportshape) into a Shape.
  *
- * Colour codes (c/m/y/w) are recognised but ignored — the returned Shape has
- * no colour information (edge coloring is M3 territory).
+ * Colour codes (c/m/y/w) are read and applied to each EdgeSegment's `color`
+ * field, matching C++ readShapeDescription behaviour. When colours are present,
+ * the caller should NOT call edgeColoringSimple (set `colorsSpecified` guard).
  *
  * @param text Raw contents of a shape.txt file.
- * @returns Parsed Shape.
+ * @returns `{ shape, colorsSpecified }` — colorsSpecified is true when any
+ *   colour letter was found in the file (matching C++ *colorsSpecified out-param).
  */
-export function parseShapeDesc(text: string): Shape {
+export function parseShapeDesc(text: string): { shape: Shape; colorsSpecified: boolean } {
   const r = new ShapeDescReader(text);
   const contours: Contour[] = [];
   let inverseYAxis = false;
+  let colorsSpecified = false;
 
   r.skipWS();
 
@@ -297,10 +302,12 @@ export function parseShapeDesc(text: string): Shape {
   // Parse contour blocks { ... }
   while (r.peekChar() === "{") {
     r.readChar(); // consume '{'
-    contours.push(parseContour(r));
+    const parsed = parseContour(r);
+    contours.push(parsed.edges);
+    colorsSpecified = colorsSpecified || parsed.colorsSpecified;
   }
 
-  return { contours, inverseYAxis };
+  return { shape: { contours, inverseYAxis }, colorsSpecified };
 }
 
 // ── Serializer ───────────────────────────────────────────────────────────────

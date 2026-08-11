@@ -66,6 +66,41 @@ const CUBIC_SEARCH_STEPS = 4;
 const _roots = [0, 0, 0];
 
 /**
+ * Veltkamp splitting constant for float64 (2^27+1).
+ * Used by {@link _sqDistFMA} to get the exact product error of x*x.
+ */
+const _VK = 134217729.0;
+
+/**
+ * Computes fl(exact(x²) + fl(y²)), matching what ARM64 generates for
+ * `sqrt(x*x+y*y)` when compiled with -O3 -ffp-contract=on:
+ *   fmul  t, y, y          ; t  = fl(y²)
+ *   fmadd r, x, x, t       ; r  = fl(exact(x²) + t)
+ *   fsqrt result, r
+ *
+ * Use `Math.sqrt(_sqDistFMA(x, y))` instead of `Math.sqrt(x*x+y*y)` for
+ * endpoint-to-pixel distance comparisons so the float64 ordering matches the
+ * C++ reference on ARM64.  Leave direction-normalization sqrt calls unchanged.
+ *
+ * port of Vector2::length() — ARM64 compiled form with FMA contraction.
+ */
+function _sqDistFMA(x: number, y: number): number {
+  // t = fl(y²)  (standard rounded multiplication, same as C++ first fmul)
+  const t = y * y;
+  // Compute exact(x²) = p + e via Veltkamp-Dekker split
+  const cx = _VK * x;
+  const xh = cx - (cx - x); // high 27-bit half of x
+  const xl = x - xh;        // low  26-bit half of x
+  const p = x * x;          // fl(x²)  (= fmadd input, rounded)
+  const e = ((xh * xh - p) + 2.0 * xh * xl) + xl * xl; // exact(x²) - p
+  // fl(exact(x²) + t) using compensated addition (TwoSum on p+t, then add e)
+  // Assumes |p| >= |t|, which holds when |x| >= |y| (x-component >= y-component).
+  // In the rare opposite case the error is still ≤ 1 ULP, never changing sign.
+  const s = p + t;
+  return s + (e + (t - (s - p)));
+}
+
+/**
  * A single curve segment within a contour.
  *
  * Field layout (matches C++ msdfgen EdgeSegment conventions):
@@ -92,6 +127,11 @@ export class EdgeSegment {
   p3x: number;
   /** CUBIC: end y. Others: 0. */
   p3y: number;
+  /**
+   * Edge color bitmask for MSDF channel assignment.
+   * port of core/EdgeColor.h: EdgeColor (BLACK=0, RED=1, GREEN=2, YELLOW=3, BLUE=4, MAGENTA=5, CYAN=6, WHITE=7)
+   */
+  color: number;
 
   /**
    * @param type Segment type (LINEAR=0, QUADRATIC=1, CUBIC=2).
@@ -124,6 +164,7 @@ export class EdgeSegment {
     this.p2y = p2y;
     this.p3x = p3x;
     this.p3y = p3y;
+    this.color = 7; // WHITE — overwritten by edgeColoringSimple
   }
 
   /** Endpoint x (the on-curve destination of this segment). */
@@ -268,11 +309,11 @@ export class EdgeSegment {
       case LINEAR: {
         this.point(1 / 3, pa);
         this.point(2 / 3, pb);
-        return [
-          new EdgeSegment(LINEAR, this.p0x, this.p0y, pa[0]!, pa[1]!, 0, 0, 0, 0),
-          new EdgeSegment(LINEAR, pa[0]!, pa[1]!, pb[0]!, pb[1]!, 0, 0, 0, 0),
-          new EdgeSegment(LINEAR, pb[0]!, pb[1]!, this.p1x, this.p1y, 0, 0, 0, 0),
-        ];
+        const sl0 = new EdgeSegment(LINEAR, this.p0x, this.p0y, pa[0]!, pa[1]!, 0, 0, 0, 0);
+        const sl1 = new EdgeSegment(LINEAR, pa[0]!, pa[1]!, pb[0]!, pb[1]!, 0, 0, 0, 0);
+        const sl2 = new EdgeSegment(LINEAR, pb[0]!, pb[1]!, this.p1x, this.p1y, 0, 0, 0, 0);
+        sl0.color = sl1.color = sl2.color = this.color;
+        return [sl0, sl1, sl2];
       }
       case QUADRATIC: {
         // part0: (p0, mix(p0,p1,1/3), point(1/3))
@@ -291,11 +332,11 @@ export class EdgeSegment {
         const ctrl1y = m59y + 0.5 * (m49y - m59y);
         const ctrl2x = this.p1x + (2 / 3) * (this.p2x - this.p1x);
         const ctrl2y = this.p1y + (2 / 3) * (this.p2y - this.p1y);
-        return [
-          new EdgeSegment(QUADRATIC, this.p0x, this.p0y, ctrl0x, ctrl0y, pa[0]!, pa[1]!, 0, 0),
-          new EdgeSegment(QUADRATIC, pa[0]!, pa[1]!, ctrl1x, ctrl1y, pb[0]!, pb[1]!, 0, 0),
-          new EdgeSegment(QUADRATIC, pb[0]!, pb[1]!, ctrl2x, ctrl2y, this.p2x, this.p2y, 0, 0),
-        ];
+        const sq0 = new EdgeSegment(QUADRATIC, this.p0x, this.p0y, ctrl0x, ctrl0y, pa[0]!, pa[1]!, 0, 0);
+        const sq1 = new EdgeSegment(QUADRATIC, pa[0]!, pa[1]!, ctrl1x, ctrl1y, pb[0]!, pb[1]!, 0, 0);
+        const sq2 = new EdgeSegment(QUADRATIC, pb[0]!, pb[1]!, ctrl2x, ctrl2y, this.p2x, this.p2y, 0, 0);
+        sq0.color = sq1.color = sq2.color = this.color;
+        return [sq0, sq1, sq2];
       }
       default: {
         // CUBIC
@@ -348,21 +389,21 @@ export class EdgeSegment {
           this.p2x === this.p3x && this.p2y === this.p3y
             ? this.p3y
             : this.p2y + (2 / 3) * (this.p3y - this.p2y);
-        return [
-          new EdgeSegment(CUBIC, this.p0x, this.p0y, c0c1x, c0c1y, c0c2x, c0c2y, pa[0]!, pa[1]!),
-          new EdgeSegment(CUBIC, pa[0]!, pa[1]!, c1c1x, c1c1y, c1c2x, c1c2y, pb[0]!, pb[1]!),
-          new EdgeSegment(
-            CUBIC,
-            pb[0]!,
-            pb[1]!,
-            m1223_23x,
-            m1223_23y,
-            c2c2x,
-            c2c2y,
-            this.p3x,
-            this.p3y,
-          ),
-        ];
+        const sc0 = new EdgeSegment(CUBIC, this.p0x, this.p0y, c0c1x, c0c1y, c0c2x, c0c2y, pa[0]!, pa[1]!);
+        const sc1 = new EdgeSegment(CUBIC, pa[0]!, pa[1]!, c1c1x, c1c1y, c1c2x, c1c2y, pb[0]!, pb[1]!);
+        const sc2 = new EdgeSegment(
+          CUBIC,
+          pb[0]!,
+          pb[1]!,
+          m1223_23x,
+          m1223_23y,
+          c2c2x,
+          c2c2y,
+          this.p3x,
+          this.p3y,
+        );
+        sc0.color = sc1.color = sc2.color = this.color;
+        return [sc0, sc1, sc2];
       }
     }
   }
@@ -397,11 +438,16 @@ export class EdgeSegment {
         const useEnd = param > 0.5;
         const ex = (useEnd ? p1x : p0x) - ox;
         const ey = (useEnd ? p1y : p0y) - oy;
-        const endpointDistance = Math.sqrt(ex * ex + ey * ey);
+        const endpointDistance = Math.sqrt(_sqDistFMA(ex, ey));
         if (param > 0 && param < 1) {
-          const abLen = Math.sqrt(abLen2);
-          // dot(ab.getOrthonormal(false), aq) = crossProduct(aq, ab)/|ab|
-          const orthoDistance = (aqx * aby - aqy * abx) / abLen;
+          // port of core/edge-segments.cpp: LinearSegment::signedDistance, orthoDistance
+          // C++ uses dot(ab.getOrthonormal(false), aq) = (aby/len)*aqx + (-abx/len)*aqy.
+          // Normalizing FIRST (divide-then-multiply) gives exact results for axis-aligned edges,
+          // matching ARM64 -O3 FMA behavior where abLen uses fmadd.
+          const abLen = Math.sqrt(_sqDistFMA(abx, aby));
+          const abNx = abx / abLen;
+          const abNy = aby / abLen;
+          const orthoDistance = abNy * aqx - abNx * aqy;
           if (Math.abs(orthoDistance) < endpointDistance) {
             out.distance = orthoDistance;
             out.dot = 0;
@@ -413,8 +459,8 @@ export class EdgeSegment {
         // crossProduct(aq, ab) = aqx*aby - aqy*abx (uniform for all param values)
         const cross = aqx * aby - aqy * abx;
         out.distance = nonZeroSign(cross) * endpointDistance;
-        // dot = |dot(ab.normalize(), eq.normalize())|
-        const abLen = Math.sqrt(abLen2);
+        // dot = |dot(ab.normalize(), eq.normalize())| using FMA-matched length
+        const abLen = Math.sqrt(_sqDistFMA(abx, aby));
         out.dot =
           endpointDistance === 0 || abLen === 0
             ? 0
@@ -444,13 +490,13 @@ export class EdgeSegment {
         // epDir = direction(0) = ab (nonzero for a real quadratic)
         let epDirx = abx,
           epDiry = aby;
-        const qaLen = Math.sqrt(qax * qax + qay * qay);
+        const qaLen = Math.sqrt(_sqDistFMA(qax, qay));
         let minDistance = nonZeroSign(epDirx * qay - epDiry * qax) * qaLen;
         let param = -(qax * epDirx + qay * epDiry) / (epDirx * epDirx + epDiry * epDiry);
         {
           const bqx = p2x - ox,
             bqy = p2y - oy;
-          const distB = Math.sqrt(bqx * bqx + bqy * bqy);
+          const distB = Math.sqrt(_sqDistFMA(bqx, bqy));
           if (distB < Math.abs(minDistance)) {
             // epDir = direction(1) = p2 - p1
             epDirx = p2x - p1x;
@@ -467,7 +513,7 @@ export class EdgeSegment {
             // qe = qa + 2t*ab + t²*br
             const qex = qax + 2 * t * abx + t * t * brx;
             const qey = qay + 2 * t * aby + t * t * bry;
-            const distance = Math.sqrt(qex * qex + qey * qey);
+            const distance = Math.sqrt(_sqDistFMA(qex, qey));
             if (distance <= Math.abs(minDistance)) {
               // dir = ab + t*br
               const dirx = abx + t * brx;
@@ -527,13 +573,13 @@ export class EdgeSegment {
           epDirx = p2x - p0x;
           epDiry = p2y - p0y;
         }
-        const qaLen = Math.sqrt(qax * qax + qay * qay);
+        const qaLen = Math.sqrt(_sqDistFMA(qax, qay));
         let minDistance = nonZeroSign(epDirx * qay - epDiry * qax) * qaLen;
         let param = -(qax * epDirx + qay * epDiry) / (epDirx * epDirx + epDiry * epDiry);
         {
           const bqx = p3x - ox,
             bqy = p3y - oy;
-          const distB = Math.sqrt(bqx * bqx + bqy * bqy);
+          const distB = Math.sqrt(_sqDistFMA(bqx, bqy));
           if (distB < Math.abs(minDistance)) {
             // epDir = direction(1)
             let e1x = p3x - p2x,
@@ -575,7 +621,7 @@ export class EdgeSegment {
               improvedT =
                 t - (qex * d1x + qey * d1y) / (d1x * d1x + d1y * d1y + (qex * d2x + qey * d2y));
             } while (improvedT > 0 && improvedT < 1);
-            const distance = Math.sqrt(qex * qex + qey * qey);
+            const distance = Math.sqrt(_sqDistFMA(qex, qey));
             if (distance < Math.abs(minDistance)) {
               minDistance = nonZeroSign(d1x * qey - d1y * qex) * distance;
               param = t;
@@ -797,6 +843,8 @@ export class EdgeSegment {
     const c1y = this.p0y + (2 / 3) * (this.p1y - this.p0y);
     const c2x = this.p1x + (1 / 3) * (this.p2x - this.p1x);
     const c2y = this.p1y + (1 / 3) * (this.p2y - this.p1y);
-    return new EdgeSegment(CUBIC, this.p0x, this.p0y, c1x, c1y, c2x, c2y, this.p2x, this.p2y);
+    const cubic = new EdgeSegment(CUBIC, this.p0x, this.p0y, c1x, c1y, c2x, c2y, this.p2x, this.p2y);
+    cubic.color = this.color;
+    return cubic;
   }
 }

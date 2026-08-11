@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 720 528" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0,8 3,0 6" fill="#4f5d75"/>
+    </marker>
+    <marker id="arr-a" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0,8 3,0 6" fill="#eb6c36"/>
+    </marker>
+  </defs>
+
+  <rect width="720" height="528" fill="#f5f5f5"/>
+
+  <!--
+    Top boxes:  cx=360, x=240, w=240, h=52
+      n1 All edges BLACK   y=48   bottom=100
+      n2 Count Corners     y=124  bottom=176
+    Diamond:    cy=240, hw=100, hh=40
+      top=(360,200) right=(460,240) bottom=(360,280) left=(260,240)
+    Case boxes: h=52, y=304, bottom=356
+      left   cx=196 x=132 w=128
+      center cx=360 x=296 w=128
+      right  cx=524 x=460 w=128
+    Merge horizontal: y=380
+    Output:     cx=360, x=240, w=240, h=52  y=404 bottom=456
+    Legend:     y=472
+  -->
+
+  <!-- ── ARROWS drawn before nodes ── -->
+  <line x1="360" y1="100" x2="360" y2="124" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arr)"/>
+  <line x1="360" y1="176" x2="360" y2="200" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arr)"/>
+  <!-- diamond left (= 0) → left case: turn left then down -->
+  <path d="M260,240 H204 Q196,240 196,248 V304"
+        fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arr)"/>
+  <!-- diamond bottom (= 1) → center case: straight down -->
+  <line x1="360" y1="280" x2="360" y2="304" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arr)"/>
+  <!-- diamond right (≥ 2) → right case: turn right then down -->
+  <path d="M460,240 H516 Q524,240 524,248 V304"
+        fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arr)"/>
+  <!-- merge: three verticals + horizontal wire + output arrow -->
+  <line x1="196" y1="356" x2="196" y2="380" stroke="#4f5d75" stroke-width="1.2"/>
+  <line x1="360" y1="356" x2="360" y2="380" stroke="#4f5d75" stroke-width="1.2"/>
+  <line x1="524" y1="356" x2="524" y2="380" stroke="#4f5d75" stroke-width="1.2"/>
+  <line x1="196" y1="380" x2="524" y2="380" stroke="#4f5d75" stroke-width="1.2"/>
+  <line x1="360" y1="380" x2="360" y2="404" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arr)"/>
+
+  <!-- ── N1 — All edges BLACK  y=48 ── -->
+  <rect x="240" y="48" width="240" height="52" rx="6" fill="#f5f5f5"/>
+  <rect x="240" y="48" width="240" height="52" rx="6" fill="white" stroke="#2d3142" stroke-width="1"/>
+  <text x="360" y="79" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist',ui-sans-serif,sans-serif" text-anchor="middle">All edges BLACK</text>
+  <text x="360" y="93" fill="#7a8399" font-size="9" font-family="'Geist Mono',ui-monospace,monospace" text-anchor="middle">EdgeSegment.color = 0</text>
+
+  <!-- ── N2 — Count Corners (FOCAL)  y=124 ── -->
+  <rect x="240" y="124" width="240" height="52" rx="6" fill="#f5f5f5"/>
+  <rect x="240" y="124" width="240" height="52" rx="6" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1.5"/>
+  <text x="360" y="155" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist',ui-sans-serif,sans-serif" text-anchor="middle">Count Corners</text>
+  <text x="360" y="169" fill="#7a8399" font-size="9" font-family="'Geist Mono',ui-monospace,monospace" text-anchor="middle">cross &gt; threshold or dot ≤ 0</text>
+
+  <!-- ── Diamond — n corners?  cy=240 ── -->
+  <polygon points="360,200 460,240 360,280 260,240" fill="#f5f5f5"/>
+  <polygon points="360,200 460,240 360,280 260,240" fill="rgba(45,49,66,0.04)" stroke="#2d3142" stroke-width="1"/>
+  <text x="360" y="244" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist',ui-sans-serif,sans-serif" text-anchor="middle">n corners?</text>
+
+  <!-- ── CASE: 0 corners  cx=196 y=304 ── -->
+  <rect x="132" y="304" width="128" height="52" rx="6" fill="#f5f5f5"/>
+  <rect x="132" y="304" width="128" height="52" rx="6" fill="white" stroke="#2d3142" stroke-width="1"/>
+  <text x="196" y="328" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist',ui-sans-serif,sans-serif" text-anchor="middle">= 0 corners</text>
+  <text x="196" y="348" fill="#7a8399" font-size="8" font-family="'Geist Mono',ui-monospace,monospace" text-anchor="middle">smooth: CMY arc</text>
+
+  <!-- ── CASE: 1 corner  cx=360 y=304 ── -->
+  <rect x="296" y="304" width="128" height="52" rx="6" fill="#f5f5f5"/>
+  <rect x="296" y="304" width="128" height="52" rx="6" fill="white" stroke="#2d3142" stroke-width="1"/>
+  <text x="360" y="328" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist',ui-sans-serif,sans-serif" text-anchor="middle">= 1 corner</text>
+  <text x="360" y="348" fill="#7a8399" font-size="8" font-family="'Geist Mono',ui-monospace,monospace" text-anchor="middle">trichrome split</text>
+
+  <!-- ── CASE: ≥ 2 corners  cx=524 y=304 ── -->
+  <rect x="460" y="304" width="128" height="52" rx="6" fill="#f5f5f5"/>
+  <rect x="460" y="304" width="128" height="52" rx="6" fill="white" stroke="#2d3142" stroke-width="1"/>
+  <text x="524" y="328" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist',ui-sans-serif,sans-serif" text-anchor="middle">≥ 2 corners</text>
+  <text x="524" y="348" fill="#7a8399" font-size="8" font-family="'Geist Mono',ui-monospace,monospace" text-anchor="middle">CMY rotate at each</text>
+  <text x="596" y="332" fill="#4f5d75" font-size="8" font-family="'Geist Mono',ui-monospace,monospace" letter-spacing="0.04em">(common)</text>
+
+  <!-- ── Decision branch labels ── -->
+  <!-- "= 0" above left horizontal segment, midpoint x=232, y=240 -->
+  <rect x="216" y="220" width="32" height="12" rx="2" fill="#f5f5f5"/>
+  <text x="232" y="229" fill="#4f5d75" font-size="8" font-family="'Geist Mono',ui-monospace,monospace" text-anchor="middle" letter-spacing="0.06em">= 0</text>
+
+  <!-- "= 1" to the right of center vertical segment, y midpoint 292 -->
+  <rect x="368" y="284" width="24" height="12" rx="2" fill="#f5f5f5"/>
+  <text x="380" y="293" fill="#4f5d75" font-size="8" font-family="'Geist Mono',ui-monospace,monospace" text-anchor="middle" letter-spacing="0.06em">= 1</text>
+
+  <!-- "≥ 2" above right horizontal segment, midpoint x=488, y=240 -->
+  <rect x="472" y="220" width="32" height="12" rx="2" fill="#f5f5f5"/>
+  <text x="488" y="229" fill="#4f5d75" font-size="8" font-family="'Geist Mono',ui-monospace,monospace" text-anchor="middle" letter-spacing="0.06em">≥ 2</text>
+
+  <!-- ── Output — Edge colors assigned (Store)  y=404 ── -->
+  <rect x="240" y="404" width="240" height="52" rx="6" fill="#f5f5f5"/>
+  <rect x="240" y="404" width="240" height="52" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+  <text x="360" y="435" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist',ui-sans-serif,sans-serif" text-anchor="middle">Edge colors assigned</text>
+  <text x="360" y="449" fill="#7a8399" font-size="9" font-family="'Geist Mono',ui-monospace,monospace" text-anchor="middle">CYAN · MAGENTA · YELLOW · WHITE</text>
+
+  <!-- ── LEGEND ── -->
+  <line x1="32" y1="468" x2="688" y2="468" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+  <text x="32" y="484" fill="#4f5d75" font-size="8" font-family="'Geist Mono',ui-monospace,monospace" letter-spacing="0.14em">LEGEND</text>
+
+  <rect x="108" y="476" width="20" height="12" rx="4" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1.5"/>
+  <text x="134" y="486" fill="#4f5d75" font-size="9" font-family="'Geist Mono',ui-monospace,monospace">Corner detection</text>
+
+  <polygon points="284,482 296,488 284,494 272,488" fill="rgba(45,49,66,0.04)" stroke="#2d3142" stroke-width="1"/>
+  <text x="304" y="492" fill="#4f5d75" font-size="9" font-family="'Geist Mono',ui-monospace,monospace">Count branch</text>
+
+  <rect x="432" y="476" width="20" height="12" rx="4" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+  <text x="458" y="486" fill="#4f5d75" font-size="9" font-family="'Geist Mono',ui-monospace,monospace">Output</text>
+
+  <text x="32" y="516" fill="#4f5d75" font-size="8" font-family="'Geist Mono',ui-monospace,monospace" letter-spacing="0.04em">CYAN = G+B · MAGENTA = R+B · YELLOW = R+G · WHITE = all 3 channels (single-edge / degenerate)</text>
+</svg>

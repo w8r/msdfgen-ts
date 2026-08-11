@@ -64,3 +64,43 @@ distance math becomes pixel colour.
 | L5 Normalized Shape | Contours with consistent winding; scanline sign-correction applied |
 | L6 Font Outline | Quadratic splines from `glyf`; composite components resolved and transformed |
 | L7 Binary Font | Raw TTF/OTF `ArrayBuffer` read via zero-copy `DataView` cursor |
+
+---
+
+## 4 — Shape Creation
+
+How a TrueType glyph outline is parsed and normalized into a `Shape` ready for coloring.
+`emNormalizeShape` is the **single coordinate-scaling boundary**: all downstream code works
+in the [0, 1] em-square — no other step may divide by `unitsPerEm`.
+
+![Shape creation flowchart](04-shape-creation.svg)
+
+| Step | What happens |
+|---|---|
+| Parse Raw Outline | Reads on/off-curve flag bytes; recurses into composite components applying each component's transform matrix |
+| Insert Implied Midpoints | TrueType-specific: consecutive off-curve points imply an on-curve midpoint between them; these are inserted explicitly |
+| Assemble EdgeSegments | Each on→off→on run becomes `QUADRATIC`; on→on runs become `LINEAR`; a collinear quadratic (cross = 0 after FMA) is collapsed to `LINEAR` |
+| **emNormalizeShape** | Divides all control-point coordinates by `unitsPerEm`; single named boundary — no other code may do this division |
+| normalizeShape | Orients all contours to consistent winding; deconverges convergent corner curves (splits/nudges); applies scanline sign correction for fill rule |
+
+---
+
+## 5 — Edge Coloring
+
+`edgeColoringSimple` assigns a color bitmask to every `EdgeSegment` so that the two
+edges meeting at any corner contribute to **different channels**. This is the prerequisite
+for MSDF generation — without it every channel would carry the same distance and the
+output would be an ordinary SDF.
+
+![Edge coloring algorithm](05-edge-coloring.svg)
+
+| Contour type | Strategy |
+|---|---|
+| 0 corners (smooth, e.g. a circle) | Distribute CYAN / MAGENTA / YELLOW in proportion to arc length |
+| 1 corner | `switchColor` at the corner; balance the two halves with a second switch (trichrome split) |
+| ≥ 2 corners *(most contours)* | Start with seed color; call `switchColor` at each corner, keeping current color between corners |
+
+Valid per-edge colors are **CYAN** (G+B channels), **MAGENTA** (R+B), and **YELLOW** (R+G).
+**WHITE** (all three channels) appears only for single-edge degenerate contours.
+The seed selection and `switchColor` logic are ported exactly from C++ to reproduce the same
+color assignment order as the reference binary; divergence here produces incorrect golden diffs.

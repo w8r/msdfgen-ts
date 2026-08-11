@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 560 632" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0,8 3,0 6" fill="#4f5d75"/>
+    </marker>
+    <marker id="arr-a" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0,8 3,0 6" fill="#eb6c36"/>
+    </marker>
+  </defs>
+
+  <rect width="560" height="632" fill="#f5f5f5"/>
+
+  <!--
+    Layout: cx=280, x=160, w=240, h=52
+    y positions (step=76): 48 124 200 276 352(FOCAL) 428 504
+  -->
+
+  <!-- ── ARROWS drawn before nodes ── -->
+  <!-- n1→n2 -->
+  <line x1="280" y1="100" x2="280" y2="124" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arr)"/>
+  <!-- n2→n3 -->
+  <line x1="280" y1="176" x2="280" y2="200" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arr)"/>
+  <!-- n3→n4 -->
+  <line x1="280" y1="252" x2="280" y2="276" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arr)"/>
+  <!-- n4→n5 entering focal -->
+  <line x1="280" y1="328" x2="280" y2="352" stroke="#eb6c36" stroke-width="1.5" marker-end="url(#arr-a)"/>
+  <!-- n5→n6 exiting focal -->
+  <line x1="280" y1="404" x2="280" y2="428" stroke="#eb6c36" stroke-width="1.5" marker-end="url(#arr-a)"/>
+  <!-- n6→n7 -->
+  <line x1="280" y1="480" x2="280" y2="504" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arr)"/>
+
+  <!-- ── N1 — glyf bytes (External)  y=48 ── -->
+  <rect x="160" y="48" width="240" height="52" rx="6" fill="#f5f5f5"/>
+  <rect x="160" y="48" width="240" height="52" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.22)" stroke-width="1"/>
+  <rect x="168" y="56" width="20" height="12" rx="2" fill="none" stroke="rgba(45,49,66,0.22)" stroke-width="0.8"/>
+  <text x="178" y="65" fill="rgba(45,49,66,0.45)" font-size="7" font-family="'Geist Mono',ui-monospace,monospace" text-anchor="middle" letter-spacing="0.08em">EXT</text>
+  <text x="280" y="79" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist',ui-sans-serif,sans-serif" text-anchor="middle">glyf table bytes</text>
+  <text x="280" y="93" fill="#7a8399" font-size="9" font-family="'Geist Mono',ui-monospace,monospace" text-anchor="middle">raw TrueType outline data</text>
+
+  <!-- ── N2 — Parse Raw Outline  y=124 ── -->
+  <rect x="160" y="124" width="240" height="52" rx="6" fill="#f5f5f5"/>
+  <rect x="160" y="124" width="240" height="52" rx="6" fill="white" stroke="#2d3142" stroke-width="1"/>
+  <text x="280" y="155" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist',ui-sans-serif,sans-serif" text-anchor="middle">Parse Raw Outline</text>
+  <text x="280" y="169" fill="#7a8399" font-size="9" font-family="'Geist Mono',ui-monospace,monospace" text-anchor="middle">simple / composite recursion</text>
+
+  <!-- ── N3 — Insert Implied Midpoints  y=200 ── -->
+  <rect x="160" y="200" width="240" height="52" rx="6" fill="#f5f5f5"/>
+  <rect x="160" y="200" width="240" height="52" rx="6" fill="white" stroke="#2d3142" stroke-width="1"/>
+  <text x="280" y="231" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist',ui-sans-serif,sans-serif" text-anchor="middle">Insert Implied Midpoints</text>
+  <text x="280" y="245" fill="#7a8399" font-size="9" font-family="'Geist Mono',ui-monospace,monospace" text-anchor="middle">off·off pair → on-curve midpoint</text>
+  <!-- TrueType-specific annotation -->
+  <text x="408" y="236" fill="#4f5d75" font-size="8" font-family="'Geist Mono',ui-monospace,monospace" letter-spacing="0.04em">TrueType-specific</text>
+
+  <!-- ── N4 — Assemble EdgeSegments  y=276 ── -->
+  <rect x="160" y="276" width="240" height="52" rx="6" fill="#f5f5f5"/>
+  <rect x="160" y="276" width="240" height="52" rx="6" fill="white" stroke="#2d3142" stroke-width="1"/>
+  <text x="280" y="307" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist',ui-sans-serif,sans-serif" text-anchor="middle">Assemble EdgeSegments</text>
+  <text x="280" y="321" fill="#7a8399" font-size="9" font-family="'Geist Mono',ui-monospace,monospace" text-anchor="middle">LINEAR · QUADRATIC · type tag</text>
+
+  <!-- ── N5 — emNormalizeShape (FOCAL)  y=352 ── -->
+  <rect x="160" y="352" width="240" height="52" rx="6" fill="#f5f5f5"/>
+  <rect x="160" y="352" width="240" height="52" rx="6" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1.5"/>
+  <text x="280" y="383" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist',ui-sans-serif,sans-serif" text-anchor="middle">emNormalizeShape</text>
+  <text x="280" y="397" fill="#7a8399" font-size="9" font-family="'Geist Mono',ui-monospace,monospace" text-anchor="middle">÷ unitsPerEm → [0, 1] em-square</text>
+  <!-- single-boundary annotation -->
+  <text x="408" y="381" fill="#eb6c36" font-size="8" font-family="'Geist Mono',ui-monospace,monospace" letter-spacing="0.04em">single scaling</text>
+  <text x="408" y="392" fill="#eb6c36" font-size="8" font-family="'Geist Mono',ui-monospace,monospace" letter-spacing="0.04em">boundary</text>
+
+  <!-- ── N6 — normalizeShape  y=428 ── -->
+  <rect x="160" y="428" width="240" height="52" rx="6" fill="#f5f5f5"/>
+  <rect x="160" y="428" width="240" height="52" rx="6" fill="white" stroke="#2d3142" stroke-width="1"/>
+  <text x="280" y="459" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist',ui-sans-serif,sans-serif" text-anchor="middle">normalizeShape</text>
+  <text x="280" y="473" fill="#7a8399" font-size="9" font-family="'Geist Mono',ui-monospace,monospace" text-anchor="middle">winding · deconverge · scanline</text>
+
+  <!-- ── N7 — Shape (Store)  y=504 ── -->
+  <rect x="160" y="504" width="240" height="52" rx="6" fill="#f5f5f5"/>
+  <rect x="160" y="504" width="240" height="52" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+  <text x="280" y="535" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist',ui-sans-serif,sans-serif" text-anchor="middle">Shape</text>
+  <text x="280" y="549" fill="#7a8399" font-size="9" font-family="'Geist Mono',ui-monospace,monospace" text-anchor="middle">Contour[] · EdgeSegment[]</text>
+
+  <!-- ── LEGEND ── -->
+  <line x1="32" y1="572" x2="528" y2="572" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+  <text x="32" y="588" fill="#4f5d75" font-size="8" font-family="'Geist Mono',ui-monospace,monospace" letter-spacing="0.14em">LEGEND</text>
+
+  <rect x="108" y="580" width="20" height="12" rx="4" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.22)" stroke-width="1"/>
+  <text x="134" y="590" fill="#4f5d75" font-size="9" font-family="'Geist Mono',ui-monospace,monospace">Input</text>
+
+  <rect x="200" y="580" width="20" height="12" rx="4" fill="white" stroke="#2d3142" stroke-width="1"/>
+  <text x="226" y="590" fill="#4f5d75" font-size="9" font-family="'Geist Mono',ui-monospace,monospace">Transform</text>
+
+  <rect x="328" y="580" width="20" height="12" rx="4" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1.5"/>
+  <text x="354" y="590" fill="#4f5d75" font-size="9" font-family="'Geist Mono',ui-monospace,monospace">Boundary step</text>
+
+  <rect x="468" y="580" width="20" height="12" rx="4" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+  <text x="494" y="590" fill="#4f5d75" font-size="9" font-family="'Geist Mono',ui-monospace,monospace">Output</text>
+</svg>

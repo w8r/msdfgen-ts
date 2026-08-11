@@ -6,7 +6,7 @@ Runs entirely in the browser — no WASM, no server, no canvas fallbacks.
 
 ## Algorithm diagrams
 
-Three SVG diagrams covering the pipeline, the per-pixel generation loop, and the data abstraction layers: [docs/diagrams/algorithm.md](docs/diagrams/algorithm.md).
+Three SVG diagrams covering the pipeline, the per-pixel generation loop, and the data abstraction layers → **[docs/algorithm.md](docs/algorithm.md)**.
 
 ## What it does
 

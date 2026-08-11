@@ -90,9 +90,9 @@ function _sqDistFMA(x: number, y: number): number {
   // Compute exact(x²) = p + e via Veltkamp-Dekker split
   const cx = _VK * x;
   const xh = cx - (cx - x); // high 27-bit half of x
-  const xl = x - xh;        // low  26-bit half of x
-  const p = x * x;          // fl(x²)  (= fmadd input, rounded)
-  const e = ((xh * xh - p) + 2.0 * xh * xl) + xl * xl; // exact(x²) - p
+  const xl = x - xh; // low  26-bit half of x
+  const p = x * x; // fl(x²)  (= fmadd input, rounded)
+  const e = xh * xh - p + 2.0 * xh * xl + xl * xl; // exact(x²) - p
   // fl(exact(x²) + t) using compensated addition (TwoSum on p+t, then add e)
   // Assumes |p| >= |t|, which holds when |x| >= |y| (x-component >= y-component).
   // In the rare opposite case the error is still ≤ 1 ULP, never changing sign.
@@ -332,9 +332,39 @@ export class EdgeSegment {
         const ctrl1y = m59y + 0.5 * (m49y - m59y);
         const ctrl2x = this.p1x + (2 / 3) * (this.p2x - this.p1x);
         const ctrl2y = this.p1y + (2 / 3) * (this.p2y - this.p1y);
-        const sq0 = new EdgeSegment(QUADRATIC, this.p0x, this.p0y, ctrl0x, ctrl0y, pa[0]!, pa[1]!, 0, 0);
-        const sq1 = new EdgeSegment(QUADRATIC, pa[0]!, pa[1]!, ctrl1x, ctrl1y, pb[0]!, pb[1]!, 0, 0);
-        const sq2 = new EdgeSegment(QUADRATIC, pb[0]!, pb[1]!, ctrl2x, ctrl2y, this.p2x, this.p2y, 0, 0);
+        const sq0 = new EdgeSegment(
+          QUADRATIC,
+          this.p0x,
+          this.p0y,
+          ctrl0x,
+          ctrl0y,
+          pa[0]!,
+          pa[1]!,
+          0,
+          0,
+        );
+        const sq1 = new EdgeSegment(
+          QUADRATIC,
+          pa[0]!,
+          pa[1]!,
+          ctrl1x,
+          ctrl1y,
+          pb[0]!,
+          pb[1]!,
+          0,
+          0,
+        );
+        const sq2 = new EdgeSegment(
+          QUADRATIC,
+          pb[0]!,
+          pb[1]!,
+          ctrl2x,
+          ctrl2y,
+          this.p2x,
+          this.p2y,
+          0,
+          0,
+        );
         sq0.color = sq1.color = sq2.color = this.color;
         return [sq0, sq1, sq2];
       }
@@ -389,8 +419,28 @@ export class EdgeSegment {
           this.p2x === this.p3x && this.p2y === this.p3y
             ? this.p3y
             : this.p2y + (2 / 3) * (this.p3y - this.p2y);
-        const sc0 = new EdgeSegment(CUBIC, this.p0x, this.p0y, c0c1x, c0c1y, c0c2x, c0c2y, pa[0]!, pa[1]!);
-        const sc1 = new EdgeSegment(CUBIC, pa[0]!, pa[1]!, c1c1x, c1c1y, c1c2x, c1c2y, pb[0]!, pb[1]!);
+        const sc0 = new EdgeSegment(
+          CUBIC,
+          this.p0x,
+          this.p0y,
+          c0c1x,
+          c0c1y,
+          c0c2x,
+          c0c2y,
+          pa[0]!,
+          pa[1]!,
+        );
+        const sc1 = new EdgeSegment(
+          CUBIC,
+          pa[0]!,
+          pa[1]!,
+          c1c1x,
+          c1c1y,
+          c1c2x,
+          c1c2y,
+          pb[0]!,
+          pb[1]!,
+        );
         const sc2 = new EdgeSegment(
           CUBIC,
           pb[0]!,
@@ -843,7 +893,17 @@ export class EdgeSegment {
     const c1y = this.p0y + (2 / 3) * (this.p1y - this.p0y);
     const c2x = this.p1x + (1 / 3) * (this.p2x - this.p1x);
     const c2y = this.p1y + (1 / 3) * (this.p2y - this.p1y);
-    const cubic = new EdgeSegment(CUBIC, this.p0x, this.p0y, c1x, c1y, c2x, c2y, this.p2x, this.p2y);
+    const cubic = new EdgeSegment(
+      CUBIC,
+      this.p0x,
+      this.p0y,
+      c1x,
+      c1y,
+      c2x,
+      c2y,
+      this.p2x,
+      this.p2y,
+    );
     cubic.color = this.color;
     return cubic;
   }

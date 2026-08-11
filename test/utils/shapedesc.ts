@@ -163,10 +163,26 @@ function parseContour(r: ShapeDescReader): { edges: EdgeSegment[]; colorsSpecifi
     let controlPoints = 0;
 
     let nextC = dc;
-    if (dc === "c" || dc === "C") { edgeColor = 6; colorsSpecified = true; nextC = r.readChar(); } // CYAN
-    else if (dc === "m" || dc === "M") { edgeColor = 5; colorsSpecified = true; nextC = r.readChar(); } // MAGENTA
-    else if (dc === "y" || dc === "Y") { edgeColor = 3; colorsSpecified = true; nextC = r.readChar(); } // YELLOW
-    else if (dc === "w" || dc === "W") { edgeColor = 7; colorsSpecified = true; nextC = r.readChar(); } // WHITE
+    if (dc === "c" || dc === "C") {
+      edgeColor = 6;
+      colorsSpecified = true;
+      nextC = r.readChar();
+    } // CYAN
+    else if (dc === "m" || dc === "M") {
+      edgeColor = 5;
+      colorsSpecified = true;
+      nextC = r.readChar();
+    } // MAGENTA
+    else if (dc === "y" || dc === "Y") {
+      edgeColor = 3;
+      colorsSpecified = true;
+      nextC = r.readChar();
+    } // YELLOW
+    else if (dc === "w" || dc === "W") {
+      edgeColor = 7;
+      colorsSpecified = true;
+      nextC = r.readChar();
+    } // WHITE
 
     if (nextC === ";") {
       // Color letter followed directly by ';': no control points, go to end.

@@ -16,15 +16,30 @@ const { width: w, height: h, scale, tx, ty, pxrange } = meta;
 // Run reference
 const tmpOut = "/tmp/msdf-ref.fl32";
 execFileSync(BINARY, [
-  "msdf", "-shapedesc", `${fixDir}/shape.txt`,
-  "-o", tmpOut, "-format", "fl32",
-  "-dimensions", String(w), String(h),
-  "-pxrange", String(pxrange), "-scale", String(scale),
-  "-translate", tx.toFixed(6), ty.toFixed(6), "-scanline"
+  "msdf",
+  "-shapedesc",
+  `${fixDir}/shape.txt`,
+  "-o",
+  tmpOut,
+  "-format",
+  "fl32",
+  "-dimensions",
+  String(w),
+  String(h),
+  "-pxrange",
+  String(pxrange),
+  "-scale",
+  String(scale),
+  "-translate",
+  tx.toFixed(6),
+  ty.toFixed(6),
+  "-scanline",
 ]);
 
 const refBuf = readFileSync(tmpOut);
-const refData = new Float32Array(refBuf.buffer.slice(refBuf.byteOffset + 16, refBuf.byteOffset + refBuf.byteLength));
+const refData = new Float32Array(
+  refBuf.buffer.slice(refBuf.byteOffset + 16, refBuf.byteOffset + refBuf.byteLength),
+);
 
 const shape = parseShapeDesc(shapeText);
 normalizeShape(shape);
@@ -34,11 +49,13 @@ generateMSDF(shape, w, h, scale, tx, ty, pxrange, out);
 
 // Scan for Infinity after generate
 function scanInf(label: string, arr: Float32Array) {
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) for (let ch = 0; ch < 3; ch++) {
-    if (!isFinite(arr[(y*w+x)*3+ch]!)) {
-      console.log(`[${label}] Infinity at (${x},${y}) ch${ch} = ${arr[(y*w+x)*3+ch]}`);
-    }
-  }
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++)
+      for (let ch = 0; ch < 3; ch++) {
+        if (!isFinite(arr[(y * w + x) * 3 + ch]!)) {
+          console.log(`[${label}] Infinity at (${x},${y}) ch${ch} = ${arr[(y * w + x) * 3 + ch]}`);
+        }
+      }
 }
 scanInf("PostGenerate", out);
 distanceSignCorrection(out, shape, w, h, scale, tx, ty);
@@ -46,25 +63,41 @@ scanInf("PostSignCorrect", out);
 msdfErrorCorrection(out, shape, w, h, scale, tx, ty, pxrange);
 scanInf("PostErrCorrect", out);
 
-let maxDiff = 0, worstX = 0, worstY = 0, worstCh = 0;
-for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) for (let ch = 0; ch < 3; ch++) {
-  const i = (y * w + x) * 3 + ch;
-  const diff = Math.abs(refData[i]! - out[i]!);
-  if (diff > maxDiff) { maxDiff = diff; worstX = x; worstY = y; worstCh = ch; }
-}
+let maxDiff = 0,
+  worstX = 0,
+  worstY = 0,
+  worstCh = 0;
+for (let y = 0; y < h; y++)
+  for (let x = 0; x < w; x++)
+    for (let ch = 0; ch < 3; ch++) {
+      const i = (y * w + x) * 3 + ch;
+      const diff = Math.abs(refData[i]! - out[i]!);
+      if (diff > maxDiff) {
+        maxDiff = diff;
+        worstX = x;
+        worstY = y;
+        worstCh = ch;
+      }
+    }
 
 console.log(`maxAbsDiff=${maxDiff.toFixed(6)} worst=(${worstX},${worstY}) ch${worstCh}`);
-console.log(`ref=${refData[(worstY*w+worstX)*3+worstCh]}, ours=${out[(worstY*w+worstX)*3+worstCh]}`);
+console.log(
+  `ref=${refData[(worstY * w + worstX) * 3 + worstCh]}, ours=${out[(worstY * w + worstX) * 3 + worstCh]}`,
+);
 
 // Print region
-const wx = worstX, wy = worstY;
-for (const [label, arr] of [["REF", refData], ["OURS", out]] as [string, Float32Array][]) {
+const wx = worstX,
+  wy = worstY;
+for (const [label, arr] of [
+  ["REF", refData],
+  ["OURS", out],
+] as [string, Float32Array][]) {
   console.log(`\n${label} around (${wx},${wy}):`);
-  for (let y = Math.max(0,wy-2); y <= Math.min(h-1, wy+2); y++) {
+  for (let y = Math.max(0, wy - 2); y <= Math.min(h - 1, wy + 2); y++) {
     let row = `y=${y}: `;
-    for (let x = Math.max(0,wx-2); x <= Math.min(w-1, wx+2); x++) {
-      const b = (y*w+x)*3;
-      row += `(${arr[b]!.toFixed(3)},${arr[b+1]!.toFixed(3)},${arr[b+2]!.toFixed(3)}) `;
+    for (let x = Math.max(0, wx - 2); x <= Math.min(w - 1, wx + 2); x++) {
+      const b = (y * w + x) * 3;
+      row += `(${arr[b]!.toFixed(3)},${arr[b + 1]!.toFixed(3)},${arr[b + 2]!.toFixed(3)}) `;
     }
     console.log(row);
   }

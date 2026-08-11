@@ -26,31 +26,46 @@ const refBuf = readFileSync(`${fixDir}/bitmap.fl32`);
 const refData = new Float32Array(refBuf.buffer.slice(refBuf.byteOffset + 16));
 
 // Find worst pixel
-let maxDiff = 0, wx = 0, wy = 0, wch = 0;
-for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) for (let ch = 0; ch < 3; ch++) {
-  const i = (y*w+x)*3+ch;
-  const d = Math.abs(refData[i]! - out[i]!);
-  if (d > maxDiff) { maxDiff = d; wx = x; wy = y; wch = ch; }
-}
+let maxDiff = 0,
+  wx = 0,
+  wy = 0,
+  wch = 0;
+for (let y = 0; y < h; y++)
+  for (let x = 0; x < w; x++)
+    for (let ch = 0; ch < 3; ch++) {
+      const i = (y * w + x) * 3 + ch;
+      const d = Math.abs(refData[i]! - out[i]!);
+      if (d > maxDiff) {
+        maxDiff = d;
+        wx = x;
+        wy = y;
+        wch = ch;
+      }
+    }
 console.log(`maxAbsDiff=${maxDiff} worst=(${wx},${wy}) ch${wch}`);
 
 // Print region around worst pixel showing ref vs raw vs final
 console.log(`\nRegion around (${wx},${wy}) — showing ch${wch}: ref | raw | final (diff)`);
-for (let y = Math.max(0,wy-2); y <= Math.min(h-1,wy+2); y++) {
+for (let y = Math.max(0, wy - 2); y <= Math.min(h - 1, wy + 2); y++) {
   let line = `y=${y}: `;
-  for (let x = Math.max(0,wx-2); x <= Math.min(w-1,wx+2); x++) {
-    const i = (y*w+x)*3+wch;
+  for (let x = Math.max(0, wx - 2); x <= Math.min(w - 1, wx + 2); x++) {
+    const i = (y * w + x) * 3 + wch;
     const d = Math.abs(refData[i]! - out[i]!);
-    const marker = (x===wx && y===wy) ? '*' : ' ';
+    const marker = x === wx && y === wy ? "*" : " ";
     line += `${marker}(${x},${y}):${refData[i]!.toFixed(3)}|${rawOut[i]!.toFixed(3)}|${out[i]!.toFixed(3)}[d=${d.toFixed(3)}] `;
   }
   console.log(line);
 }
 
 // All pixels with diff > 0.01
-console.log('\nAll pixels with diff > 0.01:');
-for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) for (let ch = 0; ch < 3; ch++) {
-  const i = (y*w+x)*3+ch;
-  const d = Math.abs(refData[i]! - out[i]!);
-  if (d > 0.01) console.log(`  (${x},${y}) ch${ch}: ref=${refData[i]!.toFixed(4)} raw=${rawOut[i]!.toFixed(4)} final=${out[i]!.toFixed(4)} diff=${d.toFixed(4)}`);
-}
+console.log("\nAll pixels with diff > 0.01:");
+for (let y = 0; y < h; y++)
+  for (let x = 0; x < w; x++)
+    for (let ch = 0; ch < 3; ch++) {
+      const i = (y * w + x) * 3 + ch;
+      const d = Math.abs(refData[i]! - out[i]!);
+      if (d > 0.01)
+        console.log(
+          `  (${x},${y}) ch${ch}: ref=${refData[i]!.toFixed(4)} raw=${rawOut[i]!.toFixed(4)} final=${out[i]!.toFixed(4)} diff=${d.toFixed(4)}`,
+        );
+    }

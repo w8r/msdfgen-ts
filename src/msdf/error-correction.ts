@@ -71,14 +71,16 @@ export function distanceSignCorrection(
       const sx = (x + 0.5) / scale - tx;
       const fill = scanline.filled(sx, FILL_NONZERO);
       const base = (y * width + x) * 3;
-      const r = msdf[base]!, g = msdf[base + 1]!, b = msdf[base + 2]!;
+      const r = msdf[base]!,
+        g = msdf[base + 1]!,
+        b = msdf[base + 2]!;
       const med = _median(r, g, b);
       const mapIdx = y * width + x;
       if (med === 0.5) {
         matchMap[mapIdx] = 0; // ambiguous
-      } else if ((med > 0.5) !== fill) {
+      } else if (med > 0.5 !== fill) {
         // Wrong side — invert all channels.
-        msdf[base]     = 1 - r;
+        msdf[base] = 1 - r;
         msdf[base + 1] = 1 - g;
         msdf[base + 2] = 1 - b;
         matchMap[mapIdx] = -1;
@@ -94,13 +96,13 @@ export function distanceSignCorrection(
       const mapIdx = y * width + x;
       if (matchMap[mapIdx] !== 0) continue;
       let vote = 0;
-      if (x > 0)           vote += matchMap[mapIdx - 1]!;
-      if (x < width - 1)   vote += matchMap[mapIdx + 1]!;
-      if (y > 0)           vote += matchMap[mapIdx - width]!;
-      if (y < height - 1)  vote += matchMap[mapIdx + width]!;
+      if (x > 0) vote += matchMap[mapIdx - 1]!;
+      if (x < width - 1) vote += matchMap[mapIdx + 1]!;
+      if (y > 0) vote += matchMap[mapIdx - width]!;
+      if (y < height - 1) vote += matchMap[mapIdx + width]!;
       if (vote < 0) {
         const base = (y * width + x) * 3;
-        msdf[base]     = 1 - msdf[base]!;
+        msdf[base] = 1 - msdf[base]!;
         msdf[base + 1] = 1 - msdf[base + 1]!;
         msdf[base + 2] = 1 - msdf[base + 2]!;
       }
@@ -213,7 +215,8 @@ function _protectCorners(
 function _edgeBetweenTexels(msdf: Float32Array, aBase: number, bBase: number): number {
   let mask = 0;
   for (let ch = 0; ch < 3; ch++) {
-    const a = msdf[aBase + ch]!, b = msdf[bBase + ch]!;
+    const a = msdf[aBase + ch]!,
+      b = msdf[bBase + ch]!;
     // t where mix(a,b,t) == 0.5
     const ab = a - b;
     if (ab === 0) continue;
@@ -246,9 +249,9 @@ function _protectExtremeChannels(
   mask: number,
 ): void {
   if (
-    ((mask & RED) && msdf[base]! !== m) ||
-    ((mask & GREEN) && msdf[base + 1]! !== m) ||
-    ((mask & BLUE) && msdf[base + 2]! !== m)
+    (mask & RED && msdf[base]! !== m) ||
+    (mask & GREEN && msdf[base + 1]! !== m) ||
+    (mask & BLUE && msdf[base + 2]! !== m)
   ) {
     stencil[idx]! |= PROTECTED;
   }
@@ -270,7 +273,7 @@ function _protectEdges(
   // invRange = scale/pxrange; unprojectVector({invRange,0}) = {invRange/scale,0} = {1/pxrange,0}
   const hRadius = PROTECTION_RADIUS_TOLERANCE / pxrange;
   const vRadius = PROTECTION_RADIUS_TOLERANCE / pxrange;
-  const dRadius = PROTECTION_RADIUS_TOLERANCE * Math.SQRT2 / pxrange;
+  const dRadius = (PROTECTION_RADIUS_TOLERANCE * Math.SQRT2) / pxrange;
 
   // Horizontal pairs.
   for (let y = 0; y < height; y++) {
@@ -345,10 +348,10 @@ function _protectEdges(
  * Result: median(NaN, b, c) = NaN; median(a, NaN, c) = a; median(a, b, NaN) = max(a,b)
  */
 function _medianCpp(a: number, b: number, c: number): number {
-  const minAB = (b < a) ? b : a;           // msdfgen min(a,b)
-  const maxAB = (a < b) ? b : a;           // msdfgen max(a,b)
-  const minMaxABc = (c < maxAB) ? c : maxAB;  // msdfgen min(maxAB, c)
-  return (minAB < minMaxABc) ? minMaxABc : minAB;  // msdfgen max(minAB, minMaxABc)
+  const minAB = b < a ? b : a; // msdfgen min(a,b)
+  const maxAB = a < b ? b : a; // msdfgen max(a,b)
+  const minMaxABc = c < maxAB ? c : maxAB; // msdfgen min(maxAB, c)
+  return minAB < minMaxABc ? minMaxABc : minAB; // msdfgen max(minAB, minMaxABc)
 }
 
 /**
@@ -393,8 +396,12 @@ const FLAG_CANDIDATE = 0x01;
 const FLAG_ARTIFACT = 0x02;
 
 function _rangeTest(
-  at: number, bt: number, xt: number,
-  am: number, bm: number, xm: number,
+  at: number,
+  bt: number,
+  xt: number,
+  am: number,
+  bm: number,
+  xm: number,
   span: number,
   protectedFlag: boolean,
 ): number {
@@ -428,7 +435,8 @@ function _median3f(a: number, b: number, c: number): number {
  */
 function _hasLinearArtifact(
   msdf: Float32Array,
-  aBase: number, bBase: number,
+  aBase: number,
+  bBase: number,
   am: number,
   span: number,
   protectedFlag: boolean,
@@ -438,8 +446,8 @@ function _hasLinearArtifact(
 
   // Check 3 channel pairs: (r,g), (g,b), (b,r).
   for (let i = 0; i < 3; i++) {
-    const dA = msdf[aBase + i]! - msdf[aBase + (i + 1) % 3]!;
-    const dB = msdf[bBase + i]! - msdf[bBase + (i + 1) % 3]!;
+    const dA = msdf[aBase + i]! - msdf[aBase + ((i + 1) % 3)]!;
+    const dB = msdf[bBase + i]! - msdf[bBase + ((i + 1) % 3)]!;
     const denom = dA - dB;
     if (denom === 0) continue;
     const t = dA / denom;
@@ -458,7 +466,10 @@ function _hasLinearArtifact(
  */
 function _hasDiagonalArtifact(
   msdf: Float32Array,
-  aBase: number, bBase: number, cBase: number, dBase: number,
+  aBase: number,
+  bBase: number,
+  cBase: number,
+  dBase: number,
   am: number,
   span: number,
   protectedFlag: boolean,
@@ -468,24 +479,33 @@ function _hasDiagonalArtifact(
 
   // Compute bilinear coefficients in float32 (matching C++ float arithmetic).
   for (let ch = 0; ch < 3; ch++) {
-    _abcArr[ch] = Math.fround(Math.fround(msdf[aBase + ch]! - msdf[bBase + ch]!) - msdf[cBase + ch]!);
-    _lArr[ch]   = Math.fround(-msdf[aBase + ch]! - _abcArr[ch]!);
-    _qArr[ch]   = Math.fround(msdf[dBase + ch]! + _abcArr[ch]!);
+    _abcArr[ch] = Math.fround(
+      Math.fround(msdf[aBase + ch]! - msdf[bBase + ch]!) - msdf[cBase + ch]!,
+    );
+    _lArr[ch] = Math.fround(-msdf[aBase + ch]! - _abcArr[ch]!);
+    _qArr[ch] = Math.fround(msdf[dBase + ch]! + _abcArr[ch]!);
   }
 
   // Local extremes tEx[i] = -0.5 * l[i] / q[i]
-  const tEx0 = _qArr[0]! !== 0 ? -0.5 * _lArr[0]! / _qArr[0]! : -1;
-  const tEx1 = _qArr[1]! !== 0 ? -0.5 * _lArr[1]! / _qArr[1]! : -1;
-  const tEx2 = _qArr[2]! !== 0 ? -0.5 * _lArr[2]! / _qArr[2]! : -1;
+  const tEx0 = _qArr[0]! !== 0 ? (-0.5 * _lArr[0]!) / _qArr[0]! : -1;
+  const tEx1 = _qArr[1]! !== 0 ? (-0.5 * _lArr[1]!) / _qArr[1]! : -1;
+  const tEx2 = _qArr[2]! !== 0 ? (-0.5 * _lArr[2]!) / _qArr[2]! : -1;
 
   // Check 3 channel-pair intersections.
   // Pair (ch0, ch1): solve (d-bc+a)*t^2 + (bc-a-a)*t + a == 0 where a=dA, bc=dBC, d=dD
-  const channelPairs = [[0, 1, tEx0, tEx1], [1, 2, tEx1, tEx2], [2, 0, tEx2, tEx0]] as const;
+  const channelPairs = [
+    [0, 1, tEx0, tEx1],
+    [1, 2, tEx1, tEx2],
+    [2, 0, tEx2, tEx0],
+  ] as const;
   for (const [ch0, ch1, tex0, tex1] of channelPairs) {
     // Compute dA, dBC, dD in float32 (matching C++ float arithmetic).
-    const dA  = Math.fround(msdf[aBase + ch0]! - msdf[aBase + ch1]!);
-    const dBC = Math.fround(Math.fround(msdf[bBase + ch0]! - msdf[bBase + ch1]!) + Math.fround(msdf[cBase + ch0]! - msdf[cBase + ch1]!));
-    const dD  = Math.fround(msdf[dBase + ch0]! - msdf[dBase + ch1]!);
+    const dA = Math.fround(msdf[aBase + ch0]! - msdf[aBase + ch1]!);
+    const dBC = Math.fround(
+      Math.fround(msdf[bBase + ch0]! - msdf[bBase + ch1]!) +
+        Math.fround(msdf[cBase + ch0]! - msdf[cBase + ch1]!),
+    );
+    const dD = Math.fround(msdf[dBase + ch0]! - msdf[dBase + ch1]!);
     // Compute quadratic coefficients in float32, then as float64 (matching C++ solveQuadratic call).
     const qCoeff = Math.fround(Math.fround(dD - dBC) + dA);
     const lCoeff = Math.fround(Math.fround(dBC - dA) - dA);
@@ -507,9 +527,11 @@ function _hasDiagonalArtifact(
       }
     }
 
-  for (const t of solutions) {
+    for (const t of solutions) {
       if (!(t > ARTIFACT_T_EPSILON && t < 1 - ARTIFACT_T_EPSILON)) continue;
-      _aArr[0] = msdf[aBase]!; _aArr[1] = msdf[aBase + 1]!; _aArr[2] = msdf[aBase + 2]!;
+      _aArr[0] = msdf[aBase]!;
+      _aArr[1] = msdf[aBase + 1]!;
+      _aArr[2] = msdf[aBase + 2]!;
       const xm = _bilinearMedian(_aArr, _lArr, _qArr, t);
       let flags = _rangeTest(0, 1, t, am, dm, xm, span, protectedFlag);
 
@@ -518,9 +540,13 @@ function _hasDiagonalArtifact(
         if (tEx > 0 && tEx < 1) {
           const tEnd0 = tEx > t ? 0 : tEx;
           const tEnd1 = tEx > t ? tEx : 1;
-          _aArr[0] = msdf[aBase]!; _aArr[1] = msdf[aBase + 1]!; _aArr[2] = msdf[aBase + 2]!;
+          _aArr[0] = msdf[aBase]!;
+          _aArr[1] = msdf[aBase + 1]!;
+          _aArr[2] = msdf[aBase + 2]!;
           const em0 = tEx > t ? am : _bilinearMedian(_aArr, _lArr, _qArr, tEx);
-          _aArr[0] = msdf[aBase]!; _aArr[1] = msdf[aBase + 1]!; _aArr[2] = msdf[aBase + 2]!;
+          _aArr[0] = msdf[aBase]!;
+          _aArr[1] = msdf[aBase + 1]!;
+          _aArr[2] = msdf[aBase + 2]!;
           const em1 = tEx > t ? _bilinearMedian(_aArr, _lArr, _qArr, tEx) : dm;
           flags |= _rangeTest(tEnd0, tEnd1, t, em0, em1, xm, span, protectedFlag);
         }
@@ -547,7 +573,7 @@ function _findErrors(
   // Spans: hSpan = vSpan = minDeviationRatio / pxrange, dSpan = minDeviationRatio * sqrt(2) / pxrange
   const hSpan = minDeviationRatio / pxrange;
   const vSpan = minDeviationRatio / pxrange;
-  const dSpan = minDeviationRatio * Math.SQRT2 / pxrange;
+  const dSpan = (minDeviationRatio * Math.SQRT2) / pxrange;
 
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
@@ -568,24 +594,31 @@ function _findErrors(
 
       let artifact = false;
       if (hasL && _hasLinearArtifact(msdf, cBase, lBase, cm, hSpan, prot)) artifact = true;
-      if (!artifact && hasB && _hasLinearArtifact(msdf, cBase, bBase, cm, vSpan, prot)) artifact = true;
-      if (!artifact && hasR && _hasLinearArtifact(msdf, cBase, rBase, cm, hSpan, prot)) artifact = true;
-      if (!artifact && hasT && _hasLinearArtifact(msdf, cBase, tBase, cm, vSpan, prot)) artifact = true;
+      if (!artifact && hasB && _hasLinearArtifact(msdf, cBase, bBase, cm, vSpan, prot))
+        artifact = true;
+      if (!artifact && hasR && _hasLinearArtifact(msdf, cBase, rBase, cm, hSpan, prot))
+        artifact = true;
+      if (!artifact && hasT && _hasLinearArtifact(msdf, cBase, tBase, cm, vSpan, prot))
+        artifact = true;
       if (!artifact && hasL && hasB) {
         const lbBase = (idx - width - 1) * 3;
-        if (_hasDiagonalArtifact(msdf, cBase, lBase, bBase, lbBase, cm, dSpan, prot)) artifact = true;
+        if (_hasDiagonalArtifact(msdf, cBase, lBase, bBase, lbBase, cm, dSpan, prot))
+          artifact = true;
       }
       if (!artifact && hasR && hasB) {
         const rbBase = (idx - width + 1) * 3;
-        if (_hasDiagonalArtifact(msdf, cBase, rBase, bBase, rbBase, cm, dSpan, prot)) artifact = true;
+        if (_hasDiagonalArtifact(msdf, cBase, rBase, bBase, rbBase, cm, dSpan, prot))
+          artifact = true;
       }
       if (!artifact && hasL && hasT) {
         const ltBase = (idx + width - 1) * 3;
-        if (_hasDiagonalArtifact(msdf, cBase, lBase, tBase, ltBase, cm, dSpan, prot)) artifact = true;
+        if (_hasDiagonalArtifact(msdf, cBase, lBase, tBase, ltBase, cm, dSpan, prot))
+          artifact = true;
       }
       if (!artifact && hasR && hasT) {
         const rtBase = (idx + width + 1) * 3;
-        if (_hasDiagonalArtifact(msdf, cBase, rBase, tBase, rtBase, cm, dSpan, prot)) artifact = true;
+        if (_hasDiagonalArtifact(msdf, cBase, rBase, tBase, rtBase, cm, dSpan, prot))
+          artifact = true;
       }
 
       if (artifact) stencil[idx]! |= ERROR;
@@ -605,7 +638,9 @@ function _apply(stencil: Uint8Array, msdf: Float32Array, width: number, height: 
     if (stencil[i]! & ERROR) {
       const base = i * 3;
       const m = _median(msdf[base]!, msdf[base + 1]!, msdf[base + 2]!);
-      msdf[base] = m; msdf[base + 1] = m; msdf[base + 2] = m;
+      msdf[base] = m;
+      msdf[base + 1] = m;
+      msdf[base + 2] = m;
     }
   }
 }

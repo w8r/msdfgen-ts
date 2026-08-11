@@ -41,14 +41,20 @@ const _pt: number[] = [0, 0];
  * port of core/edge-coloring.cpp: symmetricalTrichotomy
  */
 function _symmetricalTrichotomy(position: number, n: number): number {
-  return Math.trunc(3 + 2.875 * position / (n - 1) - 1.4375 + 0.5) - 3;
+  return Math.trunc(3 + (2.875 * position) / (n - 1) - 1.4375 + 0.5) - 3;
 }
 
 /**
  * True if the junction between two consecutive edge directions is a corner.
  * port of core/edge-coloring.cpp: isCorner
  */
-function _isCorner(adx: number, ady: number, bdx: number, bdy: number, crossThreshold: number): boolean {
+function _isCorner(
+  adx: number,
+  ady: number,
+  bdx: number,
+  bdy: number,
+  crossThreshold: number,
+): boolean {
   // dot(aDir, bDir) <= 0  OR  |cross(aDir, bDir)| > crossThreshold
   return adx * bdx + ady * bdy <= 0 || Math.abs(adx * bdy - ady * bdx) > crossThreshold;
 }
@@ -98,13 +104,17 @@ function _estimateEdgeLength(seg: EdgeSegment): number {
   const N = 4; // MSDFGEN_EDGE_LENGTH_PRECISION
   let len = 0;
   seg.point(0, _pt);
-  let px = _pt[0]!, py = _pt[1]!;
+  let px = _pt[0]!,
+    py = _pt[1]!;
   for (let i = 1; i <= N; i++) {
     seg.point(i / N, _pt);
-    const cx = _pt[0]!, cy = _pt[1]!;
-    const dx = cx - px, dy = cy - py;
+    const cx = _pt[0]!,
+      cy = _pt[1]!;
+    const dx = cx - px,
+      dy = cy - py;
     len += Math.sqrt(dx * dx + dy * dy);
-    px = cx; py = cy;
+    px = cx;
+    py = cy;
   }
   return len;
 }
@@ -161,7 +171,7 @@ export function edgeColoringSimple(shape: Shape, angleThreshold: number, seed: b
       _switchColor(colorRef, seedRef);
       for (const edge of contour) edge.color = colorRef.v;
 
-    // ── "Teardrop" case (single corner) ───────────────────────────────────
+      // ── "Teardrop" case (single corner) ───────────────────────────────────
     } else if (corners.length === 1) {
       const colors: [number, number, number] = [0, WHITE, 0];
       _switchColor(colorRef, seedRef);
@@ -203,7 +213,7 @@ export function edgeColoringSimple(shape: Shape, angleThreshold: number, seed: b
         for (const p of parts) if (p !== null) contour.push(p);
       }
 
-    // ── Multiple corners ───────────────────────────────────────────────────
+      // ── Multiple corners ───────────────────────────────────────────────────
     } else {
       const cornerCount = corners.length;
       let spline = 0;

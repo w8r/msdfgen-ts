@@ -28,20 +28,47 @@ const postSign = new Float32Array(out);
 msdfErrorCorrection(out, shape, w, h, scale, tx, ty, pxrange);
 
 // Full C++ pipeline
-execFileSync("./tools/msdfgen-ref/build/msdfgen", [
-  "msdf", "-shapedesc", `${dir}/shape.txt`,
-  "-o", "/tmp/dbg_full.fl32", "-format", "fl32",
-  "-dimensions", String(w), String(h),
-  "-pxrange", String(pxrange), "-scale", String(scale),
-  "-translate", tx.toFixed(6), ty.toFixed(6), "-scanline"
-], { stdio: ["pipe", "pipe", "pipe"] });
+execFileSync(
+  "./tools/msdfgen-ref/build/msdfgen",
+  [
+    "msdf",
+    "-shapedesc",
+    `${dir}/shape.txt`,
+    "-o",
+    "/tmp/dbg_full.fl32",
+    "-format",
+    "fl32",
+    "-dimensions",
+    String(w),
+    String(h),
+    "-pxrange",
+    String(pxrange),
+    "-scale",
+    String(scale),
+    "-translate",
+    tx.toFixed(6),
+    ty.toFixed(6),
+    "-scanline",
+  ],
+  { stdio: ["pipe", "pipe", "pipe"] },
+);
 const refBuf = readFileSync("/tmp/dbg_full.fl32");
 const ref = new Float32Array(refBuf.buffer, refBuf.byteOffset + 16);
 
 const i = (ty2 * w + tx2) * 3;
 console.log(`At (${tx2},${ty2}):`);
-console.log(`  raw:      ch0=${rawOut[i]!.toFixed(6)} ch1=${rawOut[i+1]!.toFixed(6)} ch2=${rawOut[i+2]!.toFixed(6)}`);
-console.log(`  postSign: ch0=${postSign[i]!.toFixed(6)} ch1=${postSign[i+1]!.toFixed(6)} ch2=${postSign[i+2]!.toFixed(6)}`);
-console.log(`  full TS:  ch0=${out[i]!.toFixed(6)} ch1=${out[i+1]!.toFixed(6)} ch2=${out[i+2]!.toFixed(6)}`);
-console.log(`  full C++: ch0=${ref[i]!.toFixed(6)} ch1=${ref[i+1]!.toFixed(6)} ch2=${ref[i+2]!.toFixed(6)}`);
-console.log(`  diff:     ch0=${Math.abs(out[i]!-ref[i]!).toFixed(6)} ch1=${Math.abs(out[i+1]!-ref[i+1]!).toFixed(6)} ch2=${Math.abs(out[i+2]!-ref[i+2]!).toFixed(6)}`);
+console.log(
+  `  raw:      ch0=${rawOut[i]!.toFixed(6)} ch1=${rawOut[i + 1]!.toFixed(6)} ch2=${rawOut[i + 2]!.toFixed(6)}`,
+);
+console.log(
+  `  postSign: ch0=${postSign[i]!.toFixed(6)} ch1=${postSign[i + 1]!.toFixed(6)} ch2=${postSign[i + 2]!.toFixed(6)}`,
+);
+console.log(
+  `  full TS:  ch0=${out[i]!.toFixed(6)} ch1=${out[i + 1]!.toFixed(6)} ch2=${out[i + 2]!.toFixed(6)}`,
+);
+console.log(
+  `  full C++: ch0=${ref[i]!.toFixed(6)} ch1=${ref[i + 1]!.toFixed(6)} ch2=${ref[i + 2]!.toFixed(6)}`,
+);
+console.log(
+  `  diff:     ch0=${Math.abs(out[i]! - ref[i]!).toFixed(6)} ch1=${Math.abs(out[i + 1]! - ref[i + 1]!).toFixed(6)} ch2=${Math.abs(out[i + 2]! - ref[i + 2]!).toFixed(6)}`,
+);

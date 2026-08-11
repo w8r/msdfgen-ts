@@ -26,8 +26,11 @@ for (let ci = 0; ci < contours.length; ci++) {
   console.log(`Contour ${ci} (${c.length} edges):`);
   for (let ei = 0; ei < c.length; ei++) {
     const e = c[ei]!;
-    const colorStr = (e.color & RED ? "R" : "-") + (e.color & GREEN ? "G" : "-") + (e.color & BLUE ? "B" : "-");
-    console.log(`  edge ${ei}: color=${colorStr}(${e.color}) type=${e.type} p0=(${e.p0x.toFixed(3)},${e.p0y.toFixed(3)})`);
+    const colorStr =
+      (e.color & RED ? "R" : "-") + (e.color & GREEN ? "G" : "-") + (e.color & BLUE ? "B" : "-");
+    console.log(
+      `  edge ${ei}: color=${colorStr}(${e.color}) type=${e.type} p0=(${e.p0x.toFixed(3)},${e.p0y.toFixed(3)})`,
+    );
   }
 }
 
@@ -44,7 +47,12 @@ const _sd = { distance: 0, dot: 0, param: 0 };
 const _dir = [0, 0];
 const _pt = [0, 0];
 
-let cTD = -DBL_MAX, cDot = 0, cNeg = -DBL_MAX, cPos = DBL_MAX, cNEI = -1, cNPar = 0;
+let cTD = -DBL_MAX,
+  cDot = 0,
+  cNeg = -DBL_MAX,
+  cPos = DBL_MAX,
+  cNEI = -1,
+  cNPar = 0;
 
 const c0 = contours[0]!;
 const n = c0.length;
@@ -54,15 +62,22 @@ for (let ei = 0; ei < n; ei++) {
   if (!doCh) continue;
 
   edge.signedDistance(px, py, _sd);
-  const dist = _sd.distance, dot = _sd.dot, param = _sd.param;
+  const dist = _sd.distance,
+    dot = _sd.dot,
+    param = _sd.param;
   const absDist = Math.abs(dist);
   const cAbs = Math.abs(cTD);
   const wins = absDist < cAbs || (absDist === cAbs && dot < cDot);
 
-  console.log(`  ei=${ei} dist=${dist.toFixed(6)} dot=${dot.toFixed(4)} param=${param.toFixed(4)} ${wins ? "← BEST" : ""}`);
+  console.log(
+    `  ei=${ei} dist=${dist.toFixed(6)} dot=${dot.toFixed(4)} param=${param.toFixed(4)} ${wins ? "← BEST" : ""}`,
+  );
 
   if (wins) {
-    cTD = dist; cDot = dot; cNEI = ei; cNPar = param;
+    cTD = dist;
+    cDot = dot;
+    cNEI = ei;
+    cNPar = param;
   }
 
   // Perpendicular distances
@@ -70,9 +85,11 @@ for (let ei = 0; ei < n; ei++) {
   const nextEdge = c0[(ei + 1) % n]!;
 
   edge.point(0, _pt);
-  const apx = px - _pt[0]!, apy = py - _pt[1]!;
+  const apx = px - _pt[0]!,
+    apy = py - _pt[1]!;
   edge.point(1, _pt);
-  const bpx = px - _pt[0]!, bpy = py - _pt[1]!;
+  const bpx = px - _pt[0]!,
+    bpy = py - _pt[1]!;
 
   edge.direction(0, _dir);
   let dlen = Math.sqrt(_dir[0]! ** 2 + _dir[1]! ** 2);
@@ -94,11 +111,13 @@ for (let ei = 0; ei < n; ei++) {
   const nDx = dlen > 0 ? _dir[0]! / dlen : 0;
   const nDy = dlen > 0 ? _dir[1]! / dlen : 0;
 
-  const addSx = pDx + aDx, addSy = pDy + aDy;
+  const addSx = pDx + aDx,
+    addSy = pDy + aDy;
   const addSl = Math.sqrt(addSx ** 2 + addSy ** 2);
   const add = addSl > 0 ? apx * (addSx / addSl) + apy * (addSy / addSl) : 0;
 
-  const bddSx = bDx + nDx, bddSy = bDy + nDy;
+  const bddSx = bDx + nDx,
+    bddSy = bDy + nDy;
   const bddSl = Math.sqrt(bddSx ** 2 + bddSy ** 2);
   const bdd = bddSl > 0 ? -(bpx * (bddSx / bddSl) + bpy * (bddSy / bddSl)) : 0;
 
@@ -126,7 +145,9 @@ for (let ei = 0; ei < n; ei++) {
   }
 }
 
-console.log(`\nFinal: td=${cTD.toFixed(6)} neg=${cNeg} pos=${cPos} nearEI=${cNEI} nearParam=${cNPar.toFixed(4)}`);
+console.log(
+  `\nFinal: td=${cTD.toFixed(6)} neg=${cNeg} pos=${cPos} nearEI=${cNEI} nearParam=${cNPar.toFixed(4)}`,
+);
 const minDist = cTD < 0 ? cNeg : cPos;
 console.log(`  minDist (before distToPerp) = ${minDist}`);
 const invRange = scale / pxrange;

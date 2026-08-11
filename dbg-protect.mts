@@ -32,8 +32,11 @@ for (const contour of (shape as any).contours) {
       const pyf = scale * (_ept[1] + ty);
       const l = Math.floor(pxf - 0.5) | 0;
       const b = Math.floor(pyf - 0.5) | 0;
-      const r = l + 1, t = b + 1;
-      console.log(`corner at shape(${_ept[0].toFixed(3)},${_ept[1].toFixed(3)}) pixel(${pxf.toFixed(2)},${pyf.toFixed(2)}) → protecting l=${l},b=${b},r=${r},t=${t}`);
+      const r = l + 1,
+        t = b + 1;
+      console.log(
+        `corner at shape(${_ept[0].toFixed(3)},${_ept[1].toFixed(3)}) pixel(${pxf.toFixed(2)},${pyf.toFixed(2)}) → protecting l=${l},b=${b},r=${r},t=${t}`,
+      );
       if (l < w && b < h && r >= 0 && t >= 0) {
         if (l >= 0 && b >= 0) stencil[b * w + l] |= PROTECTED;
         if (r < w && b >= 0) stencil[b * w + r] |= PROTECTED;
@@ -46,5 +49,5 @@ for (const contour of (shape as any).contours) {
 }
 console.log(`Total corners: ${cornersFound}`);
 // Check if (13,10) and (14,10) are protected:
-console.log(`(13,10) protected: ${(stencil[10*w+13] & PROTECTED) !== 0}`);
-console.log(`(14,10) protected: ${(stencil[10*w+14] & PROTECTED) !== 0}`);
+console.log(`(13,10) protected: ${(stencil[10 * w + 13] & PROTECTED) !== 0}`);
+console.log(`(14,10) protected: ${(stencil[10 * w + 14] & PROTECTED) !== 0}`);

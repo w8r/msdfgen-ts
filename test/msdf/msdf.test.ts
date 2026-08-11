@@ -133,7 +133,9 @@ function referenceMSDF(
     { stdio: ["ignore", "ignore", "pipe"] },
   );
   const raw = readFileSync(outPath);
-  const fl32 = fl32FromBuffer(raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer);
+  const fl32 = fl32FromBuffer(
+    raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer,
+  );
   if (fl32.channels !== 3) {
     throw new Error(`Expected 3-channel MSDF output, got ${fl32.channels} channels (${outPath})`);
   }
@@ -207,7 +209,7 @@ describe("generateMSDF — golden comparison", () => {
         const t = result.worstTexel;
         expect.fail(
           `[${fix.fontId}/${fix.glyphKey}] maxAbsDiff=${result.maxAbsDiff.toFixed(6)} > 1e-4` +
-          (t ? ` worst at (${t.x},${t.y}) ch${t.channel}` : ""),
+            (t ? ` worst at (${t.x},${t.y}) ch${t.channel}` : ""),
         );
       }
     });

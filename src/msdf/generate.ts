@@ -37,11 +37,11 @@ const _pt: number[] = [0, 0];
 // Tracks PerpendicularDistanceSelectorBase state per contour per channel.
 
 let _cNC = 0; // last allocated size (number of contours)
-let _cTD: Float64Array = new Float64Array(0);   // true signed distance
-let _cDot: Float64Array = new Float64Array(0);  // dot tiebreaker
-let _cNeg: Float64Array = new Float64Array(0);  // minNegativePerpendicularDistance
-let _cPos: Float64Array = new Float64Array(0);  // minPositivePerpendicularDistance
-let _cNEI: Int32Array = new Int32Array(0);      // nearEdge index in contour (-1 = none)
+let _cTD: Float64Array = new Float64Array(0); // true signed distance
+let _cDot: Float64Array = new Float64Array(0); // dot tiebreaker
+let _cNeg: Float64Array = new Float64Array(0); // minNegativePerpendicularDistance
+let _cPos: Float64Array = new Float64Array(0); // minPositivePerpendicularDistance
+let _cNEI: Int32Array = new Int32Array(0); // nearEdge index in contour (-1 = none)
 let _cNPar: Float64Array = new Float64Array(0); // nearEdge param
 
 // Pre-computed per-contour perpendicular distances (computeDistance results for combiner).
@@ -66,24 +66,45 @@ function _contourWinding(c: Contour): number {
   if (n === 0) return 0;
   let total = 0;
   if (n === 1) {
-    c[0]!.point(0, _wPt); const ax = _wPt[0]!, ay = _wPt[1]!;
-    c[0]!.point(1 / 3, _wPt); const bx = _wPt[0]!, by = _wPt[1]!;
-    c[0]!.point(2 / 3, _wPt); const cx = _wPt[0]!, cy = _wPt[1]!;
-    total += ax * by - ay * bx; total += bx * cy - by * cx; total += cx * ay - cy * ax;
+    c[0]!.point(0, _wPt);
+    const ax = _wPt[0]!,
+      ay = _wPt[1]!;
+    c[0]!.point(1 / 3, _wPt);
+    const bx = _wPt[0]!,
+      by = _wPt[1]!;
+    c[0]!.point(2 / 3, _wPt);
+    const cx = _wPt[0]!,
+      cy = _wPt[1]!;
+    total += ax * by - ay * bx;
+    total += bx * cy - by * cx;
+    total += cx * ay - cy * ax;
   } else if (n === 2) {
-    c[0]!.point(0, _wPt);   const ax = _wPt[0]!, ay = _wPt[1]!;
-    c[0]!.point(0.5, _wPt); const bx = _wPt[0]!, by = _wPt[1]!;
-    c[1]!.point(0, _wPt);   const cx = _wPt[0]!, cy = _wPt[1]!;
-    c[1]!.point(0.5, _wPt); const dx = _wPt[0]!, dy = _wPt[1]!;
-    total += ax * by - ay * bx; total += bx * cy - by * cx;
-    total += cx * dy - cy * dx; total += dx * ay - dy * ax;
+    c[0]!.point(0, _wPt);
+    const ax = _wPt[0]!,
+      ay = _wPt[1]!;
+    c[0]!.point(0.5, _wPt);
+    const bx = _wPt[0]!,
+      by = _wPt[1]!;
+    c[1]!.point(0, _wPt);
+    const cx = _wPt[0]!,
+      cy = _wPt[1]!;
+    c[1]!.point(0.5, _wPt);
+    const dx = _wPt[0]!,
+      dy = _wPt[1]!;
+    total += ax * by - ay * bx;
+    total += bx * cy - by * cx;
+    total += cx * dy - cy * dx;
+    total += dx * ay - dy * ax;
   } else {
     const last = c[n - 1]!;
-    let prevX = last.p0x, prevY = last.p0y;
+    let prevX = last.p0x,
+      prevY = last.p0y;
     for (let i = 0; i < n; i++) {
-      const curX = c[i]!.p0x, curY = c[i]!.p0y;
+      const curX = c[i]!.p0x,
+        curY = c[i]!.p0y;
       total += prevX * curY - prevY * curX;
-      prevX = curX; prevY = curY;
+      prevX = curX;
+      prevY = curY;
     }
   }
   // C++ sign convention: CCW outer → winding = -1.
@@ -118,9 +139,11 @@ function _distToPerp(
     seg.direction(0, _dir);
     const dlen = Math.sqrt(_dir[0]! * _dir[0]! + _dir[1]! * _dir[1]!);
     if (dlen > 0) {
-      const ndx = _dir[0]! / dlen, ndy = _dir[1]! / dlen;
+      const ndx = _dir[0]! / dlen,
+        ndy = _dir[1]! / dlen;
       seg.point(0, _pt);
-      const aqx = px - _pt[0]!, aqy = py - _pt[1]!;
+      const aqx = px - _pt[0]!,
+        aqy = py - _pt[1]!;
       const ts = aqx * ndx + aqy * ndy;
       if (ts < 0) {
         const perp = aqx * ndy - aqy * ndx; // crossProduct(aq, dir)
@@ -132,9 +155,11 @@ function _distToPerp(
     seg.direction(1, _dir);
     const dlen = Math.sqrt(_dir[0]! * _dir[0]! + _dir[1]! * _dir[1]!);
     if (dlen > 0) {
-      const ndx = _dir[0]! / dlen, ndy = _dir[1]! / dlen;
+      const ndx = _dir[0]! / dlen,
+        ndy = _dir[1]! / dlen;
       seg.point(1, _pt);
-      const bqx = px - _pt[0]!, bqy = py - _pt[1]!;
+      const bqx = px - _pt[0]!,
+        bqy = py - _pt[1]!;
       const ts = bqx * ndx + bqy * ndy;
       if (ts > 0) {
         const perp = bqx * ndy - bqy * ndx;
@@ -150,16 +175,24 @@ function _distToPerp(
  * port of core/edge-selectors.cpp: PerpendicularDistanceSelectorBase::computeDistance
  */
 function _computeFromState(
-  td: number, neg: number, pos: number,
-  nearCI: number, nearEI: number, nearParam: number,
-  px: number, py: number,
+  td: number,
+  neg: number,
+  pos: number,
+  nearCI: number,
+  nearEI: number,
+  nearParam: number,
+  px: number,
+  py: number,
   contours: readonly Contour[],
   dbg?: boolean,
 ): number {
   let minDist = td < 0 ? neg : pos;
   if (nearEI >= 0) {
     const d = _distToPerp(nearCI, nearEI, td, px, py, nearParam, contours);
-    if (dbg) console.error(`[computeFromState dbg] td=${td.toFixed(6)} neg=${neg.toFixed(6)} pos=${pos.toFixed(6)} minDist_before=${minDist.toFixed(6)} neiCI=${nearCI} neiEI=${nearEI} param=${nearParam.toFixed(6)} d=${d.toFixed(6)} |d|<|minDist|=${Math.abs(d) < Math.abs(minDist)}`);
+    if (dbg)
+      console.error(
+        `[computeFromState dbg] td=${td.toFixed(6)} neg=${neg.toFixed(6)} pos=${pos.toFixed(6)} minDist_before=${minDist.toFixed(6)} neiCI=${nearCI} neiEI=${nearEI} param=${nearParam.toFixed(6)} d=${d.toFixed(6)} |d|<|minDist|=${Math.abs(d) < Math.abs(minDist)}`,
+      );
     if (Math.abs(d) < Math.abs(minDist)) minDist = d;
   }
   return minDist;
@@ -210,7 +243,10 @@ export function generateMSDF(
 
   const contours = shape.contours;
   const nc = contours.length;
-  if (nc === 0) { out.fill(0); return; }
+  if (nc === 0) {
+    out.fill(0);
+    return;
+  }
 
   // invRange = scale/pxrange = 1/rangeWidth; matches DistanceMapping::operator()(Delta(1))
   const invRange = scale / pxrange;
@@ -222,16 +258,16 @@ export function generateMSDF(
   // Ensure per-contour state arrays are large enough.
   if (_cNC < nc) {
     const n3 = nc * 3;
-    _cTD   = new Float64Array(n3);
-    _cDot  = new Float64Array(n3);
-    _cNeg  = new Float64Array(n3);
-    _cPos  = new Float64Array(n3);
-    _cNEI  = new Int32Array(n3);
+    _cTD = new Float64Array(n3);
+    _cDot = new Float64Array(n3);
+    _cNeg = new Float64Array(n3);
+    _cPos = new Float64Array(n3);
+    _cNEI = new Int32Array(n3);
     _cNPar = new Float64Array(n3);
-    _cdR   = new Float64Array(nc);
-    _cdG   = new Float64Array(nc);
-    _cdB   = new Float64Array(nc);
-    _cNC   = nc;
+    _cdR = new Float64Array(nc);
+    _cdG = new Float64Array(nc);
+    _cdB = new Float64Array(nc);
+    _cNC = nc;
   }
 
   // Scratch for signedDistance output.
@@ -260,12 +296,12 @@ export function generateMSDF(
         //   minNeg = -|trueDist| = -DBL_MAX,
         //   minPos = |trueDist| = DBL_MAX,
         //   nearEdge = null.
-        _cTD[ci3]   = _cTD[ci3+1] = _cTD[ci3+2] = -DBL_MAX;
-        _cDot[ci3]  = _cDot[ci3+1] = _cDot[ci3+2] = 0;
-        _cNeg[ci3]  = _cNeg[ci3+1] = _cNeg[ci3+2] = -DBL_MAX;
-        _cPos[ci3]  = _cPos[ci3+1] = _cPos[ci3+2] = DBL_MAX;
-        _cNEI[ci3]  = _cNEI[ci3+1] = _cNEI[ci3+2] = -1;
-        _cNPar[ci3] = _cNPar[ci3+1] = _cNPar[ci3+2] = 0;
+        _cTD[ci3] = _cTD[ci3 + 1] = _cTD[ci3 + 2] = -DBL_MAX;
+        _cDot[ci3] = _cDot[ci3 + 1] = _cDot[ci3 + 2] = 0;
+        _cNeg[ci3] = _cNeg[ci3 + 1] = _cNeg[ci3 + 2] = -DBL_MAX;
+        _cPos[ci3] = _cPos[ci3 + 1] = _cPos[ci3 + 2] = DBL_MAX;
+        _cNEI[ci3] = _cNEI[ci3 + 1] = _cNEI[ci3 + 2] = -1;
+        _cNPar[ci3] = _cNPar[ci3 + 1] = _cNPar[ci3 + 2] = 0;
 
         // port of MultiDistanceSelector::addEdge() (per edge)
         for (let ei = 0; ei < n; ei++) {
@@ -280,35 +316,48 @@ export function generateMSDF(
 
           // Signed distance for this edge.
           edge.signedDistance(px, py, _sd);
-          const dist = _sd.distance, dot = _sd.dot, param = _sd.param;
+          const dist = _sd.distance,
+            dot = _sd.dot,
+            param = _sd.param;
           const absDist = Math.abs(dist);
 
           // Update per-channel true distances (addEdgeTrueDistance).
           if (doR) {
             const cAbs = Math.abs(_cTD[ci3]!);
             if (absDist < cAbs || (absDist === cAbs && dot < _cDot[ci3]!)) {
-              _cTD[ci3] = dist; _cDot[ci3] = dot; _cNEI[ci3] = ei; _cNPar[ci3] = param;
+              _cTD[ci3] = dist;
+              _cDot[ci3] = dot;
+              _cNEI[ci3] = ei;
+              _cNPar[ci3] = param;
             }
           }
           if (doG) {
-            const cAbs = Math.abs(_cTD[ci3+1]!);
-            if (absDist < cAbs || (absDist === cAbs && dot < _cDot[ci3+1]!)) {
-              _cTD[ci3+1] = dist; _cDot[ci3+1] = dot; _cNEI[ci3+1] = ei; _cNPar[ci3+1] = param;
+            const cAbs = Math.abs(_cTD[ci3 + 1]!);
+            if (absDist < cAbs || (absDist === cAbs && dot < _cDot[ci3 + 1]!)) {
+              _cTD[ci3 + 1] = dist;
+              _cDot[ci3 + 1] = dot;
+              _cNEI[ci3 + 1] = ei;
+              _cNPar[ci3 + 1] = param;
             }
           }
           if (doB) {
-            const cAbs = Math.abs(_cTD[ci3+2]!);
-            if (absDist < cAbs || (absDist === cAbs && dot < _cDot[ci3+2]!)) {
-              _cTD[ci3+2] = dist; _cDot[ci3+2] = dot; _cNEI[ci3+2] = ei; _cNPar[ci3+2] = param;
+            const cAbs = Math.abs(_cTD[ci3 + 2]!);
+            if (absDist < cAbs || (absDist === cAbs && dot < _cDot[ci3 + 2]!)) {
+              _cTD[ci3 + 2] = dist;
+              _cDot[ci3 + 2] = dot;
+              _cNEI[ci3 + 2] = ei;
+              _cNPar[ci3 + 2] = param;
             }
           }
 
           // Perpendicular distances at edge endpoints.
           // ap = p - edge.point(0), bp = p - edge.point(1)
           edge.point(0, _pt);
-          const apx = px - _pt[0]!, apy = py - _pt[1]!;
+          const apx = px - _pt[0]!,
+            apy = py - _pt[1]!;
           edge.point(1, _pt);
-          const bpx = px - _pt[0]!, bpy = py - _pt[1]!;
+          const bpx = px - _pt[0]!,
+            bpy = py - _pt[1]!;
 
           // aDir = edge.direction(0).normalize(true)
           edge.direction(0, _dir);
@@ -335,18 +384,16 @@ export function generateMSDF(
           const nDy = dlen > 0 ? _dir[1]! / dlen : 0;
 
           // add = dotProduct(ap, (prevDir + aDir).normalize(true))
-          const addSx = pDx + aDx, addSy = pDy + aDy;
+          const addSx = pDx + aDx,
+            addSy = pDy + aDy;
           const addSl = Math.sqrt(addSx * addSx + addSy * addSy);
-          const add = addSl > 0
-            ? apx * (addSx / addSl) + apy * (addSy / addSl)
-            : 0;
+          const add = addSl > 0 ? apx * (addSx / addSl) + apy * (addSy / addSl) : 0;
 
           // bdd = -dotProduct(bp, (bDir + nextDir).normalize(true))
-          const bddSx = bDx + nDx, bddSy = bDy + nDy;
+          const bddSx = bDx + nDx,
+            bddSy = bDy + nDy;
           const bddSl = Math.sqrt(bddSx * bddSx + bddSy * bddSy);
-          const bdd = bddSl > 0
-            ? -(bpx * (bddSx / bddSl) + bpy * (bddSy / bddSl))
-            : 0;
+          const bdd = bddSl > 0 ? -(bpx * (bddSx / bddSl) + bpy * (bddSy / bddSl)) : 0;
 
           // add > 0: perpendicular at edge START.
           // getPerpendicularDistance(pd, ap, -aDir): ts=dot(ap,-aDir) > 0 → pd=cross(ap,aDir)
@@ -356,10 +403,18 @@ export function generateMSDF(
               const perp = apx * aDy - apy * aDx; // cross(ap, aDir) = -cross(ap,-aDir)
               if (Math.abs(perp) < absDist) {
                 // pd = -cross(ap,-aDir) = cross(ap,aDir) = perp
-                if (doR) { if (perp <= 0 && perp > _cNeg[ci3]!)  _cNeg[ci3]  = perp; else if (perp > 0 && perp < _cPos[ci3]!)  _cPos[ci3]  = perp; }
-                if (doG) { if (perp <= 0 && perp > _cNeg[ci3+1]!) _cNeg[ci3+1] = perp; else if (perp > 0 && perp < _cPos[ci3+1]!) _cPos[ci3+1] = perp;
+                if (doR) {
+                  if (perp <= 0 && perp > _cNeg[ci3]!) _cNeg[ci3] = perp;
+                  else if (perp > 0 && perp < _cPos[ci3]!) _cPos[ci3] = perp;
                 }
-                if (doB) { if (perp <= 0 && perp > _cNeg[ci3+2]!) _cNeg[ci3+2] = perp; else if (perp > 0 && perp < _cPos[ci3+2]!) _cPos[ci3+2] = perp; }
+                if (doG) {
+                  if (perp <= 0 && perp > _cNeg[ci3 + 1]!) _cNeg[ci3 + 1] = perp;
+                  else if (perp > 0 && perp < _cPos[ci3 + 1]!) _cPos[ci3 + 1] = perp;
+                }
+                if (doB) {
+                  if (perp <= 0 && perp > _cNeg[ci3 + 2]!) _cNeg[ci3 + 2] = perp;
+                  else if (perp > 0 && perp < _cPos[ci3 + 2]!) _cPos[ci3 + 2] = perp;
+                }
               }
             }
           }
@@ -371,10 +426,18 @@ export function generateMSDF(
             if (ts_b > 0) {
               const perp = bpx * bDy - bpy * bDx; // cross(bp, bDir)
               if (Math.abs(perp) < absDist) {
-                if (doR) { if (perp <= 0 && perp > _cNeg[ci3]!)  _cNeg[ci3]  = perp; else if (perp > 0 && perp < _cPos[ci3]!)  _cPos[ci3]  = perp; }
-                if (doG) { if (perp <= 0 && perp > _cNeg[ci3+1]!) _cNeg[ci3+1] = perp; else if (perp > 0 && perp < _cPos[ci3+1]!) _cPos[ci3+1] = perp;
+                if (doR) {
+                  if (perp <= 0 && perp > _cNeg[ci3]!) _cNeg[ci3] = perp;
+                  else if (perp > 0 && perp < _cPos[ci3]!) _cPos[ci3] = perp;
                 }
-                if (doB) { if (perp <= 0 && perp > _cNeg[ci3+2]!) _cNeg[ci3+2] = perp; else if (perp > 0 && perp < _cPos[ci3+2]!) _cPos[ci3+2] = perp; }
+                if (doG) {
+                  if (perp <= 0 && perp > _cNeg[ci3 + 1]!) _cNeg[ci3 + 1] = perp;
+                  else if (perp > 0 && perp < _cPos[ci3 + 1]!) _cPos[ci3 + 1] = perp;
+                }
+                if (doB) {
+                  if (perp <= 0 && perp > _cNeg[ci3 + 2]!) _cNeg[ci3 + 2] = perp;
+                  else if (perp > 0 && perp < _cPos[ci3 + 2]!) _cPos[ci3 + 2] = perp;
+                }
               }
             }
           }
@@ -383,24 +446,44 @@ export function generateMSDF(
         // Compute per-contour perpendicular distances.
         // port of MultiDistanceSelector::distance() → r.computeDistance(p) etc.
         _cdR[ci] = _computeFromState(
-          _cTD[ci3]!, _cNeg[ci3]!, _cPos[ci3]!,
-          ci, _cNEI[ci3]!, _cNPar[ci3]!,
-          px, py, contours,
+          _cTD[ci3]!,
+          _cNeg[ci3]!,
+          _cPos[ci3]!,
+          ci,
+          _cNEI[ci3]!,
+          _cNPar[ci3]!,
+          px,
+          py,
+          contours,
         );
         _cdG[ci] = _computeFromState(
-          _cTD[ci3+1]!, _cNeg[ci3+1]!, _cPos[ci3+1]!,
-          ci, _cNEI[ci3+1]!, _cNPar[ci3+1]!,
-          px, py, contours,
+          _cTD[ci3 + 1]!,
+          _cNeg[ci3 + 1]!,
+          _cPos[ci3 + 1]!,
+          ci,
+          _cNEI[ci3 + 1]!,
+          _cNPar[ci3 + 1]!,
+          px,
+          py,
+          contours,
         );
         _cdB[ci] = _computeFromState(
-          _cTD[ci3+2]!, _cNeg[ci3+2]!, _cPos[ci3+2]!,
-          ci, _cNEI[ci3+2]!, _cNPar[ci3+2]!,
-          px, py, contours,
+          _cTD[ci3 + 2]!,
+          _cNeg[ci3 + 2]!,
+          _cPos[ci3 + 2]!,
+          ci,
+          _cNEI[ci3 + 2]!,
+          _cNPar[ci3 + 2]!,
+          px,
+          py,
+          contours,
           y === 3 && x === 46,
         );
         if (y === 3 && x === 46) {
           // eslint-disable-next-line no-console
-          console.error(`[DBG gen y=3 x=46] ci=${ci} tdR=${_cTD[ci3]?.toFixed(6)} negR=${_cNeg[ci3]?.toFixed(6)} posR=${_cPos[ci3]?.toFixed(6)} neiR=${_cNEI[ci3]} cdR=${_cdR[ci]?.toFixed(6)} tdB=${_cTD[ci3+2]?.toFixed(6)} negB=${_cNeg[ci3+2]?.toFixed(6)} posB=${_cPos[ci3+2]?.toFixed(6)} neiB=${_cNEI[ci3+2]} cdB=${_cdB[ci]?.toFixed(6)}`);
+          console.error(
+            `[DBG gen y=3 x=46] ci=${ci} tdR=${_cTD[ci3]?.toFixed(6)} negR=${_cNeg[ci3]?.toFixed(6)} posR=${_cPos[ci3]?.toFixed(6)} neiR=${_cNEI[ci3]} cdR=${_cdR[ci]?.toFixed(6)} tdB=${_cTD[ci3 + 2]?.toFixed(6)} negB=${_cNeg[ci3 + 2]?.toFixed(6)} posB=${_cPos[ci3 + 2]?.toFixed(6)} neiB=${_cNEI[ci3 + 2]} cdB=${_cdB[ci]?.toFixed(6)}`,
+          );
         }
       } // end contour loop
 
@@ -414,17 +497,71 @@ export function generateMSDF(
       // All 63 variables below are stack scalars (no allocation).
 
       // Shape selector.
-      let s_r_td = -DBL_MAX, s_r_dot = 0, s_r_neg = -DBL_MAX, s_r_pos = DBL_MAX, s_r_ci = -1, s_r_ei = -1, s_r_par = 0;
-      let s_g_td = -DBL_MAX, s_g_dot = 0, s_g_neg = -DBL_MAX, s_g_pos = DBL_MAX, s_g_ci = -1, s_g_ei = -1, s_g_par = 0;
-      let s_b_td = -DBL_MAX, s_b_dot = 0, s_b_neg = -DBL_MAX, s_b_pos = DBL_MAX, s_b_ci = -1, s_b_ei = -1, s_b_par = 0;
+      let s_r_td = -DBL_MAX,
+        s_r_dot = 0,
+        s_r_neg = -DBL_MAX,
+        s_r_pos = DBL_MAX,
+        s_r_ci = -1,
+        s_r_ei = -1,
+        s_r_par = 0;
+      let s_g_td = -DBL_MAX,
+        s_g_dot = 0,
+        s_g_neg = -DBL_MAX,
+        s_g_pos = DBL_MAX,
+        s_g_ci = -1,
+        s_g_ei = -1,
+        s_g_par = 0;
+      let s_b_td = -DBL_MAX,
+        s_b_dot = 0,
+        s_b_neg = -DBL_MAX,
+        s_b_pos = DBL_MAX,
+        s_b_ci = -1,
+        s_b_ei = -1,
+        s_b_par = 0;
       // Inner selector (merged from winding > 0 contours with edgeMedian >= 0).
-      let i_r_td = -DBL_MAX, i_r_dot = 0, i_r_neg = -DBL_MAX, i_r_pos = DBL_MAX, i_r_ci = -1, i_r_ei = -1, i_r_par = 0;
-      let i_g_td = -DBL_MAX, i_g_dot = 0, i_g_neg = -DBL_MAX, i_g_pos = DBL_MAX, i_g_ci = -1, i_g_ei = -1, i_g_par = 0;
-      let i_b_td = -DBL_MAX, i_b_dot = 0, i_b_neg = -DBL_MAX, i_b_pos = DBL_MAX, i_b_ci = -1, i_b_ei = -1, i_b_par = 0;
+      let i_r_td = -DBL_MAX,
+        i_r_dot = 0,
+        i_r_neg = -DBL_MAX,
+        i_r_pos = DBL_MAX,
+        i_r_ci = -1,
+        i_r_ei = -1,
+        i_r_par = 0;
+      let i_g_td = -DBL_MAX,
+        i_g_dot = 0,
+        i_g_neg = -DBL_MAX,
+        i_g_pos = DBL_MAX,
+        i_g_ci = -1,
+        i_g_ei = -1,
+        i_g_par = 0;
+      let i_b_td = -DBL_MAX,
+        i_b_dot = 0,
+        i_b_neg = -DBL_MAX,
+        i_b_pos = DBL_MAX,
+        i_b_ci = -1,
+        i_b_ei = -1,
+        i_b_par = 0;
       // Outer selector (merged from winding < 0 contours with edgeMedian <= 0).
-      let o_r_td = -DBL_MAX, o_r_dot = 0, o_r_neg = -DBL_MAX, o_r_pos = DBL_MAX, o_r_ci = -1, o_r_ei = -1, o_r_par = 0;
-      let o_g_td = -DBL_MAX, o_g_dot = 0, o_g_neg = -DBL_MAX, o_g_pos = DBL_MAX, o_g_ci = -1, o_g_ei = -1, o_g_par = 0;
-      let o_b_td = -DBL_MAX, o_b_dot = 0, o_b_neg = -DBL_MAX, o_b_pos = DBL_MAX, o_b_ci = -1, o_b_ei = -1, o_b_par = 0;
+      let o_r_td = -DBL_MAX,
+        o_r_dot = 0,
+        o_r_neg = -DBL_MAX,
+        o_r_pos = DBL_MAX,
+        o_r_ci = -1,
+        o_r_ei = -1,
+        o_r_par = 0;
+      let o_g_td = -DBL_MAX,
+        o_g_dot = 0,
+        o_g_neg = -DBL_MAX,
+        o_g_pos = DBL_MAX,
+        o_g_ci = -1,
+        o_g_ei = -1,
+        o_g_par = 0;
+      let o_b_td = -DBL_MAX,
+        o_b_dot = 0,
+        o_b_neg = -DBL_MAX,
+        o_b_pos = DBL_MAX,
+        o_b_ci = -1,
+        o_b_ei = -1,
+        o_b_par = 0;
 
       for (let ci = 0; ci < nc; ci++) {
         const ci3 = ci * 3;
@@ -437,110 +574,245 @@ export function generateMSDF(
         // shapeEdgeSelector.merge(edgeSelectors[ci])
         // port of MultiDistanceSelector::merge → PerpendicularDistanceSelectorBase::merge
         {
-          const aTD = _cTD[ci3]!, aDot = _cDot[ci3]!;
+          const aTD = _cTD[ci3]!,
+            aDot = _cDot[ci3]!;
           const aAbs = Math.abs(aTD);
           if (aAbs < Math.abs(s_r_td) || (aAbs === Math.abs(s_r_td) && aDot < s_r_dot)) {
-            s_r_td = aTD; s_r_dot = aDot; s_r_ci = ci; s_r_ei = _cNEI[ci3]!; s_r_par = _cNPar[ci3]!;
+            s_r_td = aTD;
+            s_r_dot = aDot;
+            s_r_ci = ci;
+            s_r_ei = _cNEI[ci3]!;
+            s_r_par = _cNPar[ci3]!;
           }
           if (_cNeg[ci3]! > s_r_neg) s_r_neg = _cNeg[ci3]!;
           if (_cPos[ci3]! < s_r_pos) s_r_pos = _cPos[ci3]!;
         }
         {
-          const aTD = _cTD[ci3+1]!, aDot = _cDot[ci3+1]!;
+          const aTD = _cTD[ci3 + 1]!,
+            aDot = _cDot[ci3 + 1]!;
           const aAbs = Math.abs(aTD);
           if (aAbs < Math.abs(s_g_td) || (aAbs === Math.abs(s_g_td) && aDot < s_g_dot)) {
-            s_g_td = aTD; s_g_dot = aDot; s_g_ci = ci; s_g_ei = _cNEI[ci3+1]!; s_g_par = _cNPar[ci3+1]!;
+            s_g_td = aTD;
+            s_g_dot = aDot;
+            s_g_ci = ci;
+            s_g_ei = _cNEI[ci3 + 1]!;
+            s_g_par = _cNPar[ci3 + 1]!;
           }
-          if (_cNeg[ci3+1]! > s_g_neg) s_g_neg = _cNeg[ci3+1]!;
-          if (_cPos[ci3+1]! < s_g_pos) s_g_pos = _cPos[ci3+1]!;
+          if (_cNeg[ci3 + 1]! > s_g_neg) s_g_neg = _cNeg[ci3 + 1]!;
+          if (_cPos[ci3 + 1]! < s_g_pos) s_g_pos = _cPos[ci3 + 1]!;
         }
         {
-          const aTD = _cTD[ci3+2]!, aDot = _cDot[ci3+2]!;
+          const aTD = _cTD[ci3 + 2]!,
+            aDot = _cDot[ci3 + 2]!;
           const aAbs = Math.abs(aTD);
           if (aAbs < Math.abs(s_b_td) || (aAbs === Math.abs(s_b_td) && aDot < s_b_dot)) {
-            s_b_td = aTD; s_b_dot = aDot; s_b_ci = ci; s_b_ei = _cNEI[ci3+2]!; s_b_par = _cNPar[ci3+2]!;
+            s_b_td = aTD;
+            s_b_dot = aDot;
+            s_b_ci = ci;
+            s_b_ei = _cNEI[ci3 + 2]!;
+            s_b_par = _cNPar[ci3 + 2]!;
           }
-          if (_cNeg[ci3+2]! > s_b_neg) s_b_neg = _cNeg[ci3+2]!;
-          if (_cPos[ci3+2]! < s_b_pos) s_b_pos = _cPos[ci3+2]!;
+          if (_cNeg[ci3 + 2]! > s_b_neg) s_b_neg = _cNeg[ci3 + 2]!;
+          if (_cPos[ci3 + 2]! < s_b_pos) s_b_pos = _cPos[ci3 + 2]!;
         }
 
         // innerEdgeSelector.merge if winding > 0 && edgeMedian >= 0
         if (w > 0 && edM >= 0) {
           {
-            const aTD = _cTD[ci3]!, aDot = _cDot[ci3]!;
+            const aTD = _cTD[ci3]!,
+              aDot = _cDot[ci3]!;
             const aAbs = Math.abs(aTD);
             if (aAbs < Math.abs(i_r_td) || (aAbs === Math.abs(i_r_td) && aDot < i_r_dot)) {
-              i_r_td = aTD; i_r_dot = aDot; i_r_ci = ci; i_r_ei = _cNEI[ci3]!; i_r_par = _cNPar[ci3]!;
+              i_r_td = aTD;
+              i_r_dot = aDot;
+              i_r_ci = ci;
+              i_r_ei = _cNEI[ci3]!;
+              i_r_par = _cNPar[ci3]!;
             }
             if (_cNeg[ci3]! > i_r_neg) i_r_neg = _cNeg[ci3]!;
             if (_cPos[ci3]! < i_r_pos) i_r_pos = _cPos[ci3]!;
           }
           {
-            const aTD = _cTD[ci3+1]!, aDot = _cDot[ci3+1]!;
+            const aTD = _cTD[ci3 + 1]!,
+              aDot = _cDot[ci3 + 1]!;
             const aAbs = Math.abs(aTD);
             if (aAbs < Math.abs(i_g_td) || (aAbs === Math.abs(i_g_td) && aDot < i_g_dot)) {
-              i_g_td = aTD; i_g_dot = aDot; i_g_ci = ci; i_g_ei = _cNEI[ci3+1]!; i_g_par = _cNPar[ci3+1]!;
+              i_g_td = aTD;
+              i_g_dot = aDot;
+              i_g_ci = ci;
+              i_g_ei = _cNEI[ci3 + 1]!;
+              i_g_par = _cNPar[ci3 + 1]!;
             }
-            if (_cNeg[ci3+1]! > i_g_neg) i_g_neg = _cNeg[ci3+1]!;
-            if (_cPos[ci3+1]! < i_g_pos) i_g_pos = _cPos[ci3+1]!;
+            if (_cNeg[ci3 + 1]! > i_g_neg) i_g_neg = _cNeg[ci3 + 1]!;
+            if (_cPos[ci3 + 1]! < i_g_pos) i_g_pos = _cPos[ci3 + 1]!;
           }
           {
-            const aTD = _cTD[ci3+2]!, aDot = _cDot[ci3+2]!;
+            const aTD = _cTD[ci3 + 2]!,
+              aDot = _cDot[ci3 + 2]!;
             const aAbs = Math.abs(aTD);
             if (aAbs < Math.abs(i_b_td) || (aAbs === Math.abs(i_b_td) && aDot < i_b_dot)) {
-              i_b_td = aTD; i_b_dot = aDot; i_b_ci = ci; i_b_ei = _cNEI[ci3+2]!; i_b_par = _cNPar[ci3+2]!;
+              i_b_td = aTD;
+              i_b_dot = aDot;
+              i_b_ci = ci;
+              i_b_ei = _cNEI[ci3 + 2]!;
+              i_b_par = _cNPar[ci3 + 2]!;
             }
-            if (_cNeg[ci3+2]! > i_b_neg) i_b_neg = _cNeg[ci3+2]!;
-            if (_cPos[ci3+2]! < i_b_pos) i_b_pos = _cPos[ci3+2]!;
+            if (_cNeg[ci3 + 2]! > i_b_neg) i_b_neg = _cNeg[ci3 + 2]!;
+            if (_cPos[ci3 + 2]! < i_b_pos) i_b_pos = _cPos[ci3 + 2]!;
           }
         }
 
         // outerEdgeSelector.merge if winding < 0 && edgeMedian <= 0
         if (w < 0 && edM <= 0) {
           {
-            const aTD = _cTD[ci3]!, aDot = _cDot[ci3]!;
+            const aTD = _cTD[ci3]!,
+              aDot = _cDot[ci3]!;
             const aAbs = Math.abs(aTD);
             if (aAbs < Math.abs(o_r_td) || (aAbs === Math.abs(o_r_td) && aDot < o_r_dot)) {
-              o_r_td = aTD; o_r_dot = aDot; o_r_ci = ci; o_r_ei = _cNEI[ci3]!; o_r_par = _cNPar[ci3]!;
+              o_r_td = aTD;
+              o_r_dot = aDot;
+              o_r_ci = ci;
+              o_r_ei = _cNEI[ci3]!;
+              o_r_par = _cNPar[ci3]!;
             }
             if (_cNeg[ci3]! > o_r_neg) o_r_neg = _cNeg[ci3]!;
             if (_cPos[ci3]! < o_r_pos) o_r_pos = _cPos[ci3]!;
           }
           {
-            const aTD = _cTD[ci3+1]!, aDot = _cDot[ci3+1]!;
+            const aTD = _cTD[ci3 + 1]!,
+              aDot = _cDot[ci3 + 1]!;
             const aAbs = Math.abs(aTD);
             if (aAbs < Math.abs(o_g_td) || (aAbs === Math.abs(o_g_td) && aDot < o_g_dot)) {
-              o_g_td = aTD; o_g_dot = aDot; o_g_ci = ci; o_g_ei = _cNEI[ci3+1]!; o_g_par = _cNPar[ci3+1]!;
+              o_g_td = aTD;
+              o_g_dot = aDot;
+              o_g_ci = ci;
+              o_g_ei = _cNEI[ci3 + 1]!;
+              o_g_par = _cNPar[ci3 + 1]!;
             }
-            if (_cNeg[ci3+1]! > o_g_neg) o_g_neg = _cNeg[ci3+1]!;
-            if (_cPos[ci3+1]! < o_g_pos) o_g_pos = _cPos[ci3+1]!;
+            if (_cNeg[ci3 + 1]! > o_g_neg) o_g_neg = _cNeg[ci3 + 1]!;
+            if (_cPos[ci3 + 1]! < o_g_pos) o_g_pos = _cPos[ci3 + 1]!;
           }
           {
-            const aTD = _cTD[ci3+2]!, aDot = _cDot[ci3+2]!;
+            const aTD = _cTD[ci3 + 2]!,
+              aDot = _cDot[ci3 + 2]!;
             const aAbs = Math.abs(aTD);
             if (aAbs < Math.abs(o_b_td) || (aAbs === Math.abs(o_b_td) && aDot < o_b_dot)) {
-              o_b_td = aTD; o_b_dot = aDot; o_b_ci = ci; o_b_ei = _cNEI[ci3+2]!; o_b_par = _cNPar[ci3+2]!;
+              o_b_td = aTD;
+              o_b_dot = aDot;
+              o_b_ci = ci;
+              o_b_ei = _cNEI[ci3 + 2]!;
+              o_b_par = _cNPar[ci3 + 2]!;
             }
-            if (_cNeg[ci3+2]! > o_b_neg) o_b_neg = _cNeg[ci3+2]!;
-            if (_cPos[ci3+2]! < o_b_pos) o_b_pos = _cPos[ci3+2]!;
+            if (_cNeg[ci3 + 2]! > o_b_neg) o_b_neg = _cNeg[ci3 + 2]!;
+            if (_cPos[ci3 + 2]! < o_b_pos) o_b_pos = _cPos[ci3 + 2]!;
           }
         }
       } // end combiner merge loop
 
       // Compute distances from merged selectors.
-      const sDistR = _computeFromState(s_r_td, s_r_neg, s_r_pos, s_r_ci, s_r_ei, s_r_par, px, py, contours);
-      const sDistG = _computeFromState(s_g_td, s_g_neg, s_g_pos, s_g_ci, s_g_ei, s_g_par, px, py, contours);
-      const sDistB = _computeFromState(s_b_td, s_b_neg, s_b_pos, s_b_ci, s_b_ei, s_b_par, px, py, contours);
+      const sDistR = _computeFromState(
+        s_r_td,
+        s_r_neg,
+        s_r_pos,
+        s_r_ci,
+        s_r_ei,
+        s_r_par,
+        px,
+        py,
+        contours,
+      );
+      const sDistG = _computeFromState(
+        s_g_td,
+        s_g_neg,
+        s_g_pos,
+        s_g_ci,
+        s_g_ei,
+        s_g_par,
+        px,
+        py,
+        contours,
+      );
+      const sDistB = _computeFromState(
+        s_b_td,
+        s_b_neg,
+        s_b_pos,
+        s_b_ci,
+        s_b_ei,
+        s_b_par,
+        px,
+        py,
+        contours,
+      );
       const shapeMedian = _med(sDistR, sDistG, sDistB);
 
-      const iDistR = _computeFromState(i_r_td, i_r_neg, i_r_pos, i_r_ci, i_r_ei, i_r_par, px, py, contours);
-      const iDistG = _computeFromState(i_g_td, i_g_neg, i_g_pos, i_g_ci, i_g_ei, i_g_par, px, py, contours);
-      const iDistB = _computeFromState(i_b_td, i_b_neg, i_b_pos, i_b_ci, i_b_ei, i_b_par, px, py, contours);
+      const iDistR = _computeFromState(
+        i_r_td,
+        i_r_neg,
+        i_r_pos,
+        i_r_ci,
+        i_r_ei,
+        i_r_par,
+        px,
+        py,
+        contours,
+      );
+      const iDistG = _computeFromState(
+        i_g_td,
+        i_g_neg,
+        i_g_pos,
+        i_g_ci,
+        i_g_ei,
+        i_g_par,
+        px,
+        py,
+        contours,
+      );
+      const iDistB = _computeFromState(
+        i_b_td,
+        i_b_neg,
+        i_b_pos,
+        i_b_ci,
+        i_b_ei,
+        i_b_par,
+        px,
+        py,
+        contours,
+      );
       const innerMedian = _med(iDistR, iDistG, iDistB);
 
-      const oDistR = _computeFromState(o_r_td, o_r_neg, o_r_pos, o_r_ci, o_r_ei, o_r_par, px, py, contours);
-      const oDistG = _computeFromState(o_g_td, o_g_neg, o_g_pos, o_g_ci, o_g_ei, o_g_par, px, py, contours);
-      const oDistB = _computeFromState(o_b_td, o_b_neg, o_b_pos, o_b_ci, o_b_ei, o_b_par, px, py, contours);
+      const oDistR = _computeFromState(
+        o_r_td,
+        o_r_neg,
+        o_r_pos,
+        o_r_ci,
+        o_r_ei,
+        o_r_par,
+        px,
+        py,
+        contours,
+      );
+      const oDistG = _computeFromState(
+        o_g_td,
+        o_g_neg,
+        o_g_pos,
+        o_g_ci,
+        o_g_ei,
+        o_g_par,
+        px,
+        py,
+        contours,
+      );
+      const oDistB = _computeFromState(
+        o_b_td,
+        o_b_neg,
+        o_b_pos,
+        o_b_ci,
+        o_b_ei,
+        o_b_par,
+        px,
+        py,
+        contours,
+      );
       const outerMedian = _med(oDistR, oDistG, oDistB);
 
       // Selection logic.
@@ -549,26 +821,38 @@ export function generateMSDF(
       let winding = 0;
 
       if (innerMedian >= 0 && Math.abs(innerMedian) <= Math.abs(outerMedian)) {
-        finalR = iDistR; finalG = iDistG; finalB = iDistB;
+        finalR = iDistR;
+        finalG = iDistG;
+        finalB = iDistB;
         winding = 1;
         for (let ci = 0; ci < nc; ci++) {
           if (_windings[ci]! > 0) {
-            const cdR = _cdR[ci]!, cdG = _cdG[ci]!, cdB = _cdB[ci]!;
+            const cdR = _cdR[ci]!,
+              cdG = _cdG[ci]!,
+              cdB = _cdB[ci]!;
             const cdM = _med(cdR, cdG, cdB);
             if (Math.abs(cdM) < Math.abs(outerMedian) && cdM > _med(finalR, finalG, finalB)) {
-              finalR = cdR; finalG = cdG; finalB = cdB;
+              finalR = cdR;
+              finalG = cdG;
+              finalB = cdB;
             }
           }
         }
       } else if (outerMedian <= 0 && Math.abs(outerMedian) < Math.abs(innerMedian)) {
-        finalR = oDistR; finalG = oDistG; finalB = oDistB;
+        finalR = oDistR;
+        finalG = oDistG;
+        finalB = oDistB;
         winding = -1;
         for (let ci = 0; ci < nc; ci++) {
           if (_windings[ci]! < 0) {
-            const cdR = _cdR[ci]!, cdG = _cdG[ci]!, cdB = _cdB[ci]!;
+            const cdR = _cdR[ci]!,
+              cdG = _cdG[ci]!,
+              cdB = _cdB[ci]!;
             const cdM = _med(cdR, cdG, cdB);
             if (Math.abs(cdM) < Math.abs(innerMedian) && cdM < _med(finalR, finalG, finalB)) {
-              finalR = cdR; finalG = cdG; finalB = cdB;
+              finalR = cdR;
+              finalG = cdG;
+              finalB = cdB;
             }
           }
         }
@@ -584,18 +868,24 @@ export function generateMSDF(
       // Blend with opposite-winding contours if same sign and closer.
       for (let ci = 0; ci < nc; ci++) {
         if (_windings[ci]! !== winding) {
-          const cdR = _cdR[ci]!, cdG = _cdG[ci]!, cdB = _cdB[ci]!;
+          const cdR = _cdR[ci]!,
+            cdG = _cdG[ci]!,
+            cdB = _cdB[ci]!;
           const cdM = _med(cdR, cdG, cdB);
           const finalM = _med(finalR, finalG, finalB);
           if (cdM * finalM >= 0 && Math.abs(cdM) < Math.abs(finalM)) {
-            finalR = cdR; finalG = cdG; finalB = cdB;
+            finalR = cdR;
+            finalG = cdG;
+            finalB = cdB;
           }
         }
       }
 
       // If result median == shapeMedian, prefer shapeDistance.
       if (_med(finalR, finalG, finalB) === shapeMedian) {
-        finalR = sDistR; finalG = sDistG; finalB = sDistB;
+        finalR = sDistR;
+        finalG = sDistG;
+        finalB = sDistB;
       }
 
       const base = (y * width + x) * 3;

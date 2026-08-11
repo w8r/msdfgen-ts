@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 720 616" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0,8 3,0 6" fill="#4f5d75"/>
+    </marker>
+    <marker id="arr-a" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0,8 3,0 6" fill="#eb6c36"/>
+    </marker>
+    <marker id="arr-l" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0,8 3,0 6" fill="#2e5aa8"/>
+    </marker>
+  </defs>
+
+  <rect width="720" height="616" fill="#f5f5f5"/>
+
+  <!-- ── ARROWS drawn before nodes ── -->
+  <line x1="360" y1="60" x2="360" y2="76" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arr)"/>
+  <line x1="360" y1="124" x2="360" y2="148" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arr)"/>
+  <!-- entering focal — accent -->
+  <line x1="360" y1="196" x2="360" y2="220" stroke="#eb6c36" stroke-width="1.5" marker-end="url(#arr-a)"/>
+  <!-- exiting focal — accent -->
+  <line x1="360" y1="268" x2="360" y2="292" stroke="#eb6c36" stroke-width="1.5" marker-end="url(#arr-a)"/>
+  <line x1="360" y1="340" x2="360" y2="356" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arr)"/>
+  <!-- YES: diamond bottom → rect5 -->
+  <line x1="360" y1="436" x2="360" y2="460" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arr)"/>
+  <line x1="360" y1="508" x2="360" y2="528" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arr)"/>
+  <!-- NO loop: diamond right → right → up → rect1 right edge -->
+  <path d="M448,396 H508 A8,8 0 0 1 516,388 V108 A8,8 0 0 0 508,100 H460"
+        fill="none" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4"
+        marker-end="url(#arr)"/>
+
+  <!-- ── NODES ── -->
+
+  <!-- START -->
+  <ellipse cx="360" cy="40" rx="64" ry="20" fill="#f5f5f5"/>
+  <ellipse cx="360" cy="40" rx="64" ry="20" fill="rgba(45,49,66,0.05)" stroke="#2d3142" stroke-width="1"/>
+  <text x="360" y="44" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist',ui-sans-serif,sans-serif" text-anchor="middle">START</text>
+
+  <!-- Rect 1: For each pixel -->
+  <rect x="260" y="76" width="200" height="48" rx="6" fill="#f5f5f5"/>
+  <rect x="260" y="76" width="200" height="48" rx="6" fill="white" stroke="#2d3142" stroke-width="1"/>
+  <text x="360" y="104" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist',ui-sans-serif,sans-serif" text-anchor="middle">For each pixel (x, y)</text>
+  <text x="360" y="118" fill="#7a8399" font-size="9" font-family="'Geist Mono',ui-monospace,monospace" text-anchor="middle">project into em space</text>
+
+  <!-- Rect 2: Trace colored edges -->
+  <rect x="260" y="148" width="200" height="48" rx="6" fill="#f5f5f5"/>
+  <rect x="260" y="148" width="200" height="48" rx="6" fill="white" stroke="#2d3142" stroke-width="1"/>
+  <text x="360" y="176" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist',ui-sans-serif,sans-serif" text-anchor="middle">Trace colored edges</text>
+  <text x="360" y="190" fill="#7a8399" font-size="9" font-family="'Geist Mono',ui-monospace,monospace" text-anchor="middle">per contour · R / G / B masks</text>
+
+  <!-- Rect 3: FOCAL — Compute signed distance -->
+  <rect x="252" y="220" width="216" height="48" rx="6" fill="#f5f5f5"/>
+  <rect x="252" y="220" width="216" height="48" rx="6" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1.5"/>
+  <text x="360" y="248" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist',ui-sans-serif,sans-serif" text-anchor="middle">Compute signed distance</text>
+  <text x="360" y="262" fill="#7a8399" font-size="9" font-family="'Geist Mono',ui-monospace,monospace" text-anchor="middle">orthoDistance + pseudoDistance</text>
+
+  <!-- HOT bracket -->
+  <line x1="470" y1="232" x2="484" y2="232" stroke="rgba(235,108,54,0.50)" stroke-width="0.8"/>
+  <line x1="470" y1="256" x2="484" y2="256" stroke="rgba(235,108,54,0.50)" stroke-width="0.8"/>
+  <line x1="484" y1="232" x2="484" y2="256" stroke="rgba(235,108,54,0.50)" stroke-width="0.8"/>
+  <text x="488" y="248" fill="#eb6c36" font-size="8" font-family="'Geist Mono',ui-monospace,monospace" letter-spacing="0.06em">HOT</text>
+
+  <!-- Rect 4: Update R, G or B -->
+  <rect x="260" y="292" width="200" height="48" rx="6" fill="#f5f5f5"/>
+  <rect x="260" y="292" width="200" height="48" rx="6" fill="white" stroke="#2d3142" stroke-width="1"/>
+  <text x="360" y="320" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist',ui-sans-serif,sans-serif" text-anchor="middle">Update R, G or B</text>
+  <text x="360" y="334" fill="#7a8399" font-size="9" font-family="'Geist Mono',ui-monospace,monospace" text-anchor="middle">keep nearest signed dist</text>
+
+  <!-- Diamond: All pixels done? -->
+  <polygon points="360,356 448,396 360,436 272,396" fill="#f5f5f5"/>
+  <polygon points="360,356 448,396 360,436 272,396" fill="rgba(45,49,66,0.04)" stroke="#2d3142" stroke-width="1"/>
+  <text x="360" y="400" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist',ui-sans-serif,sans-serif" text-anchor="middle">All pixels done?</text>
+
+  <!-- Rect 5: Error correction -->
+  <rect x="260" y="460" width="200" height="48" rx="6" fill="#f5f5f5"/>
+  <rect x="260" y="460" width="200" height="48" rx="6" fill="white" stroke="#2d3142" stroke-width="1"/>
+  <text x="360" y="488" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist',ui-sans-serif,sans-serif" text-anchor="middle">Error correction pass</text>
+  <text x="360" y="502" fill="#7a8399" font-size="9" font-family="'Geist Mono',ui-monospace,monospace" text-anchor="middle">corners · edges · apply</text>
+
+  <!-- END -->
+  <ellipse cx="360" cy="548" rx="64" ry="20" fill="#f5f5f5"/>
+  <ellipse cx="360" cy="548" rx="64" ry="20" fill="rgba(45,49,66,0.05)" stroke="#2d3142" stroke-width="1"/>
+  <text x="360" y="552" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist',ui-sans-serif,sans-serif" text-anchor="middle">END</text>
+
+  <!-- ── DECISION LABELS ── -->
+  <rect x="460" y="383" width="28" height="12" rx="2" fill="#f5f5f5"/>
+  <text x="474" y="392" fill="#4f5d75" font-size="8" font-family="'Geist Mono',ui-monospace,monospace" text-anchor="middle" letter-spacing="0.06em">NO</text>
+
+  <rect x="364" y="440" width="28" height="12" rx="2" fill="#f5f5f5"/>
+  <text x="378" y="449" fill="#4f5d75" font-size="8" font-family="'Geist Mono',ui-monospace,monospace" text-anchor="middle" letter-spacing="0.06em">YES</text>
+
+  <!-- ── LEGEND ── -->
+  <line x1="28" y1="576" x2="692" y2="576" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+  <text x="28" y="592" fill="#4f5d75" font-size="8" font-family="'Geist Mono',ui-monospace,monospace" letter-spacing="0.14em">LEGEND</text>
+
+  <ellipse cx="120" cy="601" rx="20" ry="10" fill="rgba(45,49,66,0.04)" stroke="#2d3142" stroke-width="1"/>
+  <text x="148" y="605" fill="#4f5d75" font-size="9" font-family="'Geist Mono',ui-monospace,monospace">Start / End</text>
+
+  <rect x="256" y="595" width="20" height="12" rx="4" fill="white" stroke="#2d3142" stroke-width="1"/>
+  <text x="282" y="605" fill="#4f5d75" font-size="9" font-family="'Geist Mono',ui-monospace,monospace">Step</text>
+
+  <rect x="356" y="595" width="20" height="12" rx="4" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1.5"/>
+  <text x="382" y="605" fill="#4f5d75" font-size="9" font-family="'Geist Mono',ui-monospace,monospace">Hottest step</text>
+
+  <polygon points="476,601 488,607 476,613 464,607" fill="rgba(45,49,66,0.04)" stroke="#2d3142" stroke-width="1"/>
+  <text x="496" y="611" fill="#4f5d75" font-size="9" font-family="'Geist Mono',ui-monospace,monospace">Decision</text>
+
+  <line x1="576" y1="603" x2="600" y2="603" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arr)"/>
+  <text x="608" y="607" fill="#4f5d75" font-size="9" font-family="'Geist Mono',ui-monospace,monospace">Loop back</text>
+</svg>

@@ -4,6 +4,10 @@ A zero-dependency TypeScript port of [Viktor Chlumský's msdfgen](https://github
 
 Runs entirely in the browser — no WASM, no server, no canvas fallbacks.
 
+## Algorithm diagrams
+
+Three SVG diagrams covering the pipeline, the per-pixel generation loop, and the data abstraction layers: [docs/diagrams/algorithm.md](docs/diagrams/algorithm.md).
+
 ## What it does
 
 1. **Parses TrueType fonts** (`glyf` outlines, `cmap`, `kern`, and metric tables) directly from an `ArrayBuffer`.

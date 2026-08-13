@@ -263,4 +263,10 @@ Closure-friendly constraints (cheap now, painful to retrofit):
   is the first thing to suspect. Revisit this decision once M5's actual rendering is visible:
   confirm a lone flipped texel at a degenerate corner is genuinely imperceptible after AA/media
   reconstruction before considering any other approach.
+  Note: `crossFMA` in `src/math/scalar.ts` (used by `shape/normalize.ts`'s deconverge logic) is
+  a *different*, pre-existing FMA-contraction emulation that predates this decision and was
+  deliberately left alone — gate:m2/m3 are green with it in place against the FMA-off reference,
+  so it isn't causing the problem this note describes. Don't treat its existence as license to
+  add more; if it ever needs touching, apply the same "suspect FMA, verify by toggling the
+  reference build flag" diagnostic before changing it.
 - create files per-milestone as needed; never pre-scaffold future milestones

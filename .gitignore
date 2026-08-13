@@ -1,6 +1,7 @@
 node_modules/
 dist/
 tools/msdfgen-ref/
+tools/atlas-preview-out/
 *.log
 .DS_Store
 

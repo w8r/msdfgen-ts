@@ -13,8 +13,10 @@
     "gate:m2b": "vitest run test/msdf/sdf.test.ts",
     "gate:m2": "vitest run test/shape/normalize.test.ts test/msdf/sdf.test.ts",
     "gate:m3": "vitest run test/msdf/msdf.test.ts",
+    "gate:m4": "vitest run test/atlas/",
     "gen-golden": "node tools/gen-golden.mjs",
     "setup-reference": "bash tools/setup-reference.sh",
+    "atlas-preview": "tsx tools/atlas-preview.mjs",
     "build": "vite build",
     "size": "vite build && gzip -c dist/msdfgen-ts.iife.js | wc -c | awk '{printf \"%.1f KB (iife, gzip)\\n\", $1/1024}'",
     "lint": "oxlint src/ test/",
@@ -25,6 +27,7 @@
     "@types/opentype.js": "1.3.10",
     "opentype.js": "1.3.4",
     "oxlint": "1.0.0",
+    "tsx": "4.23.12",
     "typescript": "7.0.2",
     "vite": "6.3.0",
     "vitest": "3.2.0"

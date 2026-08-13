@@ -39,11 +39,18 @@ npm run build        # outputs ES module + IIFE to dist/
 npm run size         # minified + gzip size report
 ```
 
-### Run the WebGPU demo
+### Run the demos
 
 ```sh
-npm run dev          # Vite dev server; open the demo/ entry in a WebGPU-capable browser
+npm run dev            # demo/canvas — CPU fallback, no GPU needed (see below)
+npm run dev:webgpu     # demo/webgpu — WebGPU renderer; needs a WebGPU-capable browser
 ```
+
+`demo/webgpu` is M5 work-in-progress. Checkpoint 1 (current): a static instanced-quad
+renderer with a WGSL median shader — no camera/pan/zoom/atlas-tiering yet, just proving
+the GPU pipeline renders the same text as `demo/canvas`'s CPU path. It fails gracefully
+(shows a message instead of crashing) when `navigator.gpu` or a GPU adapter isn't
+available — headless CI environments commonly hit this.
 
 ## API
 
@@ -107,7 +114,8 @@ src/
   math/            scalar helpers (no Vec2 in hot paths)
   index.ts         Public API surface
 demo/
-  webgpu/          Instanced-quad renderer, WGSL median shader (M5)
+  canvas/          CPU fallback: layout + kerning + median reconstruction, no GPU
+  webgpu/          Instanced-quad renderer, WGSL median shader (M5, in progress)
 test/
   golden/          Committed fl32 fixtures from C++ msdfgen (read-only)
   parser/          Font-metric tests vs opentype.js

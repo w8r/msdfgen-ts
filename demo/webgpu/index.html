@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>msdfgen-ts — WebGPU demo (checkpoint 1: static render)</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 24px;
+        background: #f2f2f2;
+        font-family: system-ui, sans-serif;
+        color: #111;
+      }
+      h1 {
+        font-size: 18px;
+      }
+      p {
+        color: #555;
+        font-size: 14px;
+      }
+      .gpu-canvas {
+        display: block;
+        border: 1px solid #ddd;
+        background: white;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>msdfgen-ts — WebGPU demo (checkpoint 1: static instanced-quad render)</h1>
+    <div id="root">Requesting WebGPU adapter…</div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

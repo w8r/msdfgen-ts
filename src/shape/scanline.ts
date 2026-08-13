@@ -5,8 +5,8 @@
  * msdfgen © Viktor Chlumský — MIT licence.
  */
 
-import { sign } from "../math/scalar.js";
-import { type Shape } from "./shape.js";
+import { sign } from "../math/scalar";
+import { type Shape } from "./shape";
 
 /** Fill-rule tags — match C++ msdfgen's FillRule enum. */
 export const FILL_NONZERO = 0 as const;

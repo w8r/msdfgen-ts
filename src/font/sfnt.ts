@@ -1,4 +1,4 @@
-import { BinaryReader } from "./reader.js";
+import { BinaryReader } from "./reader";
 
 /** Maps a 4-char tag to its byte range within the font buffer. */
 export interface TableRecord {

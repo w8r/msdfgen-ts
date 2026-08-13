@@ -1,4 +1,4 @@
-import { type EdgeSegment } from "./segments.js";
+import { type EdgeSegment } from "./segments";
 
 /**
  * A closed contour — an ordered sequence of edge segments.

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import opentype from "opentype.js";
-import { loadCorpusFonts } from "./corpus.js";
-import { type Shape } from "../../src/shape/shape.js";
-import { LINEAR, QUADRATIC } from "../../src/shape/segments.js";
+import { loadCorpusFonts } from "./corpus";
+import { type Shape } from "../../src/shape/shape";
+import { LINEAR, QUADRATIC } from "../../src/shape/segments";
 
 /**
  * M1 outline gate.

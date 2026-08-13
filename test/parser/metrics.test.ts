@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { loadCorpusFonts } from "./corpus.js";
+import { loadCorpusFonts } from "./corpus";
 
 /**
  * M1 metrics gate.

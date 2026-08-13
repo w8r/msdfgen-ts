@@ -14,7 +14,7 @@
  * drawn versus the atlas's generation resolution — this is exactly what
  * lets one small atlas stay crisp at any output size.
  */
-import { Font, Atlas, type GlyphInfo } from "../../src/index.js";
+import { Font, Atlas, type GlyphInfo } from "../../src/index";
 
 const FONT_URL = "/test/fonts/PTSerif-Regular.ttf";
 const ATLAS_SIZE = 32; // generation resolution: px per em cell
@@ -28,7 +28,11 @@ interface LayoutGlyph {
 }
 
 /** Lays out `text` left-to-right, applying kerning; returns glyphs + total advance (em). */
-function layout(font: Font, atlas: Atlas, text: string): { glyphs: LayoutGlyph[]; widthEm: number } {
+function layout(
+  font: Font,
+  atlas: Atlas,
+  text: string,
+): { glyphs: LayoutGlyph[]; widthEm: number } {
   const glyphs: LayoutGlyph[] = [];
   let penX = 0;
   let prevGlyphId = -1;

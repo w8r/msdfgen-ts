@@ -10,10 +10,10 @@
  * msdfgen © Viktor Chlumský — MIT licence.
  */
 
-import { type Contour } from "./contour.js";
-import { EdgeSegment, QUADRATIC, CUBIC, LINEAR } from "./segments.js";
-import { type Shape } from "./shape.js";
-import { cross, crossFMA, dot, sign } from "../math/scalar.js";
+import { type Contour } from "./contour";
+import { EdgeSegment, QUADRATIC, CUBIC, LINEAR } from "./segments";
+import { type Shape } from "./shape";
+import { cross, crossFMA, dot, sign } from "../math/scalar";
 
 // ── em-normalization ────────────────────────────────────────────────────────
 

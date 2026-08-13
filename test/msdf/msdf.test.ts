@@ -17,12 +17,12 @@ import { fileURLToPath } from "url";
 import { tmpdir } from "os";
 import { execFileSync } from "child_process";
 import { describe, it, expect, beforeAll } from "vitest";
-import { generateMSDF } from "../../src/msdf/generate.js";
-import { edgeColoringSimple } from "../../src/msdf/edge-coloring.js";
-import { distanceSignCorrection, msdfErrorCorrection } from "../../src/msdf/error-correction.js";
-import { normalizeShape } from "../../src/shape/normalize.js";
-import { parseShapeDesc } from "../utils/shapedesc.js";
-import { compareBitmaps, fl32FromBuffer } from "../utils/compare.js";
+import { generateMSDF } from "../../src/msdf/generate";
+import { edgeColoringSimple } from "../../src/msdf/edge-coloring";
+import { distanceSignCorrection, msdfErrorCorrection } from "../../src/msdf/error-correction";
+import { normalizeShape } from "../../src/shape/normalize";
+import { parseShapeDesc } from "../utils/shapedesc";
+import { compareBitmaps, fl32FromBuffer } from "../utils/compare";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const GOLDEN_DIR = resolve(__dirname, "../golden");

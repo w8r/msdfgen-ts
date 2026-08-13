@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { ShelfPacker, type PackRect } from "../../src/atlas/packer.js";
+import { ShelfPacker, type PackRect } from "../../src/atlas/packer";
 
 /** Small deterministic PRNG (mulberry32) so the property test is reproducible. */
 function mulberry32(seed: number): () => number {

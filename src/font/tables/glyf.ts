@@ -22,10 +22,10 @@
  *  of 0 for that component.
  */
 
-import { BinaryReader } from "../reader.js";
-import { EdgeSegment, LINEAR, QUADRATIC } from "../../shape/segments.js";
-import { type Contour } from "../../shape/contour.js";
-import { type Shape } from "../../shape/shape.js";
+import { BinaryReader } from "../reader";
+import { EdgeSegment, LINEAR, QUADRATIC } from "../../shape/segments";
+import { type Contour } from "../../shape/contour";
+import { type Shape } from "../../shape/shape";
 
 /**
  * A single raw outline point in font units, before implied on-curve midpoints

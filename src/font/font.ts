@@ -1,13 +1,13 @@
-import { type CmapLookup, parseCmap } from "./tables/cmap.js";
-import { type HeadTable, parseHead } from "./tables/head.js";
-import { type HheaTable, parseHhea } from "./tables/hhea.js";
-import { type HMetric, parseHmtx } from "./tables/hmtx.js";
-import { parseLoca } from "./tables/loca.js";
-import { parseMaxp } from "./tables/maxp.js";
-import { parseGlyph, parseGlyphRaw, type RawGlyph } from "./tables/glyf.js";
-import { type KernMap, parseKern } from "./tables/kern.js";
-import { type TableMap, parseSfnt } from "./sfnt.js";
-import { type Shape } from "../shape/shape.js";
+import { type CmapLookup, parseCmap } from "./tables/cmap";
+import { type HeadTable, parseHead } from "./tables/head";
+import { type HheaTable, parseHhea } from "./tables/hhea";
+import { type HMetric, parseHmtx } from "./tables/hmtx";
+import { parseLoca } from "./tables/loca";
+import { parseMaxp } from "./tables/maxp";
+import { parseGlyph, parseGlyphRaw, type RawGlyph } from "./tables/glyf";
+import { type KernMap, parseKern } from "./tables/kern";
+import { type TableMap, parseSfnt } from "./sfnt";
+import { type Shape } from "../shape/shape";
 
 /** Font-level metrics exposed from `head` and `hhea`. */
 export interface FontMetrics {

@@ -10,8 +10,8 @@ import { readFileSync, writeFileSync, mkdirSync } from "fs";
 import { deflateSync } from "zlib";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
-import { Font } from "../src/font/font.js";
-import { Atlas } from "../src/atlas/atlas.js";
+import { Font } from "../src/font/font";
+import { Atlas } from "../src/atlas/atlas";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");

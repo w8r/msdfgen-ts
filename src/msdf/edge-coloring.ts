@@ -12,8 +12,8 @@
  * msdfgen © Viktor Chlumský — MIT licence.
  */
 
-import { type Shape } from "../shape/shape.js";
-import { LINEAR, QUADRATIC, EdgeSegment } from "../shape/segments.js";
+import { type Shape } from "../shape/shape";
+import { LINEAR, QUADRATIC, EdgeSegment } from "../shape/segments";
 
 // ── Color constants ──────────────────────────────────────────────────────────
 

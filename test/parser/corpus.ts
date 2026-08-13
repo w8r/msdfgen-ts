@@ -2,7 +2,7 @@ import { readFileSync } from "fs";
 import { dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 import opentype from "opentype.js";
-import { Font } from "../../src/font/font.js";
+import { Font } from "../../src/font/font";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FONTS_DIR = resolve(__dirname, "../fonts");

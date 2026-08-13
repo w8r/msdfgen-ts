@@ -17,9 +17,9 @@
  * msdfgen © Viktor Chlumský — MIT licence.
  */
 
-import { type Shape } from "../shape/shape.js";
-import { type Contour } from "../shape/contour.js";
-import { RED, GREEN, BLUE } from "./edge-coloring.js";
+import { type Shape } from "../shape/shape";
+import { type Contour } from "../shape/contour";
+import { RED, GREEN, BLUE } from "./edge-coloring";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 

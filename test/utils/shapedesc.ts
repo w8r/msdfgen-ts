@@ -8,9 +8,9 @@
  * msdfgen © Viktor Chlumský — MIT licence.
  */
 
-import { EdgeSegment, LINEAR, QUADRATIC, CUBIC } from "../../src/shape/segments.js";
-import { type Contour } from "../../src/shape/contour.js";
-import { type Shape } from "../../src/shape/shape.js";
+import { EdgeSegment, LINEAR, QUADRATIC, CUBIC } from "../../src/shape/segments";
+import { type Contour } from "../../src/shape/contour";
+import { type Shape } from "../../src/shape/shape";
 
 // ── Parser ───────────────────────────────────────────────────────────────────
 

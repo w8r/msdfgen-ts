@@ -17,12 +17,12 @@
  * msdfgen is MIT © Viktor Chlumský; this file is original.
  */
 
-import { type Font } from "../font/font.js";
-import { emNormalizeShape, normalizeShape } from "../shape/normalize.js";
-import { edgeColoringSimple } from "../msdf/edge-coloring.js";
-import { generateMSDF } from "../msdf/generate.js";
-import { distanceSignCorrection, msdfErrorCorrection } from "../msdf/error-correction.js";
-import { ShelfPacker, type PackRect } from "./packer.js";
+import { type Font } from "../font/font";
+import { emNormalizeShape, normalizeShape } from "../shape/normalize";
+import { edgeColoringSimple } from "../msdf/edge-coloring";
+import { generateMSDF } from "../msdf/generate";
+import { distanceSignCorrection, msdfErrorCorrection } from "../msdf/error-correction";
+import { ShelfPacker, type PackRect } from "./packer";
 
 /** Edge-coloring corner angle threshold (radians) — matches msdfgen CLI default. */
 const ANGLE_THRESHOLD = 3.0;

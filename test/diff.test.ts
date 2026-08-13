@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { existsSync, readFileSync, readdirSync, statSync } from "fs";
 import { dirname, resolve } from "path";
 import { fileURLToPath } from "url";
-import { type Fl32File, TOLERANCE, compareBitmaps, fl32FromBuffer } from "./utils/compare.js";
+import { type Fl32File, TOLERANCE, compareBitmaps, fl32FromBuffer } from "./utils/compare";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const GOLDEN_DIR = resolve(__dirname, "golden");

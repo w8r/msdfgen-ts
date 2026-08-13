@@ -19,9 +19,9 @@
  * msdfgen © Viktor Chlumský — MIT licence.
  */
 
-import { type Shape } from "../shape/shape.js";
-import { Scanline, computeShapeScanline, FILL_NONZERO } from "../shape/scanline.js";
-import { RED, GREEN, BLUE } from "./edge-coloring.js";
+import { type Shape } from "../shape/shape";
+import { Scanline, computeShapeScanline, FILL_NONZERO } from "../shape/scanline";
+import { RED, GREEN, BLUE } from "./edge-coloring";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 

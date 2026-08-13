@@ -1,4 +1,4 @@
-import { BinaryReader } from "../reader.js";
+import { BinaryReader } from "../reader";
 
 export interface HeadTable {
   /** Font design units per em-square (typically 1000 or 2048). */

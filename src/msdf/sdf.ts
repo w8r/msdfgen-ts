@@ -17,9 +17,9 @@
  * msdfgen © Viktor Chlumský — MIT licence.
  */
 
-import { type Shape } from "../shape/shape.js";
-import { type SignedDistanceResult, signedDistanceLess } from "../shape/segments.js";
-import { Scanline, computeShapeScanline, type FillRule, FILL_NONZERO } from "../shape/scanline.js";
+import { type Shape } from "../shape/shape";
+import { type SignedDistanceResult, signedDistanceLess } from "../shape/segments";
+import { Scanline, computeShapeScanline, type FillRule, FILL_NONZERO } from "../shape/scanline";
 
 /**
  * Parameters for {@link generateSDF}.  Mirror msdfgen's projection + range:
@@ -59,7 +59,7 @@ const _pt: number[] = [0, 0];
  *
  * Returns +1 for CCW (outer, filled area), -1 for CW (inner/hole), 0 for empty.
  */
-function _contourWinding(contour: import("../shape/contour.js").Contour): number {
+function _contourWinding(contour: import("../shape/contour").Contour): number {
   const n = contour.length;
   if (n === 0) return 0;
   let total = 0;

@@ -14,9 +14,9 @@ import { readFileSync, existsSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { describe, it, expect } from "vitest";
-import { Font } from "../../src/font/font.js";
-import { Atlas, pixelFloatToByte } from "../../src/atlas/atlas.js";
-import { fl32FromBuffer } from "../utils/compare.js";
+import { Font } from "../../src/font/font";
+import { Atlas, pixelFloatToByte } from "../../src/atlas/atlas";
+import { fl32FromBuffer } from "../utils/compare";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FONTS_DIR = resolve(__dirname, "../fonts");

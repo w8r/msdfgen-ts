@@ -20,10 +20,10 @@ import { fileURLToPath } from "url";
 import { tmpdir } from "os";
 import { execFileSync } from "child_process";
 import { describe, it, expect, beforeAll } from "vitest";
-import { generateSDF } from "../../src/msdf/sdf.js";
-import { normalizeShape } from "../../src/shape/normalize.js";
-import { parseShapeDesc } from "../utils/shapedesc.js";
-import { compareBitmaps, fl32FromBuffer } from "../utils/compare.js";
+import { generateSDF } from "../../src/msdf/sdf";
+import { normalizeShape } from "../../src/shape/normalize";
+import { parseShapeDesc } from "../utils/shapedesc";
+import { compareBitmaps, fl32FromBuffer } from "../utils/compare";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const GOLDEN_DIR = resolve(__dirname, "../golden");

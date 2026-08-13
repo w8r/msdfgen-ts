@@ -22,12 +22,12 @@ import { readFileSync, readdirSync, existsSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { describe, it, expect } from "vitest";
-import { Font } from "../../src/font/font.js";
-import { emNormalizeShape, normalizeShape } from "../../src/shape/normalize.js";
-import { parseShapeDesc } from "../utils/shapedesc.js";
-import { LINEAR, QUADRATIC, CUBIC } from "../../src/shape/segments.js";
-import type { Shape } from "../../src/shape/shape.js";
-import type { EdgeSegment } from "../../src/shape/segments.js";
+import { Font } from "../../src/font/font";
+import { emNormalizeShape, normalizeShape } from "../../src/shape/normalize";
+import { parseShapeDesc } from "../utils/shapedesc";
+import { LINEAR, QUADRATIC, CUBIC } from "../../src/shape/segments";
+import type { Shape } from "../../src/shape/shape";
+import type { EdgeSegment } from "../../src/shape/segments";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const GOLDEN_DIR = resolve(__dirname, "../golden");

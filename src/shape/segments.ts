@@ -9,7 +9,7 @@
  *  - Never add conditional fields; always initialise every field in the same order.
  */
 
-import { solveQuadratic, solveCubic, sign, nonZeroSign, mix } from "../math/scalar.js";
+import { solveQuadratic, solveCubic, sign, nonZeroSign, mix } from "../math/scalar";
 
 /** Segment type tags — match C++ msdfgen's EdgeType enum. */
 export const LINEAR = 0 as const;

@@ -1,4 +1,4 @@
-import { BinaryReader } from "../reader.js";
+import { BinaryReader } from "../reader";
 
 export interface MaxpTable {
   numGlyphs: number;

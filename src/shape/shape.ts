@@ -1,4 +1,4 @@
-import { type Contour } from "./contour.js";
+import { type Contour } from "./contour";
 
 /**
  * A glyph outline — a collection of closed contours.

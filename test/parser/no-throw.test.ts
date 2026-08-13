@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from "fs";
 import { resolve } from "path";
 import { dirname } from "path";
 import { fileURLToPath } from "url";
-import { Font } from "../../src/font/font.js";
+import { Font } from "../../src/font/font";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FONTS_DIR = resolve(__dirname, "../fonts");

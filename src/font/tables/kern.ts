@@ -1,4 +1,4 @@
-import { BinaryReader } from "../reader.js";
+import { BinaryReader } from "../reader";
 
 /**
  * Kerning pair map: key = `(leftGlyphId << 16) | rightGlyphId`, value = kern value in font units.

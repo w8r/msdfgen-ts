@@ -13,7 +13,9 @@ import shaderCode from "./msdf.wgsl?raw";
 const FONT_URL = "/test/fonts/PTSerif-Regular.ttf";
 const ATLAS_SIZE = 32;
 const ATLAS_PXRANGE = 4;
-const TARGET_SIZE = 64; // px per em, rendered on screen
+const TARGET_SIZE_CSS = 64; // px per em, in CSS pixels (scaled by devicePixelRatio for the backing buffer)
+const CANVAS_CSS_WIDTH = 900;
+const CANVAS_CSS_HEIGHT = 220;
 const TEXT = "Hello Привет 123 @#&";
 const FG_COLOR: [number, number, number, number] = [0.08, 0.08, 0.08, 1];
 const BG_COLOR: [number, number, number, number] = [1, 1, 1, 1];
@@ -23,7 +25,11 @@ interface LayoutGlyph {
   penX: number; // em units
 }
 
-function layout(font: Font, atlas: Atlas, text: string): { glyphs: LayoutGlyph[]; widthEm: number } {
+function layout(
+  font: Font,
+  atlas: Atlas,
+  text: string,
+): { glyphs: LayoutGlyph[]; widthEm: number } {
   const glyphs: LayoutGlyph[] = [];
   let penX = 0;
   let prevGlyphId = -1;
@@ -57,11 +63,18 @@ async function main(): Promise<void> {
   const device = await adapter.requestDevice();
 
   root.textContent = "";
+  // Backing buffer must be sized in device pixels, not CSS pixels, or the
+  // canvas gets upscaled by the compositor on any HiDPI display — that
+  // mismatch is what makes everything look soft/blurry.
+  const dpr = window.devicePixelRatio || 1;
   const canvas = document.createElement("canvas");
-  canvas.width = 900;
-  canvas.height = 220;
+  canvas.width = Math.round(CANVAS_CSS_WIDTH * dpr);
+  canvas.height = Math.round(CANVAS_CSS_HEIGHT * dpr);
+  canvas.style.width = `${CANVAS_CSS_WIDTH}px`;
+  canvas.style.height = `${CANVAS_CSS_HEIGHT}px`;
   canvas.className = "gpu-canvas";
   root.appendChild(canvas);
+  const targetSize = TARGET_SIZE_CSS * dpr; // em size in device pixels — all layout math below is device-pixel space
 
   const context = canvas.getContext("webgpu")!;
   const format = navigator.gpu.getPreferredCanvasFormat();
@@ -84,13 +97,24 @@ async function main(): Promise<void> {
     { bytesPerRow: atlas.width * 4 },
     { width: atlas.width, height: atlas.height },
   );
-  const sampler = device.createSampler({ magFilter: "linear", minFilter: "linear" });
+  // Adjacent atlas cells are packed with zero gap (see ShelfPacker) — sampling
+  // exactly at a cell's edge with bilinear filtering would blend in the next
+  // glyph's texels. Inset the sampled UV rect by half a texel on each side so
+  // no sample ever reaches outside this glyph's own cell.
+  const sampler = device.createSampler({
+    magFilter: "linear",
+    minFilter: "linear",
+    addressModeU: "clamp-to-edge",
+    addressModeV: "clamp-to-edge",
+  });
+  const halfTexelU = 0.5 / atlas.width;
+  const halfTexelV = 0.5 / atlas.height;
 
   // ── Instance buffer: [posX, posY, sizeX, sizeY, uvMinX, uvMinY, uvSizeX, uvSizeY] ──
   const genScale = ATLAS_SIZE - 2 * ATLAS_PXRANGE;
   const originXInCellPx = ATLAS_PXRANGE;
   const baselineFromTopPx = ATLAS_SIZE - ATLAS_PXRANGE - 0.25 * genScale;
-  const outputScale = TARGET_SIZE / genScale;
+  const outputScale = targetSize / genScale;
   const screenPxRange = ATLAS_PXRANGE * outputScale;
   const padEm = 0.3;
   const baselineY = 0.6 * canvas.height;
@@ -99,7 +123,7 @@ async function main(): Promise<void> {
   const instanceData = new Float32Array(glyphs.length * FLOATS_PER_INSTANCE);
   for (let i = 0; i < glyphs.length; i++) {
     const { info, penX } = glyphs[i]!;
-    const originX = (penX + padEm) * TARGET_SIZE;
+    const originX = (penX + padEm) * targetSize;
     const cellLeft = originX - originXInCellPx * outputScale;
     const cellTop = baselineY - baselineFromTopPx * outputScale;
     const cellSizePx = info.size * outputScale;
@@ -109,10 +133,10 @@ async function main(): Promise<void> {
     instanceData[base + 1] = cellTop;
     instanceData[base + 2] = cellSizePx;
     instanceData[base + 3] = cellSizePx;
-    instanceData[base + 4] = info.rect.x / atlas.width;
-    instanceData[base + 5] = info.rect.y / atlas.height;
-    instanceData[base + 6] = info.rect.w / atlas.width;
-    instanceData[base + 7] = info.rect.h / atlas.height;
+    instanceData[base + 4] = info.rect.x / atlas.width + halfTexelU;
+    instanceData[base + 5] = info.rect.y / atlas.height + halfTexelV;
+    instanceData[base + 6] = info.rect.w / atlas.width - 2 * halfTexelU;
+    instanceData[base + 7] = info.rect.h / atlas.height - 2 * halfTexelV;
   }
   const instanceBuffer = device.createBuffer({
     size: instanceData.byteLength,
@@ -223,7 +247,7 @@ async function main(): Promise<void> {
   device.queue.submit([encoder.finish()]);
 
   const label = document.createElement("p");
-  label.textContent = `Rendered ${glyphs.length} glyphs via WebGPU (${ATLAS_SIZE}px atlas -> ${TARGET_SIZE}px on screen).`;
+  label.textContent = `Rendered ${glyphs.length} glyphs via WebGPU (${ATLAS_SIZE}px atlas -> ${TARGET_SIZE_CSS}px on screen, dpr=${dpr}).`;
   root.appendChild(label);
 }
 

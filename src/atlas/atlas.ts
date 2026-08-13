@@ -137,16 +137,7 @@ export class Atlas {
 
     generateMSDF(shape, this._size, this._size, scale, tx, ty, this._pxrange, this._msdf);
     distanceSignCorrection(this._msdf, shape, this._size, this._size, scale, tx, ty);
-    msdfErrorCorrection(
-      this._msdf,
-      shape,
-      this._size,
-      this._size,
-      scale,
-      tx,
-      ty,
-      this._pxrange,
-    );
+    msdfErrorCorrection(this._msdf, shape, this._size, this._size, scale, tx, ty, this._pxrange);
 
     const prevWidth = this._packer.width;
     const prevHeight = this._packer.height;

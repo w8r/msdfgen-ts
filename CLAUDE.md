@@ -247,4 +247,20 @@ Closure-friendly constraints (cheap now, painful to retrofit):
   exactly.
 - Error correction is not optional: without it, corner artifacts appear precisely on the
   glyphs that make MSDF worth using.
+- **FMA contraction in the reference build was a real bug source, now closed — revisit only
+  after eyeballing real rendering.** clang on Apple Silicon fuses expressions like
+  `a.x*b.x+a.y*b.y` into one rounded FMA instruction by default (`-ffp-contract=on`); JS never
+  does (always two sequential roundings). At exact geometric ties (90° corners, axis-aligned
+  serifs, symmetric curve endpoints) this flips which edge wins a tiebreak, diverging from our
+  port by a real amount at a single texel. `tools/setup-reference.sh` now builds the reference
+  binary with `-ffp-contract=off` so it matches plain sequential IEEE754 (what JS does) instead
+  of chasing this compiler's specific codegen — that fix is committed and `gate:m3` is fully
+  green on it. Do NOT reintroduce FMA-emulation helpers (a Veltkamp-Dekker split named
+  `_sqDistFMA` briefly existed in `segments.ts` to match the old FMA-on reference at one call
+  site; it was removed once the reference build stopped needing it) — matching one compiler's
+  contraction choices is an unbounded, non-portable chase, not a spec. If a fresh golden diff
+  ever surfaces a single-texel, large-magnitude mismatch at a symmetric/degenerate corner, this
+  is the first thing to suspect. Revisit this decision once M5's actual rendering is visible:
+  confirm a lone flipped texel at a degenerate corner is genuinely imperceptible after AA/media
+  reconstruction before considering any other approach.
 - create files per-milestone as needed; never pre-scaffold future milestones

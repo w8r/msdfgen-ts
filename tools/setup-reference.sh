@@ -69,11 +69,24 @@ git checkout "$MSDFGEN_COMMIT"
 #   MSDFGEN_USE_SKIA=OFF     skip Skia; use scanline sign correction instead
 #   MSDFGEN_DISABLE_SVG=ON   not needed for font/shapedesc input
 #   MSDFGEN_BUILD_STANDALONE=ON  we need the CLI binary
+#   -ffp-contract=off        disable FMA contraction. Without this, clang on
+#     Apple Silicon (and gcc on many other targets) fuses expressions like
+#     dotProduct(a,b) = a.x*b.x+a.y*b.y into a single rounded FMA instruction.
+#     For exact-cancellation cases (e.g. a 90° corner where the true dot
+#     product is mathematically 0), FMA can yield a nonzero residual
+#     (~1e-18) that plain sequential IEEE754 arithmetic (what JS always
+#     does) would round to exactly 0. That epsilon is enough to flip a
+#     `> 0` branch in MultiDistanceSelector::addEdge and pick a different,
+#     "more correct" perpendicular-distance candidate — a compiler-flag
+#     artifact of the reference build, not a property of the algorithm.
+#     Building the oracle without contraction makes it reproduce plain
+#     double arithmetic, matching what our TS port can actually replicate.
 
 echo "Configuring..."
 cmake -S . -B build \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX" \
+  -DCMAKE_CXX_FLAGS="-ffp-contract=off" \
   -DMSDFGEN_USE_VCPKG=OFF \
   -DMSDFGEN_USE_SKIA=OFF \
   -DMSDFGEN_DISABLE_SVG=ON \

@@ -66,41 +66,6 @@ const CUBIC_SEARCH_STEPS = 4;
 const _roots = [0, 0, 0];
 
 /**
- * Veltkamp splitting constant for float64 (2^27+1).
- * Used by {@link _sqDistFMA} to get the exact product error of x*x.
- */
-const _VK = 134217729.0;
-
-/**
- * Computes fl(exact(x²) + fl(y²)), matching what ARM64 generates for
- * `sqrt(x*x+y*y)` when compiled with -O3 -ffp-contract=on:
- *   fmul  t, y, y          ; t  = fl(y²)
- *   fmadd r, x, x, t       ; r  = fl(exact(x²) + t)
- *   fsqrt result, r
- *
- * Use `Math.sqrt(_sqDistFMA(x, y))` instead of `Math.sqrt(x*x+y*y)` for
- * endpoint-to-pixel distance comparisons so the float64 ordering matches the
- * C++ reference on ARM64.  Leave direction-normalization sqrt calls unchanged.
- *
- * port of Vector2::length() — ARM64 compiled form with FMA contraction.
- */
-function _sqDistFMA(x: number, y: number): number {
-  // t = fl(y²)  (standard rounded multiplication, same as C++ first fmul)
-  const t = y * y;
-  // Compute exact(x²) = p + e via Veltkamp-Dekker split
-  const cx = _VK * x;
-  const xh = cx - (cx - x); // high 27-bit half of x
-  const xl = x - xh; // low  26-bit half of x
-  const p = x * x; // fl(x²)  (= fmadd input, rounded)
-  const e = xh * xh - p + 2.0 * xh * xl + xl * xl; // exact(x²) - p
-  // fl(exact(x²) + t) using compensated addition (TwoSum on p+t, then add e)
-  // Assumes |p| >= |t|, which holds when |x| >= |y| (x-component >= y-component).
-  // In the rare opposite case the error is still ≤ 1 ULP, never changing sign.
-  const s = p + t;
-  return s + (e + (t - (s - p)));
-}
-
-/**
  * A single curve segment within a contour.
  *
  * Field layout (matches C++ msdfgen EdgeSegment conventions):
@@ -488,13 +453,11 @@ export class EdgeSegment {
         const useEnd = param > 0.5;
         const ex = (useEnd ? p1x : p0x) - ox;
         const ey = (useEnd ? p1y : p0y) - oy;
-        const endpointDistance = Math.sqrt(_sqDistFMA(ex, ey));
+        const endpointDistance = Math.sqrt(ex * ex + ey * ey);
         if (param > 0 && param < 1) {
           // port of core/edge-segments.cpp: LinearSegment::signedDistance, orthoDistance
           // C++ uses dot(ab.getOrthonormal(false), aq) = (aby/len)*aqx + (-abx/len)*aqy.
-          // Normalizing FIRST (divide-then-multiply) gives exact results for axis-aligned edges,
-          // matching ARM64 -O3 FMA behavior where abLen uses fmadd.
-          const abLen = Math.sqrt(_sqDistFMA(abx, aby));
+          const abLen = Math.sqrt(abx * abx + aby * aby);
           const abNx = abx / abLen;
           const abNy = aby / abLen;
           const orthoDistance = abNy * aqx - abNx * aqy;
@@ -509,8 +472,8 @@ export class EdgeSegment {
         // crossProduct(aq, ab) = aqx*aby - aqy*abx (uniform for all param values)
         const cross = aqx * aby - aqy * abx;
         out.distance = nonZeroSign(cross) * endpointDistance;
-        // dot = |dot(ab.normalize(), eq.normalize())| using FMA-matched length
-        const abLen = Math.sqrt(_sqDistFMA(abx, aby));
+        // dot = |dot(ab.normalize(), eq.normalize())|
+        const abLen = Math.sqrt(abx * abx + aby * aby);
         out.dot =
           endpointDistance === 0 || abLen === 0
             ? 0
@@ -540,13 +503,13 @@ export class EdgeSegment {
         // epDir = direction(0) = ab (nonzero for a real quadratic)
         let epDirx = abx,
           epDiry = aby;
-        const qaLen = Math.sqrt(_sqDistFMA(qax, qay));
+        const qaLen = Math.sqrt(qax * qax + qay * qay);
         let minDistance = nonZeroSign(epDirx * qay - epDiry * qax) * qaLen;
         let param = -(qax * epDirx + qay * epDiry) / (epDirx * epDirx + epDiry * epDiry);
         {
           const bqx = p2x - ox,
             bqy = p2y - oy;
-          const distB = Math.sqrt(_sqDistFMA(bqx, bqy));
+          const distB = Math.sqrt(bqx * bqx + bqy * bqy);
           if (distB < Math.abs(minDistance)) {
             // epDir = direction(1) = p2 - p1
             epDirx = p2x - p1x;
@@ -563,7 +526,7 @@ export class EdgeSegment {
             // qe = qa + 2t*ab + t²*br
             const qex = qax + 2 * t * abx + t * t * brx;
             const qey = qay + 2 * t * aby + t * t * bry;
-            const distance = Math.sqrt(_sqDistFMA(qex, qey));
+            const distance = Math.sqrt(qex * qex + qey * qey);
             if (distance <= Math.abs(minDistance)) {
               // dir = ab + t*br
               const dirx = abx + t * brx;
@@ -623,13 +586,13 @@ export class EdgeSegment {
           epDirx = p2x - p0x;
           epDiry = p2y - p0y;
         }
-        const qaLen = Math.sqrt(_sqDistFMA(qax, qay));
+        const qaLen = Math.sqrt(qax * qax + qay * qay);
         let minDistance = nonZeroSign(epDirx * qay - epDiry * qax) * qaLen;
         let param = -(qax * epDirx + qay * epDiry) / (epDirx * epDirx + epDiry * epDiry);
         {
           const bqx = p3x - ox,
             bqy = p3y - oy;
-          const distB = Math.sqrt(_sqDistFMA(bqx, bqy));
+          const distB = Math.sqrt(bqx * bqx + bqy * bqy);
           if (distB < Math.abs(minDistance)) {
             // epDir = direction(1)
             let e1x = p3x - p2x,
@@ -671,7 +634,7 @@ export class EdgeSegment {
               improvedT =
                 t - (qex * d1x + qey * d1y) / (d1x * d1x + d1y * d1y + (qex * d2x + qey * d2y));
             } while (improvedT > 0 && improvedT < 1);
-            const distance = Math.sqrt(_sqDistFMA(qex, qey));
+            const distance = Math.sqrt(qex * qex + qey * qey);
             if (distance < Math.abs(minDistance)) {
               minDistance = nonZeroSign(d1x * qey - d1y * qex) * distance;
               param = t;

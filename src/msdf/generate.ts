@@ -184,15 +184,10 @@ function _computeFromState(
   px: number,
   py: number,
   contours: readonly Contour[],
-  dbg?: boolean,
 ): number {
   let minDist = td < 0 ? neg : pos;
   if (nearEI >= 0) {
     const d = _distToPerp(nearCI, nearEI, td, px, py, nearParam, contours);
-    if (dbg)
-      console.error(
-        `[computeFromState dbg] td=${td.toFixed(6)} neg=${neg.toFixed(6)} pos=${pos.toFixed(6)} minDist_before=${minDist.toFixed(6)} neiCI=${nearCI} neiEI=${nearEI} param=${nearParam.toFixed(6)} d=${d.toFixed(6)} |d|<|minDist|=${Math.abs(d) < Math.abs(minDist)}`,
-      );
     if (Math.abs(d) < Math.abs(minDist)) minDist = d;
   }
   return minDist;
@@ -477,14 +472,7 @@ export function generateMSDF(
           px,
           py,
           contours,
-          y === 3 && x === 46,
         );
-        if (y === 3 && x === 46) {
-          // eslint-disable-next-line no-console
-          console.error(
-            `[DBG gen y=3 x=46] ci=${ci} tdR=${_cTD[ci3]?.toFixed(6)} negR=${_cNeg[ci3]?.toFixed(6)} posR=${_cPos[ci3]?.toFixed(6)} neiR=${_cNEI[ci3]} cdR=${_cdR[ci]?.toFixed(6)} tdB=${_cTD[ci3 + 2]?.toFixed(6)} negB=${_cNeg[ci3 + 2]?.toFixed(6)} posB=${_cPos[ci3 + 2]?.toFixed(6)} neiB=${_cNEI[ci3 + 2]} cdB=${_cdB[ci]?.toFixed(6)}`,
-          );
-        }
       } // end contour loop
 
       // ── Phase 2: OverlappingContourCombiner::distance() ──────────────────

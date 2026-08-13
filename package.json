@@ -17,6 +17,7 @@
     "gen-golden": "node tools/gen-golden.mjs",
     "setup-reference": "bash tools/setup-reference.sh",
     "atlas-preview": "tsx tools/atlas-preview.mjs",
+    "dev": "vite --open /demo/canvas/index.html",
     "build": "vite build",
     "size": "vite build && gzip -c dist/msdfgen-ts.iife.js | wc -c | awk '{printf \"%.1f KB (iife, gzip)\\n\", $1/1024}'",
     "lint": "oxlint src/ test/",

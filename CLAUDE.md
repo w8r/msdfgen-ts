@@ -22,7 +22,22 @@ Target: < 50 KB minified, zero runtime dependencies, no WASM.
 - Text shaping: ligatures, complex scripts, GSUB. Kerning = `kern` table only (format 0)
 - SVG input, PNG output
 - Skia-style overlap resolution — use scanline sign correction like msdfgen without
-  `MSDFGEN_USE_SKIA`
+  `MSDFGEN_USE_SKIA`.
+  **Exception (added post-M4 after empirically confirming reference behaviour on Roboto):**
+  a tiny, in-house polygon-union preprocessor (`src/shape/resolve-overlaps.ts`) is
+  allowed — and required — on the runtime atlas path only. Fonts like Roboto build
+  glyphs from multiple overlapping same-winding contours; without preprocessing, both
+  our port AND the non-Skia reference binary produce visible seams at contour joins
+  and fill the counters of `B`/`D`. This is verified against the goldens (`gate:m3`
+  still exits 0; our 32px MSDF matches Roboto's `bitmap.fl32` bit-exactly). The
+  preprocessor is NOT a Skia port — it does not depend on `SkPath`/`SkPathOp` and
+  does not implement general boolean polygon algebra. Constraints on it:
+    - Isolated in one file, no new runtime dependencies.
+    - Never called from anything under `test/` — the M3 gate keeps starting from
+      the reference's own `shape.txt` fixtures and must stay bit-exact.
+    - When it detects no inter-contour intersections, it is a no-op. So fonts that
+      already ship canonical outer+hole outlines (Noto Sans, PT Serif) go through
+      it unchanged.
 - Node canvas / DOM dependencies in the library itself (demo may use DOM)
 
 ## Ground truth: the C++ reference

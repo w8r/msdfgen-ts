@@ -28,6 +28,7 @@
  */
 import { Font, type Shape, LINEAR, QUADRATIC, CUBIC, pixelFloatToByte } from "../../src/index.js";
 import { emNormalizeShape, normalizeShape } from "../../src/shape/normalize.js";
+import { resolveOverlaps } from "../../src/shape/resolve-overlaps.js";
 import { edgeColoringSimple } from "../../src/msdf/edge-coloring.js";
 import { generateMSDF } from "../../src/msdf/generate.js";
 import { distanceSignCorrection, msdfErrorCorrection } from "../../src/msdf/error-correction.js";
@@ -128,6 +129,8 @@ interface GlyphCell {
   ty: number;
   /** Em-normalised, non-normalised outline for the vector overlay. */
   rawShape: Shape;
+  /** Em-normalised outline after resolveOverlaps preprocessing. */
+  resolvedShape: Shape;
 }
 
 /**
@@ -146,11 +149,15 @@ function generateGlyphCell(
   const unitsPerEm = font.metrics.unitsPerEm;
 
   // Two independent shape instances: one for MSDF generation (mutated by the
-  // full pipeline), one for the vector overlay (raw em-normalised outline only).
+  // full pipeline), one for the vector overlay (raw em-normalised outline only),
+  // and a third we normalize+resolve only, to visualise what the preprocessor
+  // produced without going all the way to edge-coloured segments.
   const shapeGen = font.shape(glyphId);
   const shapeVec = font.shape(glyphId);
+  const shapeResolved = font.shape(glyphId);
   emNormalizeShape(shapeGen, unitsPerEm);
   emNormalizeShape(shapeVec, unitsPerEm);
+  emNormalizeShape(shapeResolved, unitsPerEm);
 
   if (shapeGen.contours.length === 0) return null;
 
@@ -168,6 +175,13 @@ function generateGlyphCell(
   const ty = (padY + 0.5) / scale - b.minY;
 
   normalizeShape(shapeGen);
+  // Non-msdfgen step: fuse overlapping same-winding contours into an
+  // outer+holes boundary shape (matches Atlas — see CLAUDE.md exception).
+  resolveOverlaps(shapeGen);
+  // Same treatment for the "resolved" overlay so we can see what the
+  // preprocessor produced before coloring.
+  normalizeShape(shapeResolved);
+  resolveOverlaps(shapeResolved);
   edgeColoringSimple(shapeGen, ANGLE_THRESHOLD, COLOR_SEED);
 
   const msdf = new Float32Array(cellSize * cellSize * 3);
@@ -188,7 +202,7 @@ function generateGlyphCell(
     }
   }
 
-  return { msdf, bytes, size: cellSize, scale, tx, ty, rawShape: shapeVec };
+  return { msdf, bytes, size: cellSize, scale, tx, ty, rawShape: shapeVec, resolvedShape: shapeResolved };
 }
 
 // ── Panel renderers ──────────────────────────────────────────────────────────
@@ -206,12 +220,14 @@ function drawVector(
   ctx: CanvasRenderingContext2D,
   cell: GlyphCell,
   pxrange: number,
+  which: "raw" | "resolved" = "raw",
 ): void {
   ctx.clearRect(0, 0, PANEL, PANEL);
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, PANEL, PANEL);
 
-  const { rawShape, scale, tx, ty, size } = cell;
+  const shape = which === "raw" ? cell.rawShape : cell.resolvedShape;
+  const { scale, tx, ty, size } = cell;
   const k = PANEL / size; // px-per-atlas-texel
 
   // pxrange safe-region border (visual reference only — the glyph itself
@@ -236,7 +252,7 @@ function drawVector(
 
   const tracePath = (): void => {
     ctx.beginPath();
-    for (const contour of rawShape.contours) {
+    for (const contour of shape.contours) {
       if (contour.length === 0) continue;
       const first = contour[0]!;
       ctx.moveTo(first.p0x, first.p0y);
@@ -397,7 +413,7 @@ function drawMedian(
 function buildHeader(root: HTMLElement): void {
   const header = document.createElement("div");
   header.className = "header";
-  const cols = ["", "vector", "rgb", "R", "G", "B", "median"];
+  const cols = ["", "vector", "resolved", "rgb", "R", "G", "B", "median"];
   for (const c of cols) {
     const el = document.createElement("div");
     el.textContent = c;
@@ -443,8 +459,12 @@ function renderGlyphRow(
   row.appendChild(label);
 
   const vec = makePanel("vector");
-  drawVector(vec.getContext("2d")!, cell, pxrange);
+  drawVector(vec.getContext("2d")!, cell, pxrange, "raw");
   row.appendChild(vec);
+
+  const resolved = makePanel("vector");
+  drawVector(resolved.getContext("2d")!, cell, pxrange, "resolved");
+  row.appendChild(resolved);
 
   const rgb = makePanel();
   drawCell(rgb.getContext("2d")!, cell, 7);

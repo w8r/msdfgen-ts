@@ -19,6 +19,7 @@
 
 import { type Font } from "../font/font.js";
 import { emNormalizeShape, normalizeShape } from "../shape/normalize.js";
+import { resolveOverlaps } from "../shape/resolve-overlaps.js";
 import { edgeColoringSimple } from "../msdf/edge-coloring.js";
 import { generateMSDF } from "../msdf/generate.js";
 import { distanceSignCorrection, msdfErrorCorrection } from "../msdf/error-correction.js";
@@ -127,6 +128,10 @@ export class Atlas {
     const shape = this._font.shape(glyphId);
     emNormalizeShape(shape, unitsPerEm);
     normalizeShape(shape);
+    // Non-msdfgen step: resolve overlapping same-winding contours (e.g.
+    // Roboto letters composed of multiple pieces) into an outer+holes
+    // boundary shape before edge coloring. See src/shape/resolve-overlaps.ts.
+    resolveOverlaps(shape);
     edgeColoringSimple(shape, ANGLE_THRESHOLD, COLOR_SEED);
 
     // Fixed em-box cell: whole em square maps to a size×size canvas.

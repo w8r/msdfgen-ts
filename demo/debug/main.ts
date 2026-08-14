@@ -35,8 +35,7 @@ import { distanceSignCorrection, msdfErrorCorrection } from "../../src/msdf/erro
 const PANEL = 200; // px per debug panel
 const ANGLE_THRESHOLD = 3.0; // matches Atlas / msdfgen CLI default
 const COLOR_SEED = 0n; // matches Atlas / msdfgen CLI default
-const DEFAULT_STRING =
-  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+const DEFAULT_STRING = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 
 interface Config {
   fontUrl: string;
@@ -47,8 +46,7 @@ interface Config {
 }
 
 function readConfig(): Config {
-  const $ = <T extends HTMLElement>(id: string): T =>
-    document.getElementById(id) as T;
+  const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
   const mode = $<HTMLSelectElement>("sampling").value;
   return {
     fontUrl: $<HTMLSelectElement>("font").value,
@@ -202,11 +200,7 @@ function generateGlyphCell(
  *   target_x    = pixel_x_yup * (PANEL / cellSize)
  *   target_y    = PANEL − pixel_y_yup * (PANEL / cellSize)   (y-flip)
  */
-function drawVector(
-  ctx: CanvasRenderingContext2D,
-  cell: GlyphCell,
-  pxrange: number,
-): void {
+function drawVector(ctx: CanvasRenderingContext2D, cell: GlyphCell, pxrange: number): void {
   ctx.clearRect(0, 0, PANEL, PANEL);
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, PANEL, PANEL);
@@ -322,9 +316,7 @@ function sampleCell(cell: GlyphCell, sx: number, sy: number): [number, number, n
   const y1 = y0 + 1;
   const bytes = cell.bytes;
   const get = (x: number, y: number, ch: number): number =>
-    x < 0 || y < 0 || x >= n || y >= n
-      ? 0
-      : bytes[(y * n + x) * 3 + ch]! / 255;
+    x < 0 || y < 0 || x >= n || y >= n ? 0 : bytes[(y * n + x) * 3 + ch]! / 255;
   const out: [number, number, number] = [0, 0, 0];
   for (let ch = 0; ch < 3; ch++) {
     const c00 = get(x0, y0, ch);

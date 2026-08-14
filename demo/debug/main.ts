@@ -26,11 +26,11 @@
  * Not shipped as library code — DOM-only debug tooling, so it reaches into
  * `src/msdf/*` internals (not part of the public API surface).
  */
-import { Font, type Shape, LINEAR, QUADRATIC, CUBIC, pixelFloatToByte } from "../../src/index.js";
-import { emNormalizeShape, normalizeShape } from "../../src/shape/normalize.js";
-import { edgeColoringSimple } from "../../src/msdf/edge-coloring.js";
-import { generateMSDF } from "../../src/msdf/generate.js";
-import { distanceSignCorrection, msdfErrorCorrection } from "../../src/msdf/error-correction.js";
+import { Font, type Shape, LINEAR, QUADRATIC, CUBIC, pixelFloatToByte } from "../../src/index";
+import { emNormalizeShape, normalizeShape } from "../../src/shape/normalize";
+import { edgeColoringSimple } from "../../src/msdf/edge-coloring";
+import { generateMSDF } from "../../src/msdf/generate";
+import { distanceSignCorrection, msdfErrorCorrection } from "../../src/msdf/error-correction";
 
 const PANEL = 200; // px per debug panel
 const ANGLE_THRESHOLD = 3.0; // matches Atlas / msdfgen CLI default

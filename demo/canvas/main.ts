@@ -198,10 +198,12 @@ async function main(): Promise<void> {
   atlasImage.data.set(atlas.texture);
   actx.putImageData(atlasImage, 0, 0);
   root.appendChild(atlasCanvas);
+  root.dataset.ready = "true"; // signal for tools/screenshot.mjs
 }
 
 main().catch((err: unknown) => {
   const root = document.getElementById("root")!;
   root.textContent = `Error: ${String(err)}`;
+  root.dataset.ready = "true";
   throw err;
 });

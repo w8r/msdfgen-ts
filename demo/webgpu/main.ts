@@ -52,12 +52,14 @@ async function main(): Promise<void> {
 
   if (!navigator.gpu) {
     root.textContent = "WebGPU is not available in this browser (navigator.gpu is undefined).";
+    root.dataset.ready = "true"; // signal for tools/screenshot.mjs
     return;
   }
 
   const adapter = await navigator.gpu.requestAdapter();
   if (!adapter) {
     root.textContent = "WebGPU adapter request failed (no compatible GPU found).";
+    root.dataset.ready = "true";
     return;
   }
   const device = await adapter.requestDevice();
@@ -245,14 +247,17 @@ async function main(): Promise<void> {
   pass.drawIndexed(6, glyphs.length);
   pass.end();
   device.queue.submit([encoder.finish()]);
+  await device.queue.onSubmittedWorkDone(); // wait for the GPU frame to actually finish before signaling ready
 
   const label = document.createElement("p");
   label.textContent = `Rendered ${glyphs.length} glyphs via WebGPU (${ATLAS_SIZE}px atlas -> ${TARGET_SIZE_CSS}px on screen, dpr=${dpr}).`;
   root.appendChild(label);
+  root.dataset.ready = "true"; // signal for tools/screenshot.mjs
 }
 
 main().catch((err: unknown) => {
   const root = document.getElementById("root")!;
   root.textContent = `Error: ${String(err)}`;
+  root.dataset.ready = "true";
   throw err;
 });

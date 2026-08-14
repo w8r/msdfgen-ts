@@ -51,5 +51,13 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
   let sd = median3(s.r, s.g, s.b) - 0.5;
   let screenPxDistance = uniforms.screenPxRange * sd;
   let opacity = clamp(screenPxDistance + 0.5, 0.0, 1.0);
-  return mix(uniforms.bgColor, uniforms.fgColor, opacity);
+  // Coverage goes in alpha, not baked into rgb: glyph cells overlap their
+  // neighbours by design (pxrange padding > advance width), drawn back to
+  // front. Outputting alpha=1 everywhere (the old `mix(bgColor,fgColor,...)`
+  // with implicit alpha=1) turned every cell into an opaque rectangle, so a
+  // later glyph's transparent background fully overwrote the trailing edge
+  // of the previous glyph instead of blending — the "cut on the right" bug.
+  // uniforms.bgColor is unused here; the render pass's clear color supplies
+  // the background.
+  return vec4<f32>(uniforms.fgColor.rgb, opacity * uniforms.fgColor.a);
 }

@@ -21,6 +21,7 @@
     "screenshot:setup": "playwright install chromium",
     "dev": "vite --open /demo/canvas/index.html",
     "dev:webgpu": "vite --open /demo/webgpu/index.html",
+    "dev:webgl": "vite --open /demo/webgl/index.html",
     "build": "vite build",
     "size": "vite build && gzip -c dist/msdfgen-ts.iife.js | wc -c | awk '{printf \"%.1f KB (iife, gzip)\\n\", $1/1024}'",
     "lint": "oxlint src/ test/",

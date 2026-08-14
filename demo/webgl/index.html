@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>msdfgen-ts — WebGL2 test renderer (verification only, not the M5 demo)</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 24px;
+        background: #f2f2f2;
+        font-family: system-ui, sans-serif;
+        color: #111;
+      }
+      h1 {
+        font-size: 18px;
+      }
+      p {
+        color: #555;
+        font-size: 14px;
+      }
+      .gl-canvas {
+        display: block;
+        border: 1px solid #ddd;
+        background: white;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>msdfgen-ts — WebGL2 test renderer</h1>
+    <p>
+      Not the M5 deliverable (that's WebGPU, see /demo/webgpu/). This page exists only so
+      tools/screenshot.mjs can verify the instanced-quad MSDF layout/reconstruction on real
+      software-rendered GPU output where a WebGPU adapter isn't available.
+    </p>
+    <div id="root">Requesting WebGL2 context…</div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

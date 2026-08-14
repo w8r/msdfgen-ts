@@ -1,5 +1,6 @@
 node_modules/
 dist/
+demo-dist/
 tools/msdfgen-ref/
 tools/atlas-preview-out/
 tools/screenshot-out/

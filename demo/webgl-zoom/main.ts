@@ -19,7 +19,8 @@ import { Font, Atlas, type GlyphInfo } from "../../src/index";
 import vertSource from "../webgl/msdf.vert.glsl?raw";
 import fragSource from "../webgl/msdf.frag.glsl?raw";
 
-const FONT_URL = "/test/fonts/PTSerif-Regular.ttf";
+// See demo/canvas/main.ts for why this isn't a hardcoded leading-slash path.
+const FONT_URL = `${import.meta.env.BASE_URL}test/fonts/PTSerif-Regular.ttf`;
 const ATLAS_SIZE = 64;
 const ATLAS_PXRANGE = 8;
 const BASE_PX_PER_EM = 48; // pixel-per-em at zoom = 1
@@ -119,12 +120,11 @@ async function main(): Promise<void> {
   readout.className = "readout";
   root.appendChild(readout);
 
-
   const buf = await fetch(FONT_URL).then((r) => r.arrayBuffer());
-  console.time('Font + Atlas build');
+  console.time("Font + Atlas build");
   const font = new Font(buf);
   const atlas = new Atlas(font, { size: ATLAS_SIZE, pxrange: ATLAS_PXRANGE });
-  console.timeEnd('Font + Atlas build');
+  console.timeEnd("Font + Atlas build");
   const { glyphs, widthEm } = layout(font, atlas, TEXT);
 
   // ── Atlas texture (built once — single fixed tier) ──────────────────────

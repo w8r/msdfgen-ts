@@ -19,7 +19,8 @@ import { Font, Atlas, type GlyphInfo } from "../../src/index";
 import vertSource from "./msdf.vert.glsl?raw";
 import fragSource from "./msdf.frag.glsl?raw";
 
-const FONT_URL = "/test/fonts/PTSerif-Regular.ttf";
+// See demo/canvas/main.ts for why this isn't a hardcoded leading-slash path.
+const FONT_URL = `${import.meta.env.BASE_URL}test/fonts/PTSerif-Regular.ttf`;
 const ATLAS_SIZE = 64;
 const ATLAS_PXRANGE = 8;
 const OUTPUT_SIZES = [16, 32, 64, 128, 256]; // em-sizes to render the same atlas at

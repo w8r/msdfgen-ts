@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>msdfgen-ts — demos</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 24px;
+        background: #f2f2f2;
+        font-family: system-ui, sans-serif;
+        color: #111;
+        max-width: 720px;
+      }
+      h1 {
+        font-size: 20px;
+        margin-bottom: 4px;
+      }
+      p.lede {
+        color: #555;
+        font-size: 14px;
+        margin-top: 0;
+      }
+      ul {
+        list-style: none;
+        padding: 0;
+      }
+      li {
+        margin: 12px 0;
+        padding: 14px 16px;
+        background: white;
+        border: 1px solid #ddd;
+        border-radius: 6px;
+      }
+      li a {
+        font-size: 16px;
+        font-weight: 600;
+        color: #111;
+        text-decoration: none;
+      }
+      li a:hover {
+        text-decoration: underline;
+      }
+      li p {
+        margin: 4px 0 0 0;
+        font-size: 13px;
+        color: #666;
+      }
+      .tag {
+        display: inline-block;
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: #888;
+        background: #eee;
+        border-radius: 3px;
+        padding: 1px 6px;
+        margin-left: 8px;
+        vertical-align: middle;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>msdfgen-ts — demos</h1>
+    <p class="lede">
+      TypeScript port of Chlumsky/msdfgen — runtime MSDF atlas generation, no WASM.
+      <a href="https://github.com/w8r/msdfgen-ts">Source</a>.
+    </p>
+    <ul>
+      <li>
+        <a href="./canvas/index.html">CPU canvas fallback</a><span class="tag">reference</span>
+        <p>One atlas, several output sizes, reconstructed on the CPU with 2D canvas — no GPU needed.</p>
+      </li>
+      <li>
+        <a href="./webgpu/index.html">WebGPU renderer</a><span class="tag">M5</span>
+        <p>The real deliverable: instanced-quad WGSL median shader. Static render for now.</p>
+      </li>
+      <li>
+        <a href="./webgl-zoom/index.html">WebGL2 pan/zoom</a><span class="tag">interactive</span>
+        <p>Drag to pan, wheel/pinch to zoom toward the cursor, over a single fixed atlas tier.</p>
+      </li>
+      <li>
+        <a href="./webgl/index.html">WebGL2 test renderer</a><span class="tag">test-only</span>
+        <p>Same instanced-quad renderer as the WebGPU demo, for browsers/CI without a WebGPU adapter.</p>
+      </li>
+      <li>
+        <a href="./debug/index.html">MSDF debug view</a><span class="tag">dev tool</span>
+        <p>Per-glyph vector/RGB/channel/median panels — for inspecting coloring and error-correction.</p>
+      </li>
+    </ul>
+  </body>
+</html>

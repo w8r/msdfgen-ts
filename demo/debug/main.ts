@@ -48,8 +48,12 @@ interface Config {
 function readConfig(): Config {
   const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
   const mode = $<HTMLSelectElement>("sampling").value;
+  // The <option value>s are root-relative ("/test/fonts/...") for readability
+  // in the HTML; rewrite to import.meta.env.BASE_URL here so this still
+  // resolves once deployed under a non-root base (see demo/canvas/main.ts).
+  const rawFontUrl = $<HTMLSelectElement>("font").value;
   return {
-    fontUrl: $<HTMLSelectElement>("font").value,
+    fontUrl: import.meta.env.BASE_URL + rawFontUrl.replace(/^\//, ""),
     size: Number($<HTMLInputElement>("size").value) || 16,
     pxrange: Number($<HTMLInputElement>("pxrange").value) || 2,
     glyphs: $<HTMLInputElement>("glyphs").value || DEFAULT_STRING,

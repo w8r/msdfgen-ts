@@ -16,7 +16,11 @@
  */
 import { Font, Atlas, type GlyphInfo } from "../../src/index";
 
-const FONT_URL = "/test/fonts/PTSerif-Regular.ttf";
+// import.meta.env.BASE_URL is "/" in dev; under vite.demo.config.ts's build
+// (deployed to GH Pages under /msdfgen-ts/) it's "/msdfgen-ts/" — a hardcoded
+// leading-slash path would 404 there since fetch() URLs aren't base-rewritten
+// by Vite like import/HTML asset references are.
+const FONT_URL = `${import.meta.env.BASE_URL}test/fonts/PTSerif-Regular.ttf`;
 const ATLAS_SIZE = 64; // generation resolution: px per em cell
 const ATLAS_PXRANGE = 8;
 const OUTPUT_SIZES = [16, 32, 64, 128, 256]; // em-sizes to render the same atlas at

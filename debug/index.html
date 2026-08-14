@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>msdfgen-ts — MSDF debug view</title>
+    <style>
+      :root {
+        --paper: #f5f5f5;
+        --ink: #2d3142;
+        --muted: #4f5d75;
+        --soft: #7a8399;
+        --rule: rgba(45, 49, 66, 0.1);
+        --accent: #eb6c36;
+      }
+      body {
+        margin: 0;
+        padding: 24px;
+        background: var(--paper);
+        color: var(--ink);
+        font-family: system-ui, sans-serif;
+      }
+      h1 {
+        font-size: 20px;
+        margin: 0 0 4px 0;
+      }
+      .lede {
+        color: var(--muted);
+        font-size: 13px;
+        margin: 0 0 16px 0;
+        max-width: 60em;
+      }
+      .controls {
+        margin: 8px 0 20px 0;
+        display: flex;
+        gap: 16px;
+        align-items: center;
+        font-size: 13px;
+        color: var(--muted);
+      }
+      .controls label {
+        display: inline-flex;
+        gap: 6px;
+        align-items: center;
+      }
+      .controls input[type="number"],
+      .controls select {
+        font: inherit;
+        padding: 2px 6px;
+        border: 1px solid var(--rule);
+        background: white;
+        border-radius: 3px;
+      }
+      .header,
+      .row {
+        display: grid;
+        grid-template-columns: 44px 200px 200px 200px 200px 200px 200px;
+        gap: 8px;
+        align-items: end;
+        padding: 8px 0;
+        border-bottom: 1px solid var(--rule);
+      }
+      .header {
+        position: sticky;
+        top: 0;
+        background: var(--paper);
+        z-index: 2;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--soft);
+        border-bottom: 1px solid var(--ink);
+      }
+      .row .label {
+        font-family: ui-monospace, monospace;
+        font-size: 22px;
+        color: var(--ink);
+        text-align: center;
+        padding-bottom: 4px;
+      }
+      canvas {
+        display: block;
+        image-rendering: pixelated;
+        background: #111;
+        width: 200px;
+        height: 200px;
+      }
+      canvas.vector {
+        background: #ffffff;
+      }
+      canvas.median {
+        background: #ffffff;
+      }
+      .cell-caption {
+        font-size: 10px;
+        color: var(--soft);
+        font-family: ui-monospace, monospace;
+        margin-top: 2px;
+      }
+    </style>
+    <script type="module" crossorigin src="/msdfgen-ts/assets/debug-DK5LtQNp.js"></script>
+    <link rel="modulepreload" crossorigin href="/msdfgen-ts/assets/atlas-CcUXf4Jh.js">
+  </head>
+  <body>
+    <h1>MSDF debug view</h1>
+    <p class="lede">
+      Every row is one glyph, generated into a small MSDF cell (default 16×16 texels, pxrange 4)
+      and shown at 200×200. All six views share the same cell-space transform, so features line up
+      pixel-for-pixel — useful for spotting coloring bugs, error-correction glitches, and channel
+      misalignment. The <b>median</b> column reconstructs opacity the way a real MSDF text shader
+      does (median(r,g,b) − 0.5, clamped after scaling).
+    </p>
+    <div class="controls">
+      <label>Font
+        <select id="font">
+          <option value="/test/fonts/PTSerif-Regular.ttf" selected>PT Serif</option>
+          <option value="/test/fonts/Roboto.ttf">Roboto</option>
+          <option value="/test/fonts/NotoSans.ttf">Noto Sans</option>
+          <option value="/test/fonts/Arvo-Regular.ttf">Arvo</option>
+        </select>
+      </label>
+      <label>Cell size
+        <input id="size" type="number" min="8" max="64" step="1" value="16" />
+      </label>
+      <label>pxrange
+        <input id="pxrange" type="number" min="1" max="8" step="1" value="2" />
+      </label>
+      <label>Glyphs
+        <input id="glyphs" type="text" size="30" value="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789" />
+      </label>
+      <label>Sampling
+        <select id="sampling">
+          <option value="naive">naive (dy/scale)</option>
+          <option value="gpu" selected>gpu (texel-centre)</option>
+        </select>
+      </label>
+      <button id="regen">Regenerate</button>
+    </div>
+    <div id="root">Loading…</div>
+  </body>
+</html>

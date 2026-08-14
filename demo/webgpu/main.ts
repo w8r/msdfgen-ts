@@ -6,6 +6,12 @@
  * correctly, sourced from the same Atlas as demo/canvas/main.ts's CPU
  * reconstruction. Camera/zoom/tiering come in later checkpoints once this
  * is confirmed working in a real WebGPU-capable browser.
+ *
+ * Renders the same atlas at several output sizes (like demo/canvas/main.ts's
+ * OUTPUT_SIZES showcase) — one small atlas, several on-screen scales, same
+ * source texels every time. Device-level resources (pipeline, sampler,
+ * atlas texture, bind group) are created once and shared; only the
+ * per-canvas context, instance buffer, and uniform buffer differ per size.
  */
 import { Font, Atlas, type GlyphInfo } from "../../src/index";
 import shaderCode from "./msdf.wgsl?raw";
@@ -13,9 +19,7 @@ import shaderCode from "./msdf.wgsl?raw";
 const FONT_URL = "/test/fonts/PTSerif-Regular.ttf";
 const ATLAS_SIZE = 64;
 const ATLAS_PXRANGE = 8;
-const TARGET_SIZE_CSS = 64; // px per em, in CSS pixels (scaled by devicePixelRatio for the backing buffer)
-const CANVAS_CSS_WIDTH = 900;
-const CANVAS_CSS_HEIGHT = 220;
+const OUTPUT_SIZES = [16, 32, 64, 128, 256]; // em-sizes to render the same atlas at
 const TEXT = "Hello Привет 123 @#&";
 const FG_COLOR: [number, number, number, number] = [0.08, 0.08, 0.08, 1];
 const BG_COLOR: [number, number, number, number] = [1, 1, 1, 1];
@@ -47,68 +51,38 @@ function layout(
   return { glyphs, widthEm: penX };
 }
 
-async function main(): Promise<void> {
-  const root = document.getElementById("root")!;
-
-  if (!navigator.gpu) {
-    root.textContent = "WebGPU is not available in this browser (navigator.gpu is undefined).";
-    root.dataset.ready = "true"; // signal for tools/screenshot.mjs
-    return;
-  }
-
-  const adapter = await navigator.gpu.requestAdapter();
-  if (!adapter) {
-    root.textContent = "WebGPU adapter request failed (no compatible GPU found).";
-    root.dataset.ready = "true";
-    return;
-  }
-  const device = await adapter.requestDevice();
-
-  root.textContent = "";
-  // Backing buffer must be sized in device pixels, not CSS pixels, or the
-  // canvas gets upscaled by the compositor on any HiDPI display — that
-  // mismatch is what makes everything look soft/blurry.
-  const dpr = window.devicePixelRatio || 1;
+/**
+ * Renders `glyphs` (laid out in em units) at `targetSizeCss` px-per-em onto a
+ * fresh canvas, reusing the shared device/pipeline/bindGroup built once in
+ * main(). Returns the canvas once the GPU frame has actually finished.
+ */
+async function renderAtSize(
+  device: GPUDevice,
+  pipeline: GPURenderPipeline,
+  bindGroupLayout: GPUBindGroupLayout,
+  uniformEntries: (buffer: GPUBuffer) => GPUBindGroupEntry[],
+  quadBuffer: GPUBuffer,
+  indexBuffer: GPUBuffer,
+  atlas: Atlas,
+  glyphs: LayoutGlyph[],
+  widthEm: number,
+  targetSizeCss: number,
+  dpr: number,
+  format: GPUTextureFormat,
+): Promise<HTMLCanvasElement> {
+  const cssWidth = Math.ceil((widthEm + 0.6) * targetSizeCss);
+  const cssHeight = Math.ceil(1.6 * targetSizeCss);
   const canvas = document.createElement("canvas");
-  canvas.width = Math.round(CANVAS_CSS_WIDTH * dpr);
-  canvas.height = Math.round(CANVAS_CSS_HEIGHT * dpr);
-  canvas.style.width = `${CANVAS_CSS_WIDTH}px`;
-  canvas.style.height = `${CANVAS_CSS_HEIGHT}px`;
+  canvas.width = Math.round(cssWidth * dpr);
+  canvas.height = Math.round(cssHeight * dpr);
+  canvas.style.width = `${cssWidth}px`;
+  canvas.style.height = `${cssHeight}px`;
   canvas.className = "gpu-canvas";
-  root.appendChild(canvas);
-  const targetSize = TARGET_SIZE_CSS * dpr; // em size in device pixels — all layout math below is device-pixel space
+  const targetSize = targetSizeCss * dpr;
 
   const context = canvas.getContext("webgpu")!;
-  const format = navigator.gpu.getPreferredCanvasFormat();
   context.configure({ device, format, alphaMode: "opaque" });
 
-  const buf = await fetch(FONT_URL).then((r) => r.arrayBuffer());
-  const font = new Font(buf);
-  const atlas = new Atlas(font, { size: ATLAS_SIZE, pxrange: ATLAS_PXRANGE });
-  const { glyphs } = layout(font, atlas, TEXT);
-
-  // ── Atlas texture ────────────────────────────────────────────────────────
-  const atlasTexture = device.createTexture({
-    size: [atlas.width, atlas.height],
-    format: "rgba8unorm",
-    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
-  });
-  device.queue.writeTexture(
-    { texture: atlasTexture },
-    atlas.texture,
-    { bytesPerRow: atlas.width * 4 },
-    { width: atlas.width, height: atlas.height },
-  );
-  // Adjacent atlas cells are packed with zero gap (see ShelfPacker) — sampling
-  // exactly at a cell's edge with bilinear filtering would blend in the next
-  // glyph's texels. Inset the sampled UV rect by half a texel on each side so
-  // no sample ever reaches outside this glyph's own cell.
-  const sampler = device.createSampler({
-    magFilter: "linear",
-    minFilter: "linear",
-    addressModeU: "clamp-to-edge",
-    addressModeV: "clamp-to-edge",
-  });
   const halfTexelU = 0.5 / atlas.width;
   const halfTexelV = 0.5 / atlas.height;
 
@@ -119,7 +93,7 @@ async function main(): Promise<void> {
   const outputScale = targetSize / genScale;
   const screenPxRange = ATLAS_PXRANGE * outputScale;
   const padEm = 0.3;
-  const baselineY = 0.6 * canvas.height;
+  const baselineY = 0.75 * canvas.height;
 
   const FLOATS_PER_INSTANCE = 8;
   const instanceData = new Float32Array(glyphs.length * FLOATS_PER_INSTANCE);
@@ -146,22 +120,6 @@ async function main(): Promise<void> {
   });
   device.queue.writeBuffer(instanceBuffer, 0, instanceData);
 
-  // ── Unit quad (shared across all instances) ─────────────────────────────
-  // prettier-ignore
-  const quadCorners = new Float32Array([0, 0, 1, 0, 0, 1, 1, 1]);
-  const quadBuffer = device.createBuffer({
-    size: quadCorners.byteLength,
-    usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
-  });
-  device.queue.writeBuffer(quadBuffer, 0, quadCorners);
-
-  const quadIndices = new Uint16Array([0, 1, 2, 2, 1, 3]);
-  const indexBuffer = device.createBuffer({
-    size: quadIndices.byteLength,
-    usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
-  });
-  device.queue.writeBuffer(indexBuffer, 0, quadIndices);
-
   // ── Uniforms: viewportSize(vec2) + screenPxRange(f32) + pad(f32) + fgColor(vec4) + bgColor(vec4) ──
   const uniformData = new Float32Array([
     canvas.width,
@@ -177,7 +135,103 @@ async function main(): Promise<void> {
   });
   device.queue.writeBuffer(uniformBuffer, 0, uniformData);
 
-  // ── Pipeline ─────────────────────────────────────────────────────────────
+  const bindGroup = device.createBindGroup({
+    layout: bindGroupLayout,
+    entries: uniformEntries(uniformBuffer),
+  });
+
+  const encoder = device.createCommandEncoder();
+  const pass = encoder.beginRenderPass({
+    colorAttachments: [
+      {
+        view: context.getCurrentTexture().createView(),
+        clearValue: { r: BG_COLOR[0], g: BG_COLOR[1], b: BG_COLOR[2], a: BG_COLOR[3] },
+        loadOp: "clear",
+        storeOp: "store",
+      },
+    ],
+  });
+  pass.setPipeline(pipeline);
+  pass.setBindGroup(0, bindGroup);
+  pass.setVertexBuffer(0, quadBuffer);
+  pass.setVertexBuffer(1, instanceBuffer);
+  pass.setIndexBuffer(indexBuffer, "uint16");
+  pass.drawIndexed(6, glyphs.length);
+  pass.end();
+  device.queue.submit([encoder.finish()]);
+  await device.queue.onSubmittedWorkDone(); // wait for the GPU frame to actually finish before returning
+
+  return canvas;
+}
+
+async function main(): Promise<void> {
+  const root = document.getElementById("root")!;
+
+  if (!navigator.gpu) {
+    root.textContent = "WebGPU is not available in this browser (navigator.gpu is undefined).";
+    root.dataset.ready = "true"; // signal for tools/screenshot.mjs
+    return;
+  }
+
+  const adapter = await navigator.gpu.requestAdapter();
+  if (!adapter) {
+    root.textContent = "WebGPU adapter request failed (no compatible GPU found).";
+    root.dataset.ready = "true";
+    return;
+  }
+  const device = await adapter.requestDevice();
+  const format = navigator.gpu.getPreferredCanvasFormat();
+  const dpr = window.devicePixelRatio || 1;
+
+  root.textContent = "Loading font…";
+  const buf = await fetch(FONT_URL).then((r) => r.arrayBuffer());
+  const font = new Font(buf);
+  const atlas = new Atlas(font, { size: ATLAS_SIZE, pxrange: ATLAS_PXRANGE });
+  const { glyphs, widthEm } = layout(font, atlas, TEXT);
+
+  // ── Atlas texture + sampler (shared across all output sizes) ────────────
+  const atlasTexture = device.createTexture({
+    size: [atlas.width, atlas.height],
+    format: "rgba8unorm",
+    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+  });
+  device.queue.writeTexture(
+    { texture: atlasTexture },
+    atlas.texture,
+    { bytesPerRow: atlas.width * 4 },
+    { width: atlas.width, height: atlas.height },
+  );
+  // Adjacent atlas cells are packed with zero gap (see ShelfPacker) — sampling
+  // exactly at a cell's edge with bilinear filtering would blend in the next
+  // glyph's texels. Inset the sampled UV rect by half a texel on each side so
+  // no sample ever reaches outside this glyph's own cell (done per-instance
+  // in renderAtSize).
+  const sampler = device.createSampler({
+    magFilter: "linear",
+    minFilter: "linear",
+    addressModeU: "clamp-to-edge",
+    addressModeV: "clamp-to-edge",
+  });
+
+  // ── Unit quad + index buffer (shared across all instances and sizes) ────
+  // prettier-ignore
+  const quadCorners = new Float32Array([0, 0, 1, 0, 0, 1, 1, 1]);
+  const quadBuffer = device.createBuffer({
+    size: quadCorners.byteLength,
+    usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+  });
+  device.queue.writeBuffer(quadBuffer, 0, quadCorners);
+
+  const quadIndices = new Uint16Array([0, 1, 2, 2, 1, 3]);
+  const indexBuffer = device.createBuffer({
+    size: quadIndices.byteLength,
+    usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
+  });
+  device.queue.writeBuffer(indexBuffer, 0, quadIndices);
+
+  const FLOATS_PER_INSTANCE = 8;
+
+  // ── Pipeline (shared — layout: "auto" derives one bind group layout) ────
   const module = device.createShaderModule({ code: shaderCode });
   const pipeline = device.createRenderPipeline({
     layout: "auto",
@@ -217,41 +271,40 @@ async function main(): Promise<void> {
     },
     primitive: { topology: "triangle-list" },
   });
+  const bindGroupLayout = pipeline.getBindGroupLayout(0);
+  const uniformEntries = (uniformBuffer: GPUBuffer): GPUBindGroupEntry[] => [
+    { binding: 0, resource: { buffer: uniformBuffer } },
+    { binding: 1, resource: sampler },
+    { binding: 2, resource: atlasTexture.createView() },
+  ];
 
-  const bindGroup = device.createBindGroup({
-    layout: pipeline.getBindGroupLayout(0),
-    entries: [
-      { binding: 0, resource: { buffer: uniformBuffer } },
-      { binding: 1, resource: sampler },
-      { binding: 2, resource: atlasTexture.createView() },
-    ],
-  });
+  root.textContent = "";
+  const info = document.createElement("p");
+  info.textContent = `One ${ATLAS_SIZE}px atlas (pxrange ${ATLAS_PXRANGE}) via WebGPU, rendered at: ${OUTPUT_SIZES.join(", ")}px — same source texels every time.`;
+  root.appendChild(info);
 
-  // ── Render (static — one frame is enough for now) ───────────────────────
-  const encoder = device.createCommandEncoder();
-  const pass = encoder.beginRenderPass({
-    colorAttachments: [
-      {
-        view: context.getCurrentTexture().createView(),
-        clearValue: { r: 1, g: 1, b: 1, a: 1 },
-        loadOp: "clear",
-        storeOp: "store",
-      },
-    ],
-  });
-  pass.setPipeline(pipeline);
-  pass.setBindGroup(0, bindGroup);
-  pass.setVertexBuffer(0, quadBuffer);
-  pass.setVertexBuffer(1, instanceBuffer);
-  pass.setIndexBuffer(indexBuffer, "uint16");
-  pass.drawIndexed(6, glyphs.length);
-  pass.end();
-  device.queue.submit([encoder.finish()]);
-  await device.queue.onSubmittedWorkDone(); // wait for the GPU frame to actually finish before signaling ready
+  for (const size of OUTPUT_SIZES) {
+    const label = document.createElement("div");
+    label.className = "label";
+    label.textContent = `${size}px`;
+    root.appendChild(label);
+    const canvas = await renderAtSize(
+      device,
+      pipeline,
+      bindGroupLayout,
+      uniformEntries,
+      quadBuffer,
+      indexBuffer,
+      atlas,
+      glyphs,
+      widthEm,
+      size,
+      dpr,
+      format,
+    );
+    root.appendChild(canvas);
+  }
 
-  const label = document.createElement("p");
-  label.textContent = `Rendered ${glyphs.length} glyphs via WebGPU (${ATLAS_SIZE}px atlas -> ${TARGET_SIZE_CSS}px on screen, dpr=${dpr}).`;
-  root.appendChild(label);
   root.dataset.ready = "true"; // signal for tools/screenshot.mjs
 }
 

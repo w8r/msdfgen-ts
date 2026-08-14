@@ -10,6 +10,10 @@
  * to catch layout/UV/reconstruction bugs before real WebGPU hardware is
  * available. Same layout constants, same text, same colors as
  * demo/webgpu/main.ts so screenshots from both are directly comparable.
+ *
+ * Renders the same atlas at several output sizes (like demo/canvas/main.ts's
+ * OUTPUT_SIZES showcase) — one small atlas, several on-screen scales, same
+ * source texels every time.
  */
 import { Font, Atlas, type GlyphInfo } from "../../src/index";
 import vertSource from "./msdf.vert.glsl?raw";
@@ -18,9 +22,7 @@ import fragSource from "./msdf.frag.glsl?raw";
 const FONT_URL = "/test/fonts/PTSerif-Regular.ttf";
 const ATLAS_SIZE = 64;
 const ATLAS_PXRANGE = 8;
-const TARGET_SIZE_CSS = 64;
-const CANVAS_CSS_WIDTH = 900;
-const CANVAS_CSS_HEIGHT = 220;
+const OUTPUT_SIZES = [16, 32, 64, 128, 256]; // em-sizes to render the same atlas at
 const TEXT = "Hello Привет 123 @#&";
 const FG_COLOR: [number, number, number, number] = [0.08, 0.08, 0.08, 1];
 const BG_COLOR: [number, number, number, number] = [1, 1, 1, 1];
@@ -81,32 +83,31 @@ function linkProgram(gl: WebGL2RenderingContext, vertSrc: string, fragSrc: strin
   return program;
 }
 
-async function main(): Promise<void> {
-  const root = document.getElementById("root")!;
-
-  const dpr = window.devicePixelRatio || 1;
+/**
+ * Renders `glyphs` (laid out in em units) at `targetSizeCss` px-per-em onto a
+ * fresh canvas via its own WebGL2 context, sampling from `atlas`. Each canvas
+ * gets its own context (WebGL2 contexts aren't shareable across canvases),
+ * but all of them read the same atlas texel data — only the output scale
+ * (and thus screenPxRange) differs.
+ */
+function renderAtSize(
+  atlas: Atlas,
+  glyphs: LayoutGlyph[],
+  widthEm: number,
+  targetSizeCss: number,
+  dpr: number,
+): HTMLCanvasElement {
+  const cssWidth = Math.ceil((widthEm + 0.6) * targetSizeCss);
+  const cssHeight = Math.ceil(1.6 * targetSizeCss);
   const canvas = document.createElement("canvas");
-  canvas.width = Math.round(CANVAS_CSS_WIDTH * dpr);
-  canvas.height = Math.round(CANVAS_CSS_HEIGHT * dpr);
-  canvas.style.width = `${CANVAS_CSS_WIDTH}px`;
-  canvas.style.height = `${CANVAS_CSS_HEIGHT}px`;
+  canvas.width = Math.round(cssWidth * dpr);
+  canvas.height = Math.round(cssHeight * dpr);
+  canvas.style.width = `${cssWidth}px`;
+  canvas.style.height = `${cssHeight}px`;
   canvas.className = "gl-canvas";
 
-  const gl = canvas.getContext("webgl2");
-  if (!gl) {
-    root.textContent = "WebGL2 is not available in this browser.";
-    root.dataset.ready = "true"; // signal for tools/screenshot.mjs
-    return;
-  }
-
-  root.textContent = "";
-  root.appendChild(canvas);
-  const targetSize = TARGET_SIZE_CSS * dpr;
-
-  const buf = await fetch(FONT_URL).then((r) => r.arrayBuffer());
-  const font = new Font(buf);
-  const atlas = new Atlas(font, { size: ATLAS_SIZE, pxrange: ATLAS_PXRANGE });
-  const { glyphs } = layout(font, atlas, TEXT);
+  const gl = canvas.getContext("webgl2")!;
+  const targetSize = targetSizeCss * dpr;
 
   // ── Atlas texture ────────────────────────────────────────────────────────
   const atlasTexture = gl.createTexture();
@@ -123,9 +124,10 @@ async function main(): Promise<void> {
     gl.UNSIGNED_BYTE,
     atlas.texture,
   );
-  // Same half-texel UV inset as demo/webgpu/main.ts — adjacent atlas cells
-  // are packed with zero gap (see ShelfPacker), so bilinear sampling right at
-  // a cell edge would bleed into the next glyph without this.
+  // Adjacent atlas cells are packed with zero gap (see ShelfPacker) —
+  // sampling exactly at a cell's edge with bilinear filtering would blend in
+  // the next glyph's texels. Inset the sampled UV rect by half a texel on
+  // each side so no sample ever reaches outside this glyph's own cell.
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
@@ -140,7 +142,7 @@ async function main(): Promise<void> {
   const outputScale = targetSize / genScale;
   const screenPxRange = ATLAS_PXRANGE * outputScale;
   const padEm = 0.3;
-  const baselineY = 0.6 * canvas.height;
+  const baselineY = 0.75 * canvas.height;
 
   const FLOATS_PER_INSTANCE = 8;
   const instanceData = new Float32Array(glyphs.length * FLOATS_PER_INSTANCE);
@@ -193,7 +195,7 @@ async function main(): Promise<void> {
 
   // ── Render (static — one frame is enough for now) ───────────────────────
   gl.viewport(0, 0, canvas.width, canvas.height);
-  gl.clearColor(1, 1, 1, 1);
+  gl.clearColor(...BG_COLOR);
   gl.clear(gl.COLOR_BUFFER_BIT);
 
   gl.useProgram(program);
@@ -211,9 +213,40 @@ async function main(): Promise<void> {
   gl.bindVertexArray(vao);
   gl.drawElementsInstanced(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0, glyphs.length);
 
-  const label = document.createElement("p");
-  label.textContent = `Rendered ${glyphs.length} glyphs via WebGL2 (${ATLAS_SIZE}px atlas -> ${TARGET_SIZE_CSS}px on screen, dpr=${dpr}).`;
-  root.appendChild(label);
+  return canvas;
+}
+
+async function main(): Promise<void> {
+  const root = document.getElementById("root")!;
+
+  const probe = document.createElement("canvas").getContext("webgl2");
+  if (!probe) {
+    root.textContent = "WebGL2 is not available in this browser.";
+    root.dataset.ready = "true"; // signal for tools/screenshot.mjs
+    return;
+  }
+
+  root.textContent = "Loading font…";
+  const dpr = window.devicePixelRatio || 1;
+
+  const buf = await fetch(FONT_URL).then((r) => r.arrayBuffer());
+  const font = new Font(buf);
+  const atlas = new Atlas(font, { size: ATLAS_SIZE, pxrange: ATLAS_PXRANGE });
+  const { glyphs, widthEm } = layout(font, atlas, TEXT);
+
+  root.textContent = "";
+  const info = document.createElement("p");
+  info.textContent = `One ${ATLAS_SIZE}px atlas (pxrange ${ATLAS_PXRANGE}) via WebGL2, rendered at: ${OUTPUT_SIZES.join(", ")}px — same source texels every time.`;
+  root.appendChild(info);
+
+  for (const size of OUTPUT_SIZES) {
+    const label = document.createElement("div");
+    label.className = "label";
+    label.textContent = `${size}px`;
+    root.appendChild(label);
+    root.appendChild(renderAtSize(atlas, glyphs, widthEm, size, dpr));
+  }
+
   root.dataset.ready = "true"; // signal for tools/screenshot.mjs
 }
 

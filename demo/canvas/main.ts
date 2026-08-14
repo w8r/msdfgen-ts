@@ -17,8 +17,8 @@
 import { Font, Atlas, type GlyphInfo } from "../../src/index";
 
 const FONT_URL = "/test/fonts/PTSerif-Regular.ttf";
-const ATLAS_SIZE = 32; // generation resolution: px per em cell
-const ATLAS_PXRANGE = 4;
+const ATLAS_SIZE = 64; // generation resolution: px per em cell
+const ATLAS_PXRANGE = 8;
 const OUTPUT_SIZES = [16, 32, 64, 128, 256]; // em-sizes to render the same atlas at
 const TEXT = "Hello Привет 123 @#&";
 

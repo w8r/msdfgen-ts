@@ -16,8 +16,8 @@ import vertSource from "./msdf.vert.glsl?raw";
 import fragSource from "./msdf.frag.glsl?raw";
 
 const FONT_URL = "/test/fonts/PTSerif-Regular.ttf";
-const ATLAS_SIZE = 32;
-const ATLAS_PXRANGE = 4;
+const ATLAS_SIZE = 64;
+const ATLAS_PXRANGE = 8;
 const TARGET_SIZE_CSS = 64;
 const CANVAS_CSS_WIDTH = 900;
 const CANVAS_CSS_HEIGHT = 220;

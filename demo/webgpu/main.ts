@@ -11,8 +11,8 @@ import { Font, Atlas, type GlyphInfo } from "../../src/index";
 import shaderCode from "./msdf.wgsl?raw";
 
 const FONT_URL = "/test/fonts/PTSerif-Regular.ttf";
-const ATLAS_SIZE = 32;
-const ATLAS_PXRANGE = 4;
+const ATLAS_SIZE = 64;
+const ATLAS_PXRANGE = 8;
 const TARGET_SIZE_CSS = 64; // px per em, in CSS pixels (scaled by devicePixelRatio for the backing buffer)
 const CANVAS_CSS_WIDTH = 900;
 const CANVAS_CSS_HEIGHT = 220;

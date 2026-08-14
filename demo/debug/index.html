@@ -120,10 +120,16 @@
         <input id="size" type="number" min="8" max="64" step="1" value="16" />
       </label>
       <label>pxrange
-        <input id="pxrange" type="number" min="1" max="8" step="1" value="1" />
+        <input id="pxrange" type="number" min="1" max="8" step="1" value="2" />
       </label>
       <label>Glyphs
         <input id="glyphs" type="text" size="30" value="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789" />
+      </label>
+      <label>Sampling
+        <select id="sampling">
+          <option value="naive">naive (dy/scale)</option>
+          <option value="gpu" selected>gpu (texel-centre)</option>
+        </select>
       </label>
       <button id="regen">Regenerate</button>
     </div>

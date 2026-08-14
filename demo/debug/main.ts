@@ -43,16 +43,19 @@ interface Config {
   size: number;
   pxrange: number;
   glyphs: string;
+  sampling: SamplingMode;
 }
 
 function readConfig(): Config {
   const $ = <T extends HTMLElement>(id: string): T =>
     document.getElementById(id) as T;
+  const mode = $<HTMLSelectElement>("sampling").value;
   return {
     fontUrl: $<HTMLSelectElement>("font").value,
     size: Number($<HTMLInputElement>("size").value) || 16,
-    pxrange: Number($<HTMLInputElement>("pxrange").value) || 4,
+    pxrange: Number($<HTMLInputElement>("pxrange").value) || 2,
     glyphs: $<HTMLInputElement>("glyphs").value || DEFAULT_STRING,
+    sampling: mode === "gpu" ? "gpu" : "naive",
   };
 }
 
@@ -129,8 +132,9 @@ interface GlyphCell {
 
 /**
  * Generates a single glyph MSDF into a fresh Float32Array, sized `cellSize²`,
- * with per-glyph scale/tx/ty that fits the glyph's actual bbox into the cell
- * (leaving `pxrange` texels of padding on every side).
+ * with per-glyph scale/tx/ty that fits the glyph's actual bbox edge-to-edge
+ * into the full cell (no safe-region padding — the field's transition band
+ * extends past the cell boundary where the bbox touches the edge).
  */
 function generateGlyphCell(
   font: Font,
@@ -151,18 +155,17 @@ function generateGlyphCell(
   if (shapeGen.contours.length === 0) return null;
 
   const b = shapeBounds(shapeGen);
-  const w = Math.max(1e-6, b.maxX - b.minX);
-  const h = Math.max(1e-6, b.maxY - b.minY);
-  const usable = cellSize - 2 * pxrange;
-  if (usable <= 0) throw new Error(`pxrange ${pxrange} too large for cell ${cellSize}`);
-  const scale = usable / Math.max(w, h);
-  // Centre the bbox inside the usable region.  msdfgen's projection is
+  const m = 1 / 16; // margin
+  const w = Math.max(1e-6, b.maxX - b.minX) + m;
+  const h = Math.max(1e-6, b.maxY - b.minY) + m;
+  const scale = cellSize / Math.max(w, h);
+  // Centre the bbox inside the full cell.  msdfgen's projection is
   //   pixel = scale * (shape + t) − 0.5
-  // so we want   pixel(minX) = pxrange + padX   and   pixel(minY) = pxrange + padY.
-  const padX = (usable - scale * w) / 2;
-  const padY = (usable - scale * h) / 2;
-  const tx = (pxrange + padX + 0.5) / scale - b.minX;
-  const ty = (pxrange + padY + 0.5) / scale - b.minY;
+  // so   pixel(minX) = padX   ⇒   tx = (padX + 0.5) / scale − minX.
+  const padX = (cellSize - scale * w) / 2;
+  const padY = (cellSize - scale * h) / 2;
+  const tx = (padX + 0.5) / scale - b.minX;
+  const ty = (padY + 0.5) / scale - b.minY;
 
   normalizeShape(shapeGen);
   edgeColoringSimple(shapeGen, ANGLE_THRESHOLD, COLOR_SEED);
@@ -211,7 +214,8 @@ function drawVector(
   const { rawShape, scale, tx, ty, size } = cell;
   const k = PANEL / size; // px-per-atlas-texel
 
-  // pxrange safe-region border.
+  // pxrange safe-region border (visual reference only — the glyph itself
+  // fills the whole cell, so this box lives at the edge when pxrange = 0).
   const inset = pxrange * k;
   ctx.strokeStyle = "rgba(235, 108, 54, 0.35)";
   ctx.setLineDash([4, 3]);
@@ -303,21 +307,24 @@ function drawCell(
 
 /**
  * Bilinear RGB sample from the per-glyph byte cell (y-down, [0,1] floats).
- * Clamps to the cell edges — no atlas boundary to worry about here.
+ * Off-cell taps read as 0 (a conceptual 1-texel black border around the
+ * atlas), which keeps the corner samples anchored to "fully outside" instead
+ * of dragging clamp-to-edge transition-band values across the boundary —
+ * that leak is what produces the wavy fringes when the glyph fills the tile.
  */
 function sampleCell(cell: GlyphCell, sx: number, sy: number): [number, number, number] {
   const n = cell.size;
-  const ix = Math.floor(sx);
-  const iy = Math.floor(sy);
-  const fx = Math.max(0, Math.min(1, sx - ix));
-  const fy = Math.max(0, Math.min(1, sy - iy));
-  const x0 = Math.max(0, Math.min(n - 1, ix));
-  const y0 = Math.max(0, Math.min(n - 1, iy));
-  const x1 = Math.min(n - 1, x0 + 1);
-  const y1 = Math.min(n - 1, y0 + 1);
+  const x0 = Math.floor(sx);
+  const y0 = Math.floor(sy);
+  const fx = sx - x0;
+  const fy = sy - y0;
+  const x1 = x0 + 1;
+  const y1 = y0 + 1;
   const bytes = cell.bytes;
   const get = (x: number, y: number, ch: number): number =>
-    bytes[(y * n + x) * 3 + ch]! / 255;
+    x < 0 || y < 0 || x >= n || y >= n
+      ? 0
+      : bytes[(y * n + x) * 3 + ch]! / 255;
   const out: [number, number, number] = [0, 0, 0];
   for (let ch = 0; ch < 3; ch++) {
     const c00 = get(x0, y0, ch);
@@ -335,22 +342,29 @@ const median3 = (a: number, b: number, c: number): number =>
   Math.max(Math.min(a, b), Math.min(Math.max(a, b), c));
 
 /**
+ * Two sampling conventions, side by side:
+ *   'naive' — sy = dy / outputScale.  Places texel 0's centre at panel pixel 0
+ *             (i.e. at the cell's top edge, not the centre of its top texel).
+ *             This is what `demo/canvas/main.ts` currently uses.
+ *   'gpu'   — sy = (dy + 0.5) * cellSize / PANEL − 0.5.  Standard GPU linear
+ *             filter: texel i's centre sits at sampleCoord = i, matching what
+ *             `generateMSDF` writes (`(x + 0.5)/scale − tx`).
+ * The 'gpu' one is the mathematically-correct match for the msdfgen texel
+ * placement, but only becomes visibly different from 'naive' at large zoom.
+ * We expose the toggle so the debug view matches whichever the WebGPU
+ * renderer ends up using.
+ */
+type SamplingMode = "naive" | "gpu";
+
+/**
  * Bilinearly reconstructs the glyph at PANEL×PANEL from the per-glyph
  * cellSize×cellSize MSDF byte cell.
- *
- * Sampling convention (standard GPU linear filter):
- *   sampleCoord = (panelPx + 0.5) * cellSize / PANEL − 0.5
- * so texel i's centre sits at sampleCoord = i (integer), matching what
- * `generateMSDF` writes (`(x + 0.5)/scale − tx`) and what a GPU sampler with
- * linear filtering produces.  A naïve `panelPx/outputScale` (no ±0.5 shift)
- * puts texel 0 at panel pixel 0 instead of at ~outputScale/2 and introduces
- * a half-texel beat between the atlas grid and the panel grid — that shows
- * up as visible waves on straight edges, especially at high zooms.
  */
 function drawMedian(
   ctx: CanvasRenderingContext2D,
   cell: GlyphCell,
   pxrange: number,
+  mode: SamplingMode,
 ): void {
   const image = ctx.createImageData(PANEL, PANEL);
   const out = image.data;
@@ -359,10 +373,12 @@ function drawMedian(
   const fg: [number, number, number] = [45, 49, 66];
   const bg: [number, number, number] = [255, 255, 255];
   const k = cell.size / PANEL;
+  const shift = mode === "gpu" ? 0.5 : 0.0;
+  const offset = mode === "gpu" ? -0.5 : 0.0;
   for (let dy = 0; dy < PANEL; dy++) {
-    const sy = (dy + 0.5) * k - 0.5;
+    const sy = (dy + shift) * k + offset;
     for (let dx = 0; dx < PANEL; dx++) {
-      const sx = (dx + 0.5) * k - 0.5;
+      const sx = (dx + shift) * k + offset;
       const [r, g, b] = sampleCell(cell, sx, sy);
       const sd = median3(r, g, b) - 0.5;
       const opacity = Math.max(0, Math.min(1, screenPxRange * sd + 0.5));
@@ -404,6 +420,7 @@ function renderGlyphRow(
   ch: string,
   cellSize: number,
   pxrange: number,
+  sampling: SamplingMode,
 ): void {
   const codepoint = ch.codePointAt(0);
   if (codepoint === undefined) return;
@@ -446,7 +463,7 @@ function renderGlyphRow(
   row.appendChild(bOnly);
 
   const med = makePanel("median");
-  drawMedian(med.getContext("2d")!, cell, pxrange);
+  drawMedian(med.getContext("2d")!, cell, pxrange, sampling);
   row.appendChild(med);
 
   root.appendChild(row);
@@ -463,7 +480,7 @@ async function render(): Promise<void> {
   buildHeader(root);
   const glyphs = [...cfg.glyphs];
   for (let i = 0; i < glyphs.length; i++) {
-    renderGlyphRow(root, font, glyphs[i]!, cfg.size, cfg.pxrange);
+    renderGlyphRow(root, font, glyphs[i]!, cfg.size, cfg.pxrange, cfg.sampling);
     if ((i & 7) === 7) await new Promise((r) => setTimeout(r, 0));
   }
 }

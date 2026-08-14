@@ -5,3 +5,18 @@ tools/atlas-preview-out/
 *.log
 .DS_Store
 
+# emitted by `tsc` if noEmit is ever forgotten — never commit these
+src/**/*.js
+src/**/*.d.ts
+src/**/*.js.map
+src/**/*.d.ts.map
+demo/**/*.js
+demo/**/*.d.ts
+demo/**/*.js.map
+demo/**/*.d.ts.map
+test/**/*.js
+test/**/*.d.ts
+test/**/*.js.map
+test/**/*.d.ts.map
+
+

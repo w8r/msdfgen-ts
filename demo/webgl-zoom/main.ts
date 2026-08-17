@@ -308,6 +308,25 @@ async function main(): Promise<void> {
   );
 
   render();
+
+  // ── Underlying atlas texture preview (matches demo/canvas) ──────────────
+  const atlasLabel = document.createElement("div");
+  atlasLabel.className = "readout";
+  atlasLabel.style.marginTop = "16px";
+  atlasLabel.textContent = `underlying atlas texture (${atlas.width}×${atlas.height}, raw MSDF channels)`;
+  root.appendChild(atlasLabel);
+  const atlasCanvas = document.createElement("canvas");
+  atlasCanvas.width = atlas.width;
+  atlasCanvas.height = atlas.height;
+  atlasCanvas.style.display = "block";
+  atlasCanvas.style.border = "1px solid #ddd";
+  atlasCanvas.style.background = "white";
+  const actx = atlasCanvas.getContext("2d")!;
+  const atlasImage = actx.createImageData(atlas.width, atlas.height);
+  atlasImage.data.set(atlas.texture);
+  actx.putImageData(atlasImage, 0, 0);
+  root.appendChild(atlasCanvas);
+
   root.dataset.ready = "true"; // signal for tools/screenshot.mjs
 }
 

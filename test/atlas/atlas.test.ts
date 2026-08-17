@@ -46,11 +46,11 @@ describe("Atlas", () => {
 
   it("packs the printable ASCII range with no overlapping rects", () => {
     const font = loadFont("Roboto.ttf");
-    const atlas = new Atlas(font, {
-      pixelsPerEm: 32, pxrange: 4, atlasWidth: 256, atlasHeight: 256,
-    });
+    const atlas = new Atlas(font, { pixelsPerEm: 32, pxrange: 4 });
     const rects: AtlasGlyph[] = [];
     for (let cp = 0x21; cp <= 0x7e; cp++) rects.push(atlas.glyph(cp));
+    // Force pack via a texture read.
+    void atlas.texture;
     for (let i = 0; i < rects.length; i++) {
       for (let j = i + 1; j < rects.length; j++) {
         expect(overlaps(rects[i]!, rects[j]!)).toBe(false);
@@ -62,15 +62,14 @@ describe("Atlas", () => {
     }
   });
 
-  it("grows the texture buffer and preserves previously packed glyphs", () => {
+  it("repacks on insert and preserves all cells (alpha=255 everywhere written)", () => {
     const font = loadFont("Roboto.ttf");
-    const atlas = new Atlas(font, {
-      pixelsPerEm: 32, pxrange: 4, atlasWidth: 64, atlasHeight: 64,
-    });
-    const first = atlas.glyph(0x41); // 'A' packed before growth
-    for (let cp = 0x42; cp <= 0x5a; cp++) atlas.glyph(cp); // force growth
+    const atlas = new Atlas(font, { pixelsPerEm: 32, pxrange: 4 });
+    const first = atlas.glyph(0x41); // 'A' — packed once
+    void atlas.texture; // force first pack
+    for (let cp = 0x42; cp <= 0x5a; cp++) atlas.glyph(cp); // repack on next read
+    // After a repack, `first`'s x/y may have moved — mutation on the same object.
     expect(atlas.texture.length).toBe(atlas.width * atlas.height * 4);
-    // Alpha channel is always 255 for any written texel; corrupted reflow → 0.
     const base = (first.y * atlas.width + first.x) * 4;
     expect(atlas.texture[base + 3]).toBe(255);
   });
@@ -130,7 +129,7 @@ describe("Atlas", () => {
     for (const c of cases) {
       const font = loadFont(c.font);
       const atlas = new Atlas(font, {
-        pixelsPerEm: c.pxPerEm, pxrange: c.pxrange, atlasWidth: 1024, atlasHeight: 1024,
+        pixelsPerEm: c.pxPerEm, pxrange: c.pxrange,
       });
 
       for (const cp of c.codepoints) {

@@ -24,6 +24,7 @@ import { edgeColoringSimple } from "./msdf/edge-coloring";
 import { generateMSDF } from "./msdf/generate";
 import { distanceSignCorrection, msdfErrorCorrection } from "./msdf/error-correction";
 import { type Shape } from "./shape/shape";
+import potpack from "potpack";
 
 /** Edge-coloring corner angle threshold (radians) — matches msdfgen CLI default. */
 const ANGLE_THRESHOLD = 3.0;
@@ -49,10 +50,6 @@ export interface AtlasOptions {
   pixelsPerEm?: number;
   /** MSDF distance range in texels (msdfgen `-pxrange`). Default 4. */
   pxrange?: number;
-  /** Initial atlas texture width in texels (power of two). Default 512. */
-  atlasWidth?: number;
-  /** Initial atlas texture height in texels (power of two). Default 512. */
-  atlasHeight?: number;
 }
 
 /** Cached layout + metrics for one atlas-resident glyph. */
@@ -81,22 +78,23 @@ export interface LaidOutGlyph {
 /**
  * Runtime MSDF glyph atlas backed by a single `Font`.
  *
- * Glyphs are generated and packed lazily on first `glyph()` miss; the atlas
- * texture grows (power-of-two) as needed and never moves previously packed
- * glyphs, so cached rects stay valid across growth.
+ * Prefer {@link Atlas.glyphs} (batched — one potpack for the whole set) over
+ * calling {@link Atlas.glyph} in a loop (one potpack per insert).
+ * {@link Atlas.layout} already uses the batched path internally.
+ *
+ * `AtlasGlyph` objects are mutated in place across repacks, so keeping
+ * a reference and re-reading `x`/`y` is safe; caching them in locals
+ * before a subsequent insert is not.
  */
 export class Atlas {
   private readonly _font: Font;
   private readonly _pxPerEm: number;
   private readonly _pxrange: number;
-  private _width: number;
-  private _height: number;
-  private _pixels: Uint8Array;
-  /** Open shelves for the shelf packer (y, height, usedWidth). */
-  private readonly _shelves: { y: number; h: number; used: number }[] = [];
-  /** Next un-used y row for a fresh shelf. */
-  private _nextY = 0;
-  private readonly _cache = new Map<number, AtlasGlyph>();
+  private _width = 0;
+  private _height = 0;
+  private _pixels = new Uint8Array(0);
+  /** Cached glyph + retained float MSDF (for repacking on new inserts). */
+  private readonly _cache = new Map<number, { glyph: AtlasGlyph; msdf: Float32Array | null }>();
   /** SDF distance range in em — UNIFORM across all glyphs (that's the point). */
   readonly pxrangeEm: number;
 
@@ -104,33 +102,51 @@ export class Atlas {
     this._font = font;
     this._pxPerEm = opts.pixelsPerEm ?? 40;
     this._pxrange = opts.pxrange ?? 4;
-    this._width = opts.atlasWidth ?? 512;
-    this._height = opts.atlasHeight ?? 512;
-    this._pixels = new Uint8Array(this._width * this._height * CHANNELS);
     this.pxrangeEm = this._pxrange / this._pxPerEm;
   }
 
-  /** Current atlas texture width in texels. */
+  /** Packed atlas texture width in texels (chosen by potpack). */
   get width(): number {
     return this._width;
   }
-  /** Current atlas texture height in texels. */
+  /** Packed atlas texture height in texels (chosen by potpack). */
   get height(): number {
     return this._height;
   }
-  /** Current atlas texture, flat RGBA8 bytes, row-major, y-down. */
+  /** Packed atlas texture, flat RGBA8 bytes, row-major, y-down. */
   get texture(): Uint8Array {
     return this._pixels;
   }
 
   /**
-   * Returns layout + metrics for `codepoint`, generating and packing its
-   * glyph into the atlas texture on first access.
+   * Batched generate + pack. Generates MSDFs for any codepoints not
+   * already cached, then runs potpack **once** over the whole cache.
+   * Returns the `AtlasGlyph` for each requested codepoint, in order.
+   */
+  glyphs(codepoints: Iterable<number>): AtlasGlyph[] {
+    const result: AtlasGlyph[] = [];
+    let added = 0;
+    for (const cp of codepoints) {
+      const cached = this._cache.get(cp);
+      if (cached) { result.push(cached.glyph); continue; }
+      result.push(this._generate(cp));
+      added++;
+    }
+    if (added > 0) this._repack();
+    return result;
+  }
+
+  /**
+   * Single-glyph convenience: generates + packs if missing. Repacks the
+   * whole atlas on every new insert — for more than one glyph, use
+   * {@link Atlas.glyphs} instead.
    */
   glyph(codepoint: number): AtlasGlyph {
-    const cached = this._cache.get(codepoint);
-    if (cached) return cached;
+    return this.glyphs([codepoint])[0]!;
+  }
 
+  /** Generates + caches the MSDF for `codepoint`. Does NOT pack. */
+  private _generate(codepoint: number): AtlasGlyph {
     const font = this._font;
     const glyphId = font.glyphId(codepoint);
     const unitsPerEm = font.metrics.unitsPerEm;
@@ -140,13 +156,13 @@ export class Atlas {
 
     // Empty outline (space, .notdef with no glyf): no atlas slot needed.
     if (shape.contours.length === 0) {
-      const info: AtlasGlyph = {
+      const glyph: AtlasGlyph = {
         x: 0, y: 0, w: 0, h: 0,
         advance,
         planeLeft: 0, planeBottom: 0, planeRight: 0, planeTop: 0,
       };
-      this._cache.set(codepoint, info);
-      return info;
+      this._cache.set(codepoint, { glyph, msdf: null });
+      return glyph;
     }
 
     const bounds = _shapeBounds(shape);
@@ -169,88 +185,62 @@ export class Atlas {
     distanceSignCorrection(msdf, shape, w, h, s, tx, ty);
     msdfErrorCorrection(msdf, shape, w, h, s, tx, ty, pxr);
 
-    const rect = this._pack(w, h);
-    this._blit(msdf, rect.x, rect.y, w, h);
-
-    const info: AtlasGlyph = {
-      x: rect.x, y: rect.y, w, h,
+    const glyph: AtlasGlyph = {
+      x: 0, y: 0, w, h,
       advance,
       planeLeft: -tx,
       planeBottom: -ty,
       planeRight: w / s - tx,
       planeTop: h / s - ty,
     };
-    this._cache.set(codepoint, info);
-    return info;
+    this._cache.set(codepoint, { glyph, msdf });
+    return glyph;
   }
 
   /**
-   * Lays out `text` left-to-right, applying kerning, generating glyphs on
-   * first use. Baseline is y=0; each `penX` is the pen position in em.
+   * Lays out `text` left-to-right, applying kerning. Generates any missing
+   * glyphs and packs the atlas **once** for the whole run.
+   * Baseline is y=0; each `penX` is the pen position in em.
    */
   layout(text: string): { glyphs: LaidOutGlyph[]; widthEm: number } {
-    const glyphs: LaidOutGlyph[] = [];
+    const codepoints: number[] = [];
+    for (const ch of text) codepoints.push(ch.codePointAt(0)!);
+    this.glyphs(codepoints); // one potpack for the whole string
+
+    const laid: LaidOutGlyph[] = [];
     const font = this._font;
     const upe = font.metrics.unitsPerEm;
     let penX = 0;
     let prevGid = -1;
-    for (const ch of text) {
-      const cp = ch.codePointAt(0)!;
+    for (const cp of codepoints) {
       const gid = font.glyphId(cp);
       if (prevGid >= 0) penX += font.kerning(prevGid, gid) / upe;
-      const glyph = this.glyph(cp);
-      glyphs.push({ glyph, penX });
+      const glyph = this._cache.get(cp)!.glyph;
+      laid.push({ glyph, penX });
       penX += glyph.advance;
       prevGid = gid;
     }
-    return { glyphs, widthEm: penX };
+    return { glyphs: laid, widthEm: penX };
   }
 
-  /**
-   * Shelf pack one rect, best-height-fit; grow the atlas (doubling) as
-   * needed. Previously packed rects never move.
-   */
-  private _pack(w: number, h: number): { x: number; y: number } {
-    while (w > this._width) this._grow(this._width * 2, this._height);
-
-    let bestIdx = -1;
-    let bestH = Infinity;
-    const shelves = this._shelves;
-    for (let i = 0; i < shelves.length; i++) {
-      const s = shelves[i]!;
-      if (h <= s.h && s.used + w <= this._width && s.h < bestH) {
-        bestIdx = i;
-        bestH = s.h;
-      }
+  /** Repacks every cached glyph with potpack, reallocates the texture,
+   *  and re-blits each MSDF at its assigned rect. Called by `glyphs()`
+   *  after any batch of new inserts — once per batch. */
+  private _repack(): void {
+    const boxes: { w: number; h: number; x: number; y: number; entry: { glyph: AtlasGlyph; msdf: Float32Array | null } }[] = [];
+    for (const entry of this._cache.values()) {
+      if (entry.msdf === null) continue; // empty outline
+      boxes.push({ w: entry.glyph.w, h: entry.glyph.h, x: 0, y: 0, entry });
     }
-    if (bestIdx >= 0) {
-      const s = shelves[bestIdx]!;
-      const x = s.used;
-      s.used += w;
-      return { x, y: s.y };
+    const { w: W, h: H } = potpack(boxes);
+    this._width = W;
+    this._height = H;
+    this._pixels = new Uint8Array(W * H * CHANNELS);
+    for (const box of boxes) {
+      box.entry.glyph.x = box.x;
+      box.entry.glyph.y = box.y;
+      this._blit(box.entry.msdf!, box.x, box.y, box.w, box.h);
     }
-
-    while (this._nextY + h > this._height) this._grow(this._width, this._height * 2);
-    const shelf = { y: this._nextY, h, used: w };
-    shelves.push(shelf);
-    this._nextY += h;
-    return { x: 0, y: shelf.y };
-  }
-
-  /** Reallocate `_pixels` to (newW × newH), copying old rows into place. */
-  private _grow(newW: number, newH: number): void {
-    const oldW = this._width;
-    const oldH = this._height;
-    if (newW === oldW && newH === oldH) return;
-    const next = new Uint8Array(newW * newH * CHANNELS);
-    for (let y = 0; y < oldH; y++) {
-      const src = y * oldW * CHANNELS;
-      const dst = y * newW * CHANNELS;
-      next.set(this._pixels.subarray(src, src + oldW * CHANNELS), dst);
-    }
-    this._pixels = next;
-    this._width = newW;
-    this._height = newH;
   }
 
   /**

@@ -23,6 +23,7 @@
     "dev:webgpu": "vite --open /demo/webgpu/index.html",
     "dev:webgl": "vite --open /demo/webgl/index.html",
     "dev:webgl-zoom": "vite --open /demo/webgl-zoom/index.html",
+    "dev:webgpu-zoom": "vite --open /demo/webgpu-zoom/index.html",
     "build": "vite build",
     "build:demo": "vite build --config vite.demo.config.ts",
     "predeploy": "npm run build:demo",

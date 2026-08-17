@@ -31,6 +31,7 @@ export default defineConfig({
         index: resolve(__dirname, "demo/index.html"),
         canvas: resolve(__dirname, "demo/canvas/index.html"),
         webgpu: resolve(__dirname, "demo/webgpu/index.html"),
+        webgpuZoom: resolve(__dirname, "demo/webgpu-zoom/index.html"),
         webgl: resolve(__dirname, "demo/webgl/index.html"),
         webglZoom: resolve(__dirname, "demo/webgl-zoom/index.html"),
         debug: resolve(__dirname, "demo/debug/index.html"),

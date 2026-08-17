@@ -1,120 +1,104 @@
 /**
- * Gate 4b — Atlas glyph cache + golden bitmap match.
+ * Gate 4 — Atlas invariants.
  *
- * Verifies: cache stability (repeat lookups return the same entry), packed
- * glyph rects don't overlap, and the atlas's quantized bitmap for a glyph
- * matches its golden fixture (byte-quantized the same way) — proving the
- * runtime Font → Atlas pipeline produces the same MSDF as the golden
- * fixtures generated from `-exportshape`'d shapes.
- *
- * NEVER modify test/golden/** — only the human regenerates fixtures.
+ * The C++-byte-exact MSDF pipeline is covered end-to-end by
+ * test/msdf/msdf.test.ts (gate:m3) directly against the goldens. This
+ * file only exercises the atlas-level invariants that sit on top:
+ * caching, non-overlapping packing, buffer growth, and plane-bound
+ * sanity.
  */
 
-import { readFileSync, existsSync } from "fs";
+import { readFileSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { describe, it, expect } from "vitest";
 import { Font } from "../../src/font/font";
-import { Atlas, pixelFloatToByte } from "../../src/atlas/atlas";
-import { fl32FromBuffer } from "../utils/compare";
+import { Atlas, type AtlasGlyph } from "../../src/atlas-gen";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FONTS_DIR = resolve(__dirname, "../fonts");
-const GOLDEN_DIR = resolve(__dirname, "../golden");
 
 function loadFont(fileName: string): Font {
   const buf = readFileSync(resolve(FONTS_DIR, fileName));
   return new Font(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer);
 }
 
-function overlaps(
-  a: { x: number; y: number; w: number; h: number },
-  b: { x: number; y: number; w: number; h: number },
-): boolean {
+function overlaps(a: AtlasGlyph, b: AtlasGlyph): boolean {
+  if (a.w === 0 || a.h === 0 || b.w === 0 || b.h === 0) return false;
   return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 }
 
 describe("Atlas", () => {
   it("caches glyphs: repeat lookups return the same entry", () => {
     const font = loadFont("Roboto.ttf");
-    const atlas = new Atlas(font, { size: 48, pxrange: 4 });
-    const a = atlas.getGlyph(0x66); // 'f'
-    const b = atlas.getGlyph(0x66);
-    expect(a).toBe(b);
+    const atlas = new Atlas(font, { pixelsPerEm: 32, pxrange: 4 });
+    expect(atlas.glyph(0x66)).toBe(atlas.glyph(0x66));
   });
 
-  it("packs many glyphs without overlapping rects", () => {
+  it("packs the printable ASCII range with no overlapping rects", () => {
     const font = loadFont("Roboto.ttf");
-    const atlas = new Atlas(font, { size: 48, pxrange: 4, atlasWidth: 256, atlasHeight: 256 });
-    const rects = [];
-    for (let cp = 0x21; cp <= 0x7e; cp++) rects.push(atlas.getGlyph(cp).rect);
+    const atlas = new Atlas(font, {
+      pixelsPerEm: 32, pxrange: 4, atlasWidth: 256, atlasHeight: 256,
+    });
+    const rects: AtlasGlyph[] = [];
+    for (let cp = 0x21; cp <= 0x7e; cp++) rects.push(atlas.glyph(cp));
     for (let i = 0; i < rects.length; i++) {
       for (let j = i + 1; j < rects.length; j++) {
         expect(overlaps(rects[i]!, rects[j]!)).toBe(false);
       }
     }
+    for (const r of rects) {
+      expect(r.x + r.w).toBeLessThanOrEqual(atlas.width);
+      expect(r.y + r.h).toBeLessThanOrEqual(atlas.height);
+    }
   });
 
-  it("grows the texture buffer to match the packer and preserves earlier glyphs", () => {
+  it("grows the texture buffer and preserves previously packed glyphs", () => {
     const font = loadFont("Roboto.ttf");
-    // Tiny initial atlas forces growth well before the full ASCII range is packed.
-    const atlas = new Atlas(font, { size: 48, pxrange: 4, atlasWidth: 64, atlasHeight: 64 });
-    const first = atlas.getGlyph(0x41); // 'A', packed before growth
-    for (let cp = 0x42; cp <= 0x5a; cp++) atlas.getGlyph(cp); // force growth
+    const atlas = new Atlas(font, {
+      pixelsPerEm: 32, pxrange: 4, atlasWidth: 64, atlasHeight: 64,
+    });
+    const first = atlas.glyph(0x41); // 'A' packed before growth
+    for (let cp = 0x42; cp <= 0x5a; cp++) atlas.glyph(cp); // force growth
     expect(atlas.texture.length).toBe(atlas.width * atlas.height * 4);
-
-    // Re-derive the byte written at the first glyph's top-left texel and
-    // confirm it wasn't clobbered/shifted by the buffer reflow.
-    const { rect } = first;
-    const base = (rect.y * atlas.width + rect.x) * 4;
-    // Alpha channel is always 255 for any written glyph texel, whether or
-    // not the atlas has since grown — a corrupted reflow would show 0 here.
+    // Alpha channel is always 255 for any written texel; corrupted reflow → 0.
+    const base = (first.y * atlas.width + first.x) * 4;
     expect(atlas.texture[base + 3]).toBe(255);
   });
 
-  const goldenCases: Array<{ font: string; fixture: string; codepoint: number }> = [
-    { font: "Roboto.ttf", fixture: "roboto/U0066_48px", codepoint: 0x66 },
-    { font: "NotoSans.ttf", fixture: "notosans/U0041_48px", codepoint: 0x41 },
-    { font: "PTSerif-Regular.ttf", fixture: "ptserif/U0061_48px", codepoint: 0x61 },
-  ];
+  it("emits uniform pxrangeEm across glyphs (crop, not scale)", () => {
+    const font = loadFont("Roboto.ttf");
+    const atlas = new Atlas(font, { pixelsPerEm: 32, pxrange: 4 });
+    // Uniform pxrangeEm is the whole point of cropping (vs. per-glyph scaling).
+    expect(atlas.pxrangeEm).toBeCloseTo(4 / 32, 12);
+    // Sanity: a narrow '.' cell should be visibly smaller than a wide 'M' cell.
+    const dot = atlas.glyph(0x2e);
+    const m = atlas.glyph(0x4d);
+    expect(dot.w).toBeLessThan(m.w);
+    expect(dot.h).toBeLessThan(m.h);
+  });
 
-  for (const { font: fontFile, fixture, codepoint } of goldenCases) {
-    it(`matches golden byte-quantized bitmap: ${fixture}`, () => {
-      const metaPath = resolve(GOLDEN_DIR, fixture, "meta.json");
-      const bitmapPath = resolve(GOLDEN_DIR, fixture, "bitmap.fl32");
-      if (!existsSync(metaPath) || !existsSync(bitmapPath)) {
-        throw new Error(`Missing golden fixture: ${fixture}`);
-      }
-      const meta = JSON.parse(readFileSync(metaPath, "utf8")) as {
-        width: number;
-        height: number;
-        pxrange: number;
-      };
+  it("plane bounds match the atlas rect via the uniform pixelsPerEm scale", () => {
+    const font = loadFont("PTSerif-Regular.ttf");
+    const atlas = new Atlas(font, { pixelsPerEm: 48, pxrange: 4 });
+    for (const cp of [0x41, 0x67, 0x4d, 0x69, 0x2e]) {
+      const g = atlas.glyph(cp);
+      if (g.w === 0) continue;
+      expect((g.planeRight - g.planeLeft) * 48).toBeCloseTo(g.w, 6);
+      expect((g.planeTop - g.planeBottom) * 48).toBeCloseTo(g.h, 6);
+    }
+  });
 
-      const font = loadFont(fontFile);
-      const atlas = new Atlas(font, { size: meta.width, pxrange: meta.pxrange });
-      const { rect } = atlas.getGlyph(codepoint);
-
-      const raw = readFileSync(bitmapPath);
-      const golden = fl32FromBuffer(
-        raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer,
-      );
-
-      let maxByteDiff = 0;
-      for (let y = 0; y < meta.height; y++) {
-        // golden.data is y-up (row 0 = bottom); atlas texture is y-down (row 0 = top).
-        const goldenRow = meta.height - 1 - y;
-        for (let x = 0; x < meta.width; x++) {
-          const goldenBase = (goldenRow * meta.width + x) * 3;
-          const atlasBase = ((rect.y + y) * atlas.width + (rect.x + x)) * 4;
-          for (let ch = 0; ch < 3; ch++) {
-            const goldenByte = pixelFloatToByte(golden.data[goldenBase + ch]!);
-            const atlasByte = atlas.texture[atlasBase + ch]!;
-            maxByteDiff = Math.max(maxByteDiff, Math.abs(goldenByte - atlasByte));
-          }
-        }
-      }
-      expect(maxByteDiff).toBe(0);
-    });
-  }
+  it("layout returns em-space widths + running pen positions", () => {
+    const font = loadFont("Roboto.ttf");
+    const atlas = new Atlas(font, { pixelsPerEm: 32, pxrange: 4 });
+    const { glyphs, widthEm } = atlas.layout("AV");
+    expect(glyphs).toHaveLength(2);
+    expect(glyphs[0]!.penX).toBe(0);
+    // Absent kerning (Roboto uses GPOS, not `kern`), widthEm should equal
+    // the sum of advances exactly.
+    const sumAdvances = glyphs[0]!.glyph.advance + glyphs[1]!.glyph.advance;
+    expect(widthEm).toBeCloseTo(sumAdvances, 10);
+    expect(glyphs[1]!.penX).toBeCloseTo(glyphs[0]!.glyph.advance, 10);
+  });
 });

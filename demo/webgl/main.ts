@@ -15,45 +15,18 @@
  * OUTPUT_SIZES showcase) — one small atlas, several on-screen scales, same
  * source texels every time.
  */
-import { Font, Atlas, type GlyphInfo } from "../../src/index";
+import { Font, Atlas, type LaidOutGlyph } from "../../src/index";
 import vertSource from "./msdf.vert.glsl?raw";
 import fragSource from "./msdf.frag.glsl?raw";
 
 // See demo/canvas/main.ts for why this isn't a hardcoded leading-slash path.
 const FONT_URL = `${import.meta.env.BASE_URL}test/fonts/PTSerif-Regular.ttf`;
-const ATLAS_SIZE = 64;
-const ATLAS_PXRANGE = 8;
-const OUTPUT_SIZES = [16, 32, 64, 128, 256]; // em-sizes to render the same atlas at
+const PIXELS_PER_EM = 64; // atlas generation resolution
+const PXRANGE = 8;
+const OUTPUT_SIZES = [16, 32, 64, 128, 256];
 const TEXT = "Hello Привет 123 @#&";
 const FG_COLOR: [number, number, number, number] = [0.08, 0.08, 0.08, 1];
 const BG_COLOR: [number, number, number, number] = [1, 1, 1, 1];
-
-interface LayoutGlyph {
-  info: GlyphInfo;
-  penX: number; // em units
-}
-
-function layout(
-  font: Font,
-  atlas: Atlas,
-  text: string,
-): { glyphs: LayoutGlyph[]; widthEm: number } {
-  const glyphs: LayoutGlyph[] = [];
-  let penX = 0;
-  let prevGlyphId = -1;
-  for (const ch of text) {
-    const codepoint = ch.codePointAt(0)!;
-    const glyphId = font.glyphId(codepoint);
-    if (prevGlyphId >= 0) {
-      penX += font.kerning(prevGlyphId, glyphId) / font.metrics.unitsPerEm;
-    }
-    const info = atlas.getGlyph(codepoint);
-    glyphs.push({ info, penX });
-    penX += info.advance;
-    prevGlyphId = glyphId;
-  }
-  return { glyphs, widthEm: penX };
-}
 
 /** Compiles one shader stage; throws with the driver's info log on failure. */
 function compileShader(gl: WebGL2RenderingContext, type: number, source: string): WebGLShader {
@@ -93,7 +66,7 @@ function linkProgram(gl: WebGL2RenderingContext, vertSrc: string, fragSrc: strin
  */
 function renderAtSize(
   atlas: Atlas,
-  glyphs: LayoutGlyph[],
+  glyphs: LaidOutGlyph[],
   widthEm: number,
   targetSizeCss: number,
   dpr: number,
@@ -125,10 +98,10 @@ function renderAtSize(
     gl.UNSIGNED_BYTE,
     atlas.texture,
   );
-  // Adjacent atlas cells are packed with zero gap (see ShelfPacker) —
-  // sampling exactly at a cell's edge with bilinear filtering would blend in
-  // the next glyph's texels. Inset the sampled UV rect by half a texel on
-  // each side so no sample ever reaches outside this glyph's own cell.
+  // Adjacent atlas cells are packed with zero gap — sampling exactly at a
+  // cell's edge with bilinear filtering would blend in the next glyph's texels.
+  // Inset the sampled UV rect by half a texel on each side so no sample ever
+  // reaches outside this glyph's own cell.
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
@@ -137,32 +110,31 @@ function renderAtSize(
   const halfTexelV = 0.5 / atlas.height;
 
   // ── Instance buffer: [posX, posY, sizeX, sizeY, uvMinX, uvMinY, uvSizeX, uvSizeY] ──
-  const genScale = ATLAS_SIZE - 2 * ATLAS_PXRANGE;
-  const originXInCellPx = ATLAS_PXRANGE;
-  const baselineFromTopPx = ATLAS_SIZE - ATLAS_PXRANGE - 0.25 * genScale;
-  const outputScale = targetSize / genScale;
-  const screenPxRange = ATLAS_PXRANGE * outputScale;
+  // pxrangeEm is uniform across all glyphs (crop, not scale — see atlas-gen.ts),
+  // so screenPxRange stays a single frame-wide uniform.
+  const screenPxRange = atlas.pxrangeEm * targetSize;
   const padEm = 0.3;
   const baselineY = 0.75 * canvas.height;
 
   const FLOATS_PER_INSTANCE = 8;
   const instanceData = new Float32Array(glyphs.length * FLOATS_PER_INSTANCE);
   for (let i = 0; i < glyphs.length; i++) {
-    const { info, penX } = glyphs[i]!;
+    const { glyph, penX } = glyphs[i]!;
     const originX = (penX + padEm) * targetSize;
-    const cellLeft = originX - originXInCellPx * outputScale;
-    const cellTop = baselineY - baselineFromTopPx * outputScale;
-    const cellSizePx = info.size * outputScale;
+    const cellLeft = originX + glyph.planeLeft * targetSize;
+    const cellTop = baselineY - glyph.planeTop * targetSize;
+    const cellWidthPx = (glyph.planeRight - glyph.planeLeft) * targetSize;
+    const cellHeightPx = (glyph.planeTop - glyph.planeBottom) * targetSize;
 
     const base = i * FLOATS_PER_INSTANCE;
     instanceData[base + 0] = cellLeft;
     instanceData[base + 1] = cellTop;
-    instanceData[base + 2] = cellSizePx;
-    instanceData[base + 3] = cellSizePx;
-    instanceData[base + 4] = info.rect.x / atlas.width + halfTexelU;
-    instanceData[base + 5] = info.rect.y / atlas.height + halfTexelV;
-    instanceData[base + 6] = info.rect.w / atlas.width - 2 * halfTexelU;
-    instanceData[base + 7] = info.rect.h / atlas.height - 2 * halfTexelV;
+    instanceData[base + 2] = cellWidthPx;
+    instanceData[base + 3] = cellHeightPx;
+    instanceData[base + 4] = glyph.x / atlas.width + halfTexelU;
+    instanceData[base + 5] = glyph.y / atlas.height + halfTexelV;
+    instanceData[base + 6] = glyph.w / atlas.width - 2 * halfTexelU;
+    instanceData[base + 7] = glyph.h / atlas.height - 2 * halfTexelV;
   }
 
   // ── Program + buffers ────────────────────────────────────────────────────
@@ -232,12 +204,12 @@ async function main(): Promise<void> {
 
   const buf = await fetch(FONT_URL).then((r) => r.arrayBuffer());
   const font = new Font(buf);
-  const atlas = new Atlas(font, { size: ATLAS_SIZE, pxrange: ATLAS_PXRANGE });
-  const { glyphs, widthEm } = layout(font, atlas, TEXT);
+  const atlas = new Atlas(font, { pixelsPerEm: PIXELS_PER_EM, pxrange: PXRANGE });
+  const { glyphs, widthEm } = atlas.layout(TEXT);
 
   root.textContent = "";
   const info = document.createElement("p");
-  info.textContent = `One ${ATLAS_SIZE}px atlas (pxrange ${ATLAS_PXRANGE}) via WebGL2, rendered at: ${OUTPUT_SIZES.join(", ")}px — same source texels every time.`;
+  info.textContent = `One ${PIXELS_PER_EM}px/em atlas (pxrange ${PXRANGE}) via WebGL2, rendered at: ${OUTPUT_SIZES.join(", ")}px — same source texels every time.`;
   root.appendChild(info);
 
   for (const size of OUTPUT_SIZES) {

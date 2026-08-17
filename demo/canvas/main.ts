@@ -14,45 +14,17 @@
  * drawn versus the atlas's generation resolution — this is exactly what
  * lets one small atlas stay crisp at any output size.
  */
-import { Font, Atlas, type GlyphInfo } from "../../src/index";
+import { Font, Atlas } from "../../src/index";
 
 // import.meta.env.BASE_URL is "/" in dev; under vite.demo.config.ts's build
 // (deployed to GH Pages under /msdfgen-ts/) it's "/msdfgen-ts/" — a hardcoded
 // leading-slash path would 404 there since fetch() URLs aren't base-rewritten
 // by Vite like import/HTML asset references are.
 const FONT_URL = `${import.meta.env.BASE_URL}test/fonts/PTSerif-Regular.ttf`;
-const ATLAS_SIZE = 64; // generation resolution: px per em cell
-const ATLAS_PXRANGE = 8;
+const PIXELS_PER_EM = 32; // atlas generation resolution
+const PXRANGE = 2;
 const OUTPUT_SIZES = [16, 32, 64, 128, 256]; // em-sizes to render the same atlas at
 const TEXT = "Hello Привет 123 @#&";
-
-interface LayoutGlyph {
-  info: GlyphInfo;
-  penX: number; // in em units, left edge of the glyph's advance box
-}
-
-/** Lays out `text` left-to-right, applying kerning; returns glyphs + total advance (em). */
-function layout(
-  font: Font,
-  atlas: Atlas,
-  text: string,
-): { glyphs: LayoutGlyph[]; widthEm: number } {
-  const glyphs: LayoutGlyph[] = [];
-  let penX = 0;
-  let prevGlyphId = -1;
-  for (const ch of text) {
-    const codepoint = ch.codePointAt(0)!;
-    const glyphId = font.glyphId(codepoint);
-    if (prevGlyphId >= 0) {
-      penX += font.kerning(prevGlyphId, glyphId) / font.metrics.unitsPerEm;
-    }
-    const info = atlas.getGlyph(codepoint);
-    glyphs.push({ info, penX });
-    penX += info.advance;
-    prevGlyphId = glyphId;
-  }
-  return { glyphs, widthEm: penX };
-}
 
 /** Bilinear-samples one RGB texel (as [0,1] floats) from the atlas texture. */
 function sampleAtlas(atlas: Atlas, sx: number, sy: number): [number, number, number] {
@@ -95,14 +67,13 @@ function median3(a: number, b: number, c: number): number {
  * from `atlas` (generated at `ATLAS_SIZE`px). Returns the canvas.
  */
 function renderAtSize(
-  font: Font,
   atlas: Atlas,
   text: string,
   targetSize: number,
   fg: [number, number, number],
   bg: [number, number, number],
 ): HTMLCanvasElement {
-  const { glyphs, widthEm } = layout(font, atlas, text);
+  const { glyphs, widthEm } = atlas.layout(text);
 
   const padEm = 0.3;
   const cssWidth = Math.ceil((widthEm + 2 * padEm) * targetSize);
@@ -121,32 +92,31 @@ function renderAtSize(
     out[i + 3] = 255;
   }
 
-  // Generation-resolution layout constants for this atlas (see Atlas.getGlyph).
-  const genScale = ATLAS_SIZE - 2 * ATLAS_PXRANGE;
-  const originXInCellPx = ATLAS_PXRANGE; // glyph pen-origin, px from cell's left edge
-  const baselineFromTopPx = ATLAS_SIZE - ATLAS_PXRANGE - 0.25 * genScale; // px from cell's top edge
-  const outputScale = targetSize / genScale;
-  const screenPxRange = ATLAS_PXRANGE * outputScale;
+  // pxrangeEm is uniform across all glyphs (crop, not scale — see atlas-gen.ts),
+  // so screenPxRange stays a single frame-wide number.
+  const screenPxRange = atlas.pxrangeEm * targetSize;
 
   const baselineY = 1.2 * targetSize;
 
-  for (const { info, penX } of glyphs) {
+  for (const { glyph, penX } of glyphs) {
+    if (glyph.w === 0) continue; // empty outline (space, .notdef)
     const originX = (penX + padEm) * targetSize;
-    const cellLeft = originX - originXInCellPx * outputScale;
-    const cellTop = baselineY - baselineFromTopPx * outputScale;
-    const cellSizePx = info.size * outputScale;
+    const cellLeft = originX + glyph.planeLeft * targetSize;
+    const cellTop = baselineY - glyph.planeTop * targetSize;
+    const cellWidthPx = (glyph.planeRight - glyph.planeLeft) * targetSize;
+    const cellHeightPx = (glyph.planeTop - glyph.planeBottom) * targetSize;
 
     const dstX0 = Math.max(0, Math.floor(cellLeft));
     const dstY0 = Math.max(0, Math.floor(cellTop));
-    const dstX1 = Math.min(cssWidth, Math.ceil(cellLeft + cellSizePx));
-    const dstY1 = Math.min(cssHeight, Math.ceil(cellTop + cellSizePx));
+    const dstX1 = Math.min(cssWidth, Math.ceil(cellLeft + cellWidthPx));
+    const dstY1 = Math.min(cssHeight, Math.ceil(cellTop + cellHeightPx));
 
     for (let dy = dstY0; dy < dstY1; dy++) {
-      const cellY = (dy - cellTop) / outputScale; // [0, info.size)
-      const srcY = info.rect.y + cellY;
+      const cellFracY = (dy - cellTop) / cellHeightPx; // [0, 1)
+      const srcY = glyph.y + cellFracY * glyph.h;
       for (let dx = dstX0; dx < dstX1; dx++) {
-        const cellX = (dx - cellLeft) / outputScale;
-        const srcX = info.rect.x + cellX;
+        const cellFracX = (dx - cellLeft) / cellWidthPx;
+        const srcX = glyph.x + cellFracX * glyph.w;
 
         const [r, g, b] = sampleAtlas(atlas, srcX, srcY);
         const sd = median3(r, g, b) - 0.5;
@@ -171,11 +141,11 @@ async function main(): Promise<void> {
 
   const buf = await fetch(FONT_URL).then((r) => r.arrayBuffer());
   const font = new Font(buf);
-  const atlas = new Atlas(font, { size: ATLAS_SIZE, pxrange: ATLAS_PXRANGE });
+  const atlas = new Atlas(font, { pixelsPerEm: PIXELS_PER_EM, pxrange: PXRANGE });
 
   root.textContent = "";
   const info = document.createElement("p");
-  info.textContent = `One ${ATLAS_SIZE}px atlas (pxrange ${ATLAS_PXRANGE}), rendered at: ${OUTPUT_SIZES.join(", ")}px — same source texels every time.`;
+  info.textContent = `One ${PIXELS_PER_EM}px/em atlas (pxrange ${PXRANGE}), rendered at: ${OUTPUT_SIZES.join(", ")}px — same source texels every time.`;
   root.appendChild(info);
 
   for (const size of OUTPUT_SIZES) {
@@ -184,7 +154,7 @@ async function main(): Promise<void> {
     label.textContent = `${size}px`;
     root.appendChild(label);
 
-    const canvas = renderAtSize(font, atlas, TEXT, size, [20, 20, 20], [255, 255, 255]);
+    const canvas = renderAtSize(atlas, TEXT, size, [20, 20, 20], [255, 255, 255]);
     canvas.className = "glyph-canvas";
     root.appendChild(canvas);
   }

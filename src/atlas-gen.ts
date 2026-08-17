@@ -45,7 +45,7 @@ export function pixelFloatToByte(x: number): number {
 
 /** Options for constructing an {@link Atlas}. */
 export interface AtlasOptions {
-  /** Uniform texel-per-em generation scale. Default 32. */
+  /** Uniform texel-per-em generation scale. Default 40. */
   pixelsPerEm?: number;
   /** MSDF distance range in texels (msdfgen `-pxrange`). Default 4. */
   pxrange?: number;
@@ -102,7 +102,7 @@ export class Atlas {
 
   constructor(font: Font, opts: AtlasOptions = {}) {
     this._font = font;
-    this._pxPerEm = opts.pixelsPerEm ?? 32;
+    this._pxPerEm = opts.pixelsPerEm ?? 40;
     this._pxrange = opts.pxrange ?? 4;
     this._width = opts.atlasWidth ?? 512;
     this._height = opts.atlasHeight ?? 512;

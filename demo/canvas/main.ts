@@ -21,7 +21,7 @@ import { Font, Atlas } from "../../src/index";
 // leading-slash path would 404 there since fetch() URLs aren't base-rewritten
 // by Vite like import/HTML asset references are.
 const FONT_URL = `${import.meta.env.BASE_URL}test/fonts/PTSerif-Regular.ttf`;
-const PIXELS_PER_EM = 32; // atlas generation resolution
+const PIXELS_PER_EM = 40; // atlas generation resolution
 const PXRANGE = 2;
 const OUTPUT_SIZES = [16, 32, 64, 128, 256]; // em-sizes to render the same atlas at
 const TEXT = "Hello Привет 123 @#&";

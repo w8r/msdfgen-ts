@@ -21,7 +21,7 @@ import fragSource from "./msdf.frag.glsl?raw";
 
 // See demo/canvas/main.ts for why this isn't a hardcoded leading-slash path.
 const FONT_URL = `${import.meta.env.BASE_URL}test/fonts/PTSerif-Regular.ttf`;
-const PIXELS_PER_EM = 64; // atlas generation resolution
+const PIXELS_PER_EM = 40; // atlas generation resolution
 const PXRANGE = 8;
 const OUTPUT_SIZES = [16, 32, 64, 128, 256];
 const TEXT = "Hello Привет 123 @#&";

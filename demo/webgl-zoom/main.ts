@@ -21,7 +21,7 @@ import fragSource from "../webgl/msdf.frag.glsl?raw";
 
 // See demo/canvas/main.ts for why this isn't a hardcoded leading-slash path.
 const FONT_URL = `${import.meta.env.BASE_URL}test/fonts/PTSerif-Regular.ttf`;
-const PIXELS_PER_EM = 32; // atlas generation resolution
+const PIXELS_PER_EM = 40; // atlas generation resolution
 const PXRANGE = 2;
 const BASE_PX_PER_EM = 48; // pixel-per-em at zoom = 1
 const MIN_ZOOM = 0.05;

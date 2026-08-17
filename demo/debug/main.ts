@@ -116,10 +116,22 @@ function sampleCell(
 const median3 = (a: number, b: number, c: number): number =>
   Math.max(Math.min(a, b), Math.min(Math.max(a, b), c));
 
+/** Aspect-preserving fit of a `w × h` cell inside PANEL×PANEL, centred.
+ *  With per-glyph cropping the cell is no longer square, so panels
+ *  letterbox (transparent margins) instead of stretching. */
+function fitRect(w: number, h: number): { dx: number; dy: number; dw: number; dh: number } {
+  if (w <= 0 || h <= 0) return { dx: 0, dy: 0, dw: PANEL, dh: PANEL };
+  const scale = Math.min(PANEL / w, PANEL / h);
+  const dw = w * scale;
+  const dh = h * scale;
+  return { dx: (PANEL - dw) / 2, dy: (PANEL - dh) / 2, dw, dh };
+}
+
 // ── Panel renderers ──────────────────────────────────────────────────────────
 
 /** Vector overlay in the same coordinate frame as the MSDF panels, using
- *  the glyph's plane bounds to map em → panel pixels. */
+ *  the glyph's plane bounds to map em → panel pixels. Letterboxes to
+ *  preserve the glyph's cell aspect ratio. */
 function drawVector(
   ctx: CanvasRenderingContext2D,
   glyph: AtlasGlyph,
@@ -127,24 +139,25 @@ function drawVector(
   pxrangeEm: number,
 ): void {
   ctx.clearRect(0, 0, PANEL, PANEL);
+  const { dx, dy, dw, dh } = fitRect(glyph.w, glyph.h);
   ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, PANEL, PANEL);
+  ctx.fillRect(dx, dy, dw, dh);
 
   const cellW = glyph.planeRight - glyph.planeLeft;
   const cellH = glyph.planeTop - glyph.planeBottom;
 
   // pxrange safe-region border (glyph outline itself sits just inside it).
-  const inset = (pxrangeEm / cellW) * PANEL;
-  const insetY = (pxrangeEm / cellH) * PANEL;
+  // Uniform em→panel scale means one inset value serves both axes.
+  const inset = (pxrangeEm / cellW) * dw;
   ctx.strokeStyle = "rgba(235, 108, 54, 0.35)";
   ctx.setLineDash([4, 3]);
   ctx.lineWidth = 1;
-  ctx.strokeRect(inset, insetY, PANEL - 2 * inset, PANEL - 2 * insetY);
+  ctx.strokeRect(dx + inset, dy + inset, dw - 2 * inset, dh - 2 * inset);
   ctx.setLineDash([]);
 
-  const mapX = (x: number): number => ((x - glyph.planeLeft) / cellW) * PANEL;
-  // planeTop is upper y in em (y-up); PANEL is y-down.
-  const mapY = (y: number): number => ((glyph.planeTop - y) / cellH) * PANEL;
+  const mapX = (x: number): number => dx + ((x - glyph.planeLeft) / cellW) * dw;
+  // planeTop is upper y in em (y-up); panel is y-down.
+  const mapY = (y: number): number => dy + ((glyph.planeTop - y) / cellH) * dh;
 
   ctx.beginPath();
   for (const contour of rawShape.contours) {
@@ -177,8 +190,9 @@ function drawVector(
   ctx.stroke();
 }
 
-/** Nearest-neighbour blit of the atlas cell into a PANEL×PANEL panel,
- *  masking to the requested channels. Cell may be non-square. */
+/** Nearest-neighbour blit of the atlas cell into an aspect-preserving
+ *  sub-rect of a PANEL×PANEL panel, masking to the requested channels.
+ *  Cell may be non-square — letterboxed to keep proportions honest. */
 function drawCell(
   ctx: CanvasRenderingContext2D,
   atlas: Atlas,
@@ -186,10 +200,8 @@ function drawCell(
   channelMask: number, // 7=RGB, 1=R, 2=G, 4=B
 ): void {
   const { w, h } = glyph;
-  if (w === 0 || h === 0) {
-    ctx.clearRect(0, 0, PANEL, PANEL);
-    return;
-  }
+  ctx.clearRect(0, 0, PANEL, PANEL);
+  if (w === 0 || h === 0) return;
   const small = document.createElement("canvas");
   small.width = w;
   small.height = h;
@@ -208,13 +220,13 @@ function drawCell(
   }
   sctx.putImageData(image, 0, 0);
   ctx.imageSmoothingEnabled = false;
-  ctx.clearRect(0, 0, PANEL, PANEL);
-  ctx.drawImage(small, 0, 0, w, h, 0, 0, PANEL, PANEL);
+  const { dx, dy, dw, dh } = fitRect(w, h);
+  ctx.drawImage(small, 0, 0, w, h, dx, dy, dw, dh);
 }
 
-/** Bilinearly reconstructs the glyph at PANEL×PANEL using the median
- *  shader math. Uses the atlas's uniform pxrangeEm — the whole point of
- *  cropping instead of scaling. */
+/** Bilinearly reconstructs the glyph in an aspect-preserving sub-rect
+ *  of a PANEL×PANEL panel using the median shader math. Uses the atlas's
+ *  uniform pxrangeEm — the whole point of cropping instead of scaling. */
 function drawMedian(
   ctx: CanvasRenderingContext2D,
   atlas: Atlas,
@@ -222,40 +234,38 @@ function drawMedian(
   mode: SamplingMode,
 ): void {
   const { w, h } = glyph;
-  const image = ctx.createImageData(PANEL, PANEL);
+  ctx.clearRect(0, 0, PANEL, PANEL);
+  if (w === 0 || h === 0) return;
+  const { dx, dy, dw, dh } = fitRect(w, h);
+  const dwI = Math.round(dw);
+  const dhI = Math.round(dh);
+  const image = ctx.createImageData(dwI, dhI);
   const out = image.data;
   const fg: [number, number, number] = [45, 49, 66];
   const bg: [number, number, number] = [255, 255, 255];
-  if (w === 0 || h === 0) {
-    for (let i = 0; i < out.length; i += 4) {
-      out[i] = bg[0]; out[i + 1] = bg[1]; out[i + 2] = bg[2]; out[i + 3] = 255;
-    }
-    ctx.putImageData(image, 0, 0);
-    return;
-  }
   // screenPxRange = pxrangeEm × pixels-per-em-at-panel; equivalent to
-  // pxrangeTexels × (panelDim/cellDim) — same math, phrased in em.
+  // pxrangeTexels × (rectDim/cellDim) — same math, phrased in em.
   const cellEmH = glyph.planeTop - glyph.planeBottom;
-  const screenPxRange = (atlas.pxrangeEm / cellEmH) * PANEL;
-  const kx = w / PANEL;
-  const ky = h / PANEL;
+  const screenPxRange = (atlas.pxrangeEm / cellEmH) * dhI;
+  const kx = w / dwI;
+  const ky = h / dhI;
   const shift = mode === "gpu" ? 0.5 : 0.0;
   const offset = mode === "gpu" ? -0.5 : 0.0;
-  for (let dy = 0; dy < PANEL; dy++) {
-    const sy = (dy + shift) * ky + offset;
-    for (let dx = 0; dx < PANEL; dx++) {
-      const sx = (dx + shift) * kx + offset;
+  for (let py = 0; py < dhI; py++) {
+    const sy = (py + shift) * ky + offset;
+    for (let px = 0; px < dwI; px++) {
+      const sx = (px + shift) * kx + offset;
       const [r, g, b] = sampleCell(atlas, glyph, sx, sy);
       const sd = median3(r, g, b) - 0.5;
       const opacity = Math.max(0, Math.min(1, screenPxRange * sd + 0.5));
-      const idx = (dy * PANEL + dx) * 4;
+      const idx = (py * dwI + px) * 4;
       out[idx] = bg[0] + (fg[0] - bg[0]) * opacity;
       out[idx + 1] = bg[1] + (fg[1] - bg[1]) * opacity;
       out[idx + 2] = bg[2] + (fg[2] - bg[2]) * opacity;
       out[idx + 3] = 255;
     }
   }
-  ctx.putImageData(image, 0, 0);
+  ctx.putImageData(image, Math.round(dx), Math.round(dy));
 }
 
 // ── Layout ───────────────────────────────────────────────────────────────────

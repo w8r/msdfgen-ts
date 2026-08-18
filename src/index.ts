@@ -8,5 +8,5 @@ export { EdgeSegment, LINEAR, QUADRATIC, CUBIC } from "./shape/segments";
 export type { SegmentType } from "./shape/segments";
 export { Font } from "./font/font";
 export type { FontMetrics } from "./font/font";
-export { Atlas, pixelFloatToByte } from "./atlas/atlas";
-export type { AtlasOptions, GlyphInfo } from "./atlas/atlas";
+export { Atlas, pixelFloatToByte } from "./atlas-gen";
+export type { AtlasOptions, AtlasGlyph, LaidOutGlyph } from "./atlas-gen";

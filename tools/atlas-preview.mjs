@@ -11,7 +11,7 @@ import { deflateSync } from "zlib";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { Font } from "../src/font/font";
-import { Atlas } from "../src/atlas/atlas";
+import { Atlas } from "../src/atlas-gen";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");
@@ -62,15 +62,15 @@ function encodePNG(rgba, width, height) {
 // ── Build atlases ────────────────────────────────────────────────────────────
 
 const jobs = [
-  { name: "roboto-ascii", font: "Roboto.ttf", size: 48, pxrange: 4, codepoints: range(0x20, 0x7e) },
+  { name: "roboto-ascii", font: "Roboto.ttf", pixelsPerEm: 48, pxrange: 4, codepoints: range(0x20, 0x7e) },
   {
     name: "notosans-mixed",
     font: "NotoSans.ttf",
-    size: 32,
+    pixelsPerEm: 32,
     pxrange: 4,
     codepoints: [...range(0x41, 0x5a), ...range(0x0410, 0x042f)], // Latin + Cyrillic uppercase
   },
-  { name: "lucide-icons", font: "Lucide.ttf", size: 48, pxrange: 4, codepoints: range(0xe000, 0xe000 + 63) },
+  { name: "lucide-icons", font: "Lucide.ttf", pixelsPerEm: 48, pxrange: 4, codepoints: range(0xe000, 0xe000 + 63) },
 ];
 
 function range(a, b) {
@@ -83,14 +83,16 @@ for (const job of jobs) {
   const fontPath = resolve(ROOT, "test/fonts", job.font);
   const buf = readFileSync(fontPath);
   const font = new Font(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
-  const atlas = new Atlas(font, { size: job.size, pxrange: job.pxrange, atlasWidth: 512, atlasHeight: 512 });
+  const atlas = new Atlas(font, { pixelsPerEm: job.pixelsPerEm, pxrange: job.pxrange });
 
   let packed = 0;
+  const cps = [];
   for (const cp of job.codepoints) {
     if (font.glyphId(cp) === 0) continue; // skip .notdef (not in this font)
-    atlas.getGlyph(cp);
+    cps.push(cp);
     packed++;
   }
+  atlas.glyphs(cps); // one potpack for all glyphs
 
   const png = encodePNG(atlas.texture, atlas.width, atlas.height);
   const outPath = resolve(OUT_DIR, `${job.name}.png`);

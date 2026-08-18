@@ -18,51 +18,24 @@
  * Shares its shaders with demo/webgl/ (same reconstruction, same instance
  * layout) — only the per-frame camera transform and tier switching are new.
  */
-import { Font, Atlas, type GlyphInfo } from "../../src/index";
+import { Font, Atlas, type LaidOutGlyph } from "../../src/index";
 import vertSource from "../webgl/msdf.vert.glsl?raw";
 import fragSource from "../webgl/msdf.frag.glsl?raw";
 
 // See demo/canvas/main.ts for why this isn't a hardcoded leading-slash path.
 const FONT_URL = `${import.meta.env.BASE_URL}test/fonts/PTSerif-Regular.ttf`;
-const ATLAS_SIZES = [24, 32, 48, 64] as const;
-const DEFAULT_ATLAS_SIZE = 64;
-const PXRANGE_RATIO = 8; // pxrange = size / PXRANGE_RATIO, matches the fixed corpus convention (32px -> pxrange4)
+const ATLAS_SIZES = [24, 32, 40, 48, 64] as const; // pixelsPerEm tiers
+const DEFAULT_ATLAS_SIZE = 40;
+const PXRANGE_RATIO = 8; // pxrange = pixelsPerEm / PXRANGE_RATIO, matches the fixed corpus convention (32px -> pxrange4)
 const BASE_PX_PER_EM = 48; // pixel-per-em at zoom = 1
 const MIN_ZOOM = 0.05;
 const MAX_ZOOM = 4096; // well past any tier's crisp range (softens, doesn't break) — no tiering yet
 const ZOOM_SPEED = 0.0018; // wheel deltaY -> exponential zoom factor
 const CANVAS_CSS_WIDTH = 1100;
 const CANVAS_CSS_HEIGHT = 480;
-const TEXT = "Hello Привет 123 @#&";
+const TEXT = "*%#`²Hello Привет 123 @#&";
 const FG_COLOR: [number, number, number, number] = [0.08, 0.08, 0.08, 1];
 const BG_COLOR: [number, number, number, number] = [1, 1, 1, 1];
-
-interface LayoutGlyph {
-  info: GlyphInfo;
-  penX: number; // em units, world-space (baseline y = 0)
-}
-
-function layout(
-  font: Font,
-  atlas: Atlas,
-  text: string,
-): { glyphs: LayoutGlyph[]; widthEm: number } {
-  const glyphs: LayoutGlyph[] = [];
-  let penX = 0;
-  let prevGlyphId = -1;
-  for (const ch of text) {
-    const codepoint = ch.codePointAt(0)!;
-    const glyphId = font.glyphId(codepoint);
-    if (prevGlyphId >= 0) {
-      penX += font.kerning(prevGlyphId, glyphId) / font.metrics.unitsPerEm;
-    }
-    const info = atlas.getGlyph(codepoint);
-    glyphs.push({ info, penX });
-    penX += info.advance;
-    prevGlyphId = glyphId;
-  }
-  return { glyphs, widthEm: penX };
-}
 
 function compileShader(gl: WebGL2RenderingContext, type: number, source: string): WebGLShader {
   const shader = gl.createShader(type)!;
@@ -101,32 +74,25 @@ interface Camera {
 
 /** Everything that gets rebuilt when the atlas tier (resolution) changes. */
 interface Tier {
-  size: number;
+  pixelsPerEm: number;
   pxrange: number;
   atlas: Atlas;
-  glyphs: LayoutGlyph[];
+  glyphs: LaidOutGlyph[];
   widthEm: number;
-  genScale: number;
-  originXInCellPx: number;
-  baselineFromTopPx: number;
   halfTexelU: number;
   halfTexelV: number;
 }
 
-function buildTier(font: Font, size: number): Tier {
-  const pxrange = size / PXRANGE_RATIO;
-  const atlas = new Atlas(font, { size, pxrange });
-  const { glyphs, widthEm } = layout(font, atlas, TEXT);
-  const genScale = size - 2 * pxrange;
+function buildTier(font: Font, pixelsPerEm: number): Tier {
+  const pxrange = pixelsPerEm / PXRANGE_RATIO;
+  const atlas = new Atlas(font, { pixelsPerEm, pxrange });
+  const { glyphs, widthEm } = atlas.layout(TEXT);
   return {
-    size,
+    pixelsPerEm,
     pxrange,
     atlas,
     glyphs,
     widthEm,
-    genScale,
-    originXInCellPx: pxrange,
-    baselineFromTopPx: size - pxrange - 0.25 * genScale,
     halfTexelU: 0.5 / atlas.width,
     halfTexelV: 0.5 / atlas.height,
   };
@@ -253,27 +219,29 @@ async function main(): Promise<void> {
     const pixelPerEm = BASE_PX_PER_EM * camera.zoom;
     const centerX = canvas.width / 2;
     const centerY = canvas.height / 2;
-    const outputScale = pixelPerEm / tier.genScale;
-    const screenPxRange = tier.pxrange * outputScale;
+    // pxrangeEm is uniform across all glyphs (crop, not scale — see atlas-gen.ts),
+    // so screenPxRange stays a single frame-wide uniform.
+    const screenPxRange = tier.atlas.pxrangeEm * pixelPerEm;
 
     for (let i = 0; i < tier.glyphs.length; i++) {
-      const { info, penX } = tier.glyphs[i]!;
+      const { glyph, penX } = tier.glyphs[i]!;
       // World -> screen (f64) happens here, before anything narrows to f32.
       const originXScreen = centerX + (penX - camera.x) * pixelPerEm;
       const originYScreen = centerY - (0 - camera.y) * pixelPerEm;
-      const cellLeft = originXScreen - tier.originXInCellPx * outputScale;
-      const cellTop = originYScreen - tier.baselineFromTopPx * outputScale;
-      const cellSizePx = info.size * outputScale;
+      const cellLeft = originXScreen + glyph.planeLeft * pixelPerEm;
+      const cellTop = originYScreen - glyph.planeTop * pixelPerEm;
+      const cellWidthPx = (glyph.planeRight - glyph.planeLeft) * pixelPerEm;
+      const cellHeightPx = (glyph.planeTop - glyph.planeBottom) * pixelPerEm;
 
       const base = i * FLOATS_PER_INSTANCE;
       instanceData[base + 0] = cellLeft;
       instanceData[base + 1] = cellTop;
-      instanceData[base + 2] = cellSizePx;
-      instanceData[base + 3] = cellSizePx;
-      instanceData[base + 4] = info.rect.x / tier.atlas.width + tier.halfTexelU;
-      instanceData[base + 5] = info.rect.y / tier.atlas.height + tier.halfTexelV;
-      instanceData[base + 6] = info.rect.w / tier.atlas.width - 2 * tier.halfTexelU;
-      instanceData[base + 7] = info.rect.h / tier.atlas.height - 2 * tier.halfTexelV;
+      instanceData[base + 2] = cellWidthPx;
+      instanceData[base + 3] = cellHeightPx;
+      instanceData[base + 4] = glyph.x / tier.atlas.width + tier.halfTexelU;
+      instanceData[base + 5] = glyph.y / tier.atlas.height + tier.halfTexelV;
+      instanceData[base + 6] = glyph.w / tier.atlas.width - 2 * tier.halfTexelU;
+      instanceData[base + 7] = glyph.h / tier.atlas.height - 2 * tier.halfTexelV;
     }
     gl.bindBuffer(gl.ARRAY_BUFFER, instanceBuffer);
     gl.bufferSubData(gl.ARRAY_BUFFER, 0, instanceData, 0, tier.glyphs.length * FLOATS_PER_INSTANCE);
@@ -294,7 +262,7 @@ async function main(): Promise<void> {
     gl.bindVertexArray(vao);
     gl.drawElementsInstanced(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0, tier.glyphs.length);
 
-    readout.textContent = `zoom ${camera.zoom.toExponential(2)}x · effective screenPxRange ${screenPxRange.toFixed(1)}px · atlas ${tier.size}px/pxrange${tier.pxrange} (fixed tier)`;
+    readout.textContent = `zoom ${camera.zoom.toExponential(2)}x · effective screenPxRange ${screenPxRange.toFixed(1)}px · atlas ${tier.pixelsPerEm}px/em, pxrange ${tier.pxrange} (fixed tier)`;
   }
 
   sizeSelect.addEventListener("change", () => {
@@ -369,6 +337,25 @@ async function main(): Promise<void> {
   );
 
   render();
+
+  // ── Underlying atlas texture preview (matches demo/canvas) ──────────────
+  const atlasLabel = document.createElement("div");
+  atlasLabel.className = "readout";
+  atlasLabel.style.marginTop = "16px";
+  atlasLabel.textContent = `underlying atlas texture (${tier.atlas.width}×${tier.atlas.height}, raw MSDF channels)`;
+  root.appendChild(atlasLabel);
+  const atlasCanvas = document.createElement("canvas");
+  atlasCanvas.width = tier.atlas.width;
+  atlasCanvas.height = tier.atlas.height;
+  atlasCanvas.style.display = "block";
+  atlasCanvas.style.border = "1px solid #ddd";
+  atlasCanvas.style.background = "white";
+  const actx = atlasCanvas.getContext("2d")!;
+  const atlasImage = actx.createImageData(tier.atlas.width, tier.atlas.height);
+  atlasImage.data.set(tier.atlas.texture);
+  actx.putImageData(atlasImage, 0, 0);
+  root.appendChild(atlasCanvas);
+
   root.dataset.ready = "true"; // signal for tools/screenshot.mjs
 }
 

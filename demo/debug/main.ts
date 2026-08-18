@@ -1,45 +1,42 @@
 /**
  * MSDF debug view. For each glyph in a user-provided string, renders six
- * side-by-side 200×200 panels that all share the same cell-space transform:
+ * side-by-side 200×200 panels sourced from the shared `Atlas`:
  *
- *   1. vector     — the em-normalised shape, filled via Canvas 2D
- *   2. rgb        — the raw MSDF texels (nearest-neighbour zoom)
- *   3. R          — red channel only
- *   4. G          — green channel only
- *   5. B          — blue channel only
- *   6. median     — bilinearly-sampled median(r,g,b) − 0.5 reconstruction,
- *                   matching the shader in demo/canvas/main.ts
+ *   1. vector  — the em-normalised shape, filled via Canvas 2D
+ *   2. rgb     — the raw MSDF texels (nearest-neighbour zoom)
+ *   3. R       — red channel only
+ *   4. G       — green channel only
+ *   5. B       — blue channel only
+ *   6. median  — bilinearly-sampled median(r,g,b) − 0.5 reconstruction,
+ *                matching the shipping WebGL/WebGPU shaders
  *
- * Unlike the shipping `Atlas` (which uses a fixed em-box transform so every
- * glyph sits in the same baseline-anchored slot — wasting most of the cell on
- * blank whitespace for small glyphs like `.` or lowercase `x`), the debug view
- * fits each glyph's *actual* bounding box into the cell, leaving only
- * `pxrange` texels of MSDF safe-region padding on every side.  This gives
- * every glyph maximum resolution in its cell so channel / coloring /
- * correction bugs are visible even at 16 px.
+ * All panels use the exact same texels the `Atlas` produced — this page
+ * is a magnifying glass on `src/atlas-gen.ts`, not an alternative
+ * generator. Bugs in edge colouring, error correction, or channel
+ * alignment show up as mis-registration between the vector overlay and
+ * the RGB / median panels.
  *
- * All six views share the atlas cell's y-down coordinate frame (row 0 = top),
- * so bugs in edge colouring, error correction, or channel alignment show up as
- * visible mis-registration between the vector outline and the rgb / median
- * panels.
- *
- * Not shipped as library code — DOM-only debug tooling, so it reaches into
- * `src/msdf/*` internals (not part of the public API surface).
+ * Not shipped as library code — DOM-only debug tooling, so it reaches
+ * into `src/shape/normalize` for the vector overlay (not part of the
+ * public API surface).
  */
-import { Font, type Shape, LINEAR, QUADRATIC, CUBIC, pixelFloatToByte } from "../../src/index";
-import { emNormalizeShape, normalizeShape } from "../../src/shape/normalize";
-import { edgeColoringSimple } from "../../src/msdf/edge-coloring";
-import { generateMSDF } from "../../src/msdf/generate";
-import { distanceSignCorrection, msdfErrorCorrection } from "../../src/msdf/error-correction";
+import { Font, Atlas, type AtlasGlyph, type Shape, LINEAR, QUADRATIC, CUBIC } from "../../src/index";
+import { emNormalizeShape } from "../../src/shape/normalize";
 
 const PANEL = 200; // px per debug panel
-const ANGLE_THRESHOLD = 3.0; // matches Atlas / msdfgen CLI default
-const COLOR_SEED = 0n; // matches Atlas / msdfgen CLI default
 const DEFAULT_STRING = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+
+/**
+ * naive  — sy = dy/outputScale  (texel 0 centre at panel-pixel 0)
+ * gpu    — sy = (dy + 0.5)*cellSize/PANEL − 0.5  (texel i centre at coord i;
+ *          the mathematically correct match for `generateMSDF`'s texel
+ *          placement, and what a real GPU linear sampler does)
+ */
+type SamplingMode = "naive" | "gpu";
 
 interface Config {
   fontUrl: string;
-  size: number;
+  pixelsPerEm: number;
   pxrange: number;
   glyphs: string;
   sampling: SamplingMode;
@@ -54,7 +51,7 @@ function readConfig(): Config {
   const rawFontUrl = $<HTMLSelectElement>("font").value;
   return {
     fontUrl: import.meta.env.BASE_URL + rawFontUrl.replace(/^\//, ""),
-    size: Number($<HTMLInputElement>("size").value) || 16,
+    pixelsPerEm: Number($<HTMLInputElement>("size").value) || 16,
     pxrange: Number($<HTMLInputElement>("pxrange").value) || 2,
     glyphs: $<HTMLInputElement>("glyphs").value || DEFAULT_STRING,
     sampling: mode === "gpu" ? "gpu" : "naive",
@@ -69,267 +66,49 @@ async function loadFont(url: string): Promise<Font> {
   return new Font(buf);
 }
 
-// ── Shape bounds (tight enough) ──────────────────────────────────────────────
-
-interface Bounds {
-  minX: number;
-  minY: number;
-  maxX: number;
-  maxY: number;
-}
-
-const _pt: number[] = [0, 0];
+// ── Sampling helpers over the shared atlas texture ───────────────────────────
 
 /**
- * Bounding box of `shape` by sampling each segment at 16 t-values.  Not tight
- * to the mathematical minimum but well within a texel for typical font curves
- * — good enough to fit-to-cell without visible slop.
+ * RGB values ([0,1]) at a single texel of `glyph`'s cell in the atlas.
+ * `(sx, sy)` are cell-local, y-down (row 0 = top of the glyph rect).
  */
-function shapeBounds(shape: Shape): Bounds {
-  const b: Bounds = {
-    minX: Infinity,
-    minY: Infinity,
-    maxX: -Infinity,
-    maxY: -Infinity,
-  };
-  const N = 16;
-  for (const contour of shape.contours) {
-    for (const seg of contour) {
-      for (let i = 0; i <= N; i++) {
-        seg.point(i / N, _pt);
-        const x = _pt[0]!;
-        const y = _pt[1]!;
-        if (x < b.minX) b.minX = x;
-        if (y < b.minY) b.minY = y;
-        if (x > b.maxX) b.maxX = x;
-        if (y > b.maxY) b.maxY = y;
-      }
-    }
-  }
-  if (!isFinite(b.minX)) {
-    b.minX = 0;
-    b.minY = 0;
-    b.maxX = 1;
-    b.maxY = 1;
-  }
-  return b;
-}
-
-// ── Per-glyph generation ─────────────────────────────────────────────────────
-
-interface GlyphCell {
-  /** MSDF float bitmap, y-up (row 0 = bottom), (y*size+x)*3+ch. */
-  msdf: Float32Array;
-  /** Quantised bytes, y-down (row 0 = top), (y*size+x)*3+ch. */
-  bytes: Uint8Array;
-  /** Cell size in texels. */
-  size: number;
-  /** msdfgen projection: pixel = scale * (shape + t) − 0.5. */
-  scale: number;
-  tx: number;
-  ty: number;
-  /** Em-normalised, non-normalised outline for the vector overlay. */
-  rawShape: Shape;
+function texelRgb(
+  atlas: Atlas,
+  glyph: AtlasGlyph,
+  sx: number,
+  sy: number,
+): [number, number, number] {
+  if (sx < 0 || sy < 0 || sx >= glyph.w || sy >= glyph.h) return [0, 0, 0];
+  const tex = atlas.texture;
+  const base = ((glyph.y + sy) * atlas.width + (glyph.x + sx)) * 4;
+  return [tex[base]! / 255, tex[base + 1]! / 255, tex[base + 2]! / 255];
 }
 
 /**
- * Generates a single glyph MSDF into a fresh Float32Array, sized `cellSize²`,
- * with per-glyph scale/tx/ty that fits the glyph's actual bbox edge-to-edge
- * into the full cell (no safe-region padding — the field's transition band
- * extends past the cell boundary where the bbox touches the edge).
+ * Bilinear RGB sample of `glyph`'s cell at fractional `(sx, sy)`.
+ * Off-cell taps read as 0 (a conceptual 1-texel black border) which
+ * keeps corner samples anchored to "fully outside" instead of dragging
+ * clamp-to-edge transition-band values across the boundary.
  */
-function generateGlyphCell(
-  font: Font,
-  codepoint: number,
-  cellSize: number,
-  pxrange: number,
-): GlyphCell | null {
-  const glyphId = font.glyphId(codepoint);
-  const unitsPerEm = font.metrics.unitsPerEm;
-
-  // Two independent shape instances: one for MSDF generation (mutated by the
-  // full pipeline), one for the vector overlay (raw em-normalised outline only).
-  const shapeGen = font.shape(glyphId);
-  const shapeVec = font.shape(glyphId);
-  emNormalizeShape(shapeGen, unitsPerEm);
-  emNormalizeShape(shapeVec, unitsPerEm);
-
-  if (shapeGen.contours.length === 0) return null;
-
-  const b = shapeBounds(shapeGen);
-  const m = 1 / 16; // margin
-  const w = Math.max(1e-6, b.maxX - b.minX) + m;
-  const h = Math.max(1e-6, b.maxY - b.minY) + m;
-  const scale = cellSize / Math.max(w, h);
-  // Centre the bbox inside the full cell.  msdfgen's projection is
-  //   pixel = scale * (shape + t) − 0.5
-  // so   pixel(minX) = padX   ⇒   tx = (padX + 0.5) / scale − minX.
-  const padX = (cellSize - scale * w) / 2;
-  const padY = (cellSize - scale * h) / 2;
-  const tx = (padX + 0.5) / scale - b.minX;
-  const ty = (padY + 0.5) / scale - b.minY;
-
-  normalizeShape(shapeGen);
-  edgeColoringSimple(shapeGen, ANGLE_THRESHOLD, COLOR_SEED);
-
-  const msdf = new Float32Array(cellSize * cellSize * 3);
-  generateMSDF(shapeGen, cellSize, cellSize, scale, tx, ty, pxrange, msdf);
-  distanceSignCorrection(msdf, shapeGen, cellSize, cellSize, scale, tx, ty);
-  msdfErrorCorrection(msdf, shapeGen, cellSize, cellSize, scale, tx, ty, pxrange);
-
-  // Quantise + y-flip into a y-down byte cell (matches Atlas._blit).
-  const bytes = new Uint8Array(cellSize * cellSize * 3);
-  for (let sy = 0; sy < cellSize; sy++) {
-    const dstRow = cellSize - 1 - sy;
-    for (let sx = 0; sx < cellSize; sx++) {
-      const srcBase = (sy * cellSize + sx) * 3;
-      const dstBase = (dstRow * cellSize + sx) * 3;
-      bytes[dstBase] = pixelFloatToByte(msdf[srcBase]!);
-      bytes[dstBase + 1] = pixelFloatToByte(msdf[srcBase + 1]!);
-      bytes[dstBase + 2] = pixelFloatToByte(msdf[srcBase + 2]!);
-    }
-  }
-
-  return { msdf, bytes, size: cellSize, scale, tx, ty, rawShape: shapeVec };
-}
-
-// ── Panel renderers ──────────────────────────────────────────────────────────
-
-/**
- * Vector overlay, using the *same* per-glyph scale/tx/ty as the MSDF pass.
- *
- * Cell-space mapping (see src/msdf/generate.ts sample formula):
- *   pixel_x_yup = scale * (shape_x + tx) − 0.5
- *   pixel_y_yup = scale * (shape_y + ty) − 0.5
- *   target_x    = pixel_x_yup * (PANEL / cellSize)
- *   target_y    = PANEL − pixel_y_yup * (PANEL / cellSize)   (y-flip)
- */
-function drawVector(ctx: CanvasRenderingContext2D, cell: GlyphCell, pxrange: number): void {
-  ctx.clearRect(0, 0, PANEL, PANEL);
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, PANEL, PANEL);
-
-  const { rawShape, scale, tx, ty, size } = cell;
-  const k = PANEL / size; // px-per-atlas-texel
-
-  // pxrange safe-region border (visual reference only — the glyph itself
-  // fills the whole cell, so this box lives at the edge when pxrange = 0).
-  const inset = pxrange * k;
-  ctx.strokeStyle = "rgba(235, 108, 54, 0.35)";
-  ctx.setLineDash([4, 3]);
-  ctx.lineWidth = 1;
-  ctx.strokeRect(inset, inset, PANEL - 2 * inset, PANEL - 2 * inset);
-  ctx.setLineDash([]);
-
-  const applyXform = (): void => {
-    // translate(-0.5*k, PANEL + 0.5*k)  ← −0.5 texel-centre offset, then y-flip origin
-    // scale(k, -k)                      ← atlas-texel → target-px, flip y
-    // scale(scale, scale)               ← em → atlas-texel
-    // translate(tx, ty)                 ← msdfgen translate
-    ctx.translate(-0.5 * k, PANEL + 0.5 * k);
-    ctx.scale(k, -k);
-    ctx.scale(scale, scale);
-    ctx.translate(tx, ty);
-  };
-
-  const tracePath = (): void => {
-    ctx.beginPath();
-    for (const contour of rawShape.contours) {
-      if (contour.length === 0) continue;
-      const first = contour[0]!;
-      ctx.moveTo(first.p0x, first.p0y);
-      for (const seg of contour) {
-        switch (seg.type) {
-          case LINEAR:
-            ctx.lineTo(seg.p1x, seg.p1y);
-            break;
-          case QUADRATIC:
-            ctx.quadraticCurveTo(seg.p1x, seg.p1y, seg.p2x, seg.p2y);
-            break;
-          case CUBIC:
-            ctx.bezierCurveTo(seg.p1x, seg.p1y, seg.p2x, seg.p2y, seg.p3x, seg.p3y);
-            break;
-        }
-      }
-      ctx.closePath();
-    }
-  };
-
-  ctx.save();
-  applyXform();
-  tracePath();
-  ctx.fillStyle = "rgba(45, 49, 66, 0.15)";
-  ctx.fill("evenodd");
-  ctx.restore();
-
-  ctx.save();
-  applyXform();
-  ctx.lineWidth = 1 / (k * scale);
-  ctx.strokeStyle = "#2d3142";
-  tracePath();
-  ctx.stroke();
-  ctx.restore();
-}
-
-/**
- * Blits the per-glyph byte cell (y-down) into `ctx` at PANEL×PANEL with
- * nearest-neighbour scaling, masking to the requested channels.
- */
-function drawCell(
-  ctx: CanvasRenderingContext2D,
-  cell: GlyphCell,
-  channelMask: number, // 7=RGB, 1=R, 2=G, 4=B
-): void {
-  const { bytes, size } = cell;
-  const small = document.createElement("canvas");
-  small.width = size;
-  small.height = size;
-  const sctx = small.getContext("2d")!;
-  const image = sctx.createImageData(size, size);
-  const out = image.data;
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      const src = (y * size + x) * 3;
-      const dst = (y * size + x) * 4;
-      out[dst] = channelMask & 1 ? bytes[src]! : 0;
-      out[dst + 1] = channelMask & 2 ? bytes[src + 1]! : 0;
-      out[dst + 2] = channelMask & 4 ? bytes[src + 2]! : 0;
-      out[dst + 3] = 255;
-    }
-  }
-  sctx.putImageData(image, 0, 0);
-  ctx.imageSmoothingEnabled = false;
-  ctx.clearRect(0, 0, PANEL, PANEL);
-  ctx.drawImage(small, 0, 0, size, size, 0, 0, PANEL, PANEL);
-}
-
-/**
- * Bilinear RGB sample from the per-glyph byte cell (y-down, [0,1] floats).
- * Off-cell taps read as 0 (a conceptual 1-texel black border around the
- * atlas), which keeps the corner samples anchored to "fully outside" instead
- * of dragging clamp-to-edge transition-band values across the boundary —
- * that leak is what produces the wavy fringes when the glyph fills the tile.
- */
-function sampleCell(cell: GlyphCell, sx: number, sy: number): [number, number, number] {
-  const n = cell.size;
+function sampleCell(
+  atlas: Atlas,
+  glyph: AtlasGlyph,
+  sx: number,
+  sy: number,
+): [number, number, number] {
   const x0 = Math.floor(sx);
   const y0 = Math.floor(sy);
   const fx = sx - x0;
   const fy = sy - y0;
-  const x1 = x0 + 1;
-  const y1 = y0 + 1;
-  const bytes = cell.bytes;
-  const get = (x: number, y: number, ch: number): number =>
-    x < 0 || y < 0 || x >= n || y >= n ? 0 : bytes[(y * n + x) * 3 + ch]! / 255;
+  const c00 = texelRgb(atlas, glyph, x0, y0);
+  const c10 = texelRgb(atlas, glyph, x0 + 1, y0);
+  const c01 = texelRgb(atlas, glyph, x0, y0 + 1);
+  const c11 = texelRgb(atlas, glyph, x0 + 1, y0 + 1);
   const out: [number, number, number] = [0, 0, 0];
   for (let ch = 0; ch < 3; ch++) {
-    const c00 = get(x0, y0, ch);
-    const c10 = get(x1, y0, ch);
-    const c01 = get(x0, y1, ch);
-    const c11 = get(x1, y1, ch);
-    const top = c00 + fx * (c10 - c00);
-    const bottom = c01 + fx * (c11 - c01);
-    out[ch] = top + fy * (bottom - top);
+    const top = c00[ch]! + fx * (c10[ch]! - c00[ch]!);
+    const bot = c01[ch]! + fx * (c11[ch]! - c01[ch]!);
+    out[ch] = top + fy * (bot - top);
   }
   return out;
 }
@@ -337,55 +116,156 @@ function sampleCell(cell: GlyphCell, sx: number, sy: number): [number, number, n
 const median3 = (a: number, b: number, c: number): number =>
   Math.max(Math.min(a, b), Math.min(Math.max(a, b), c));
 
-/**
- * Two sampling conventions, side by side:
- *   'naive' — sy = dy / outputScale.  Places texel 0's centre at panel pixel 0
- *             (i.e. at the cell's top edge, not the centre of its top texel).
- *             This is what `demo/canvas/main.ts` currently uses.
- *   'gpu'   — sy = (dy + 0.5) * cellSize / PANEL − 0.5.  Standard GPU linear
- *             filter: texel i's centre sits at sampleCoord = i, matching what
- *             `generateMSDF` writes (`(x + 0.5)/scale − tx`).
- * The 'gpu' one is the mathematically-correct match for the msdfgen texel
- * placement, but only becomes visibly different from 'naive' at large zoom.
- * We expose the toggle so the debug view matches whichever the WebGPU
- * renderer ends up using.
- */
-type SamplingMode = "naive" | "gpu";
+/** Aspect-preserving fit of a `w × h` cell inside PANEL×PANEL, centred.
+ *  With per-glyph cropping the cell is no longer square, so panels
+ *  letterbox (transparent margins) instead of stretching. */
+function fitRect(w: number, h: number): { dx: number; dy: number; dw: number; dh: number } {
+  if (w <= 0 || h <= 0) return { dx: 0, dy: 0, dw: PANEL, dh: PANEL };
+  const scale = Math.min(PANEL / w, PANEL / h);
+  const dw = w * scale;
+  const dh = h * scale;
+  return { dx: (PANEL - dw) / 2, dy: (PANEL - dh) / 2, dw, dh };
+}
 
-/**
- * Bilinearly reconstructs the glyph at PANEL×PANEL from the per-glyph
- * cellSize×cellSize MSDF byte cell.
- */
+// ── Panel renderers ──────────────────────────────────────────────────────────
+
+/** Vector overlay in the same coordinate frame as the MSDF panels, using
+ *  the glyph's plane bounds to map em → panel pixels. Letterboxes to
+ *  preserve the glyph's cell aspect ratio. */
+function drawVector(
+  ctx: CanvasRenderingContext2D,
+  glyph: AtlasGlyph,
+  rawShape: Shape,
+  pxrangeEm: number,
+): void {
+  ctx.clearRect(0, 0, PANEL, PANEL);
+  const { dx, dy, dw, dh } = fitRect(glyph.w, glyph.h);
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(dx, dy, dw, dh);
+
+  const cellW = glyph.planeRight - glyph.planeLeft;
+  const cellH = glyph.planeTop - glyph.planeBottom;
+
+  // pxrange safe-region border (glyph outline itself sits just inside it).
+  // Uniform em→panel scale means one inset value serves both axes.
+  const inset = (pxrangeEm / cellW) * dw;
+  ctx.strokeStyle = "rgba(235, 108, 54, 0.35)";
+  ctx.setLineDash([4, 3]);
+  ctx.lineWidth = 1;
+  ctx.strokeRect(dx + inset, dy + inset, dw - 2 * inset, dh - 2 * inset);
+  ctx.setLineDash([]);
+
+  const mapX = (x: number): number => dx + ((x - glyph.planeLeft) / cellW) * dw;
+  // planeTop is upper y in em (y-up); panel is y-down.
+  const mapY = (y: number): number => dy + ((glyph.planeTop - y) / cellH) * dh;
+
+  ctx.beginPath();
+  for (const contour of rawShape.contours) {
+    if (contour.length === 0) continue;
+    const first = contour[0]!;
+    ctx.moveTo(mapX(first.p0x), mapY(first.p0y));
+    for (const seg of contour) {
+      switch (seg.type) {
+        case LINEAR:
+          ctx.lineTo(mapX(seg.p1x), mapY(seg.p1y));
+          break;
+        case QUADRATIC:
+          ctx.quadraticCurveTo(mapX(seg.p1x), mapY(seg.p1y), mapX(seg.p2x), mapY(seg.p2y));
+          break;
+        case CUBIC:
+          ctx.bezierCurveTo(
+            mapX(seg.p1x), mapY(seg.p1y),
+            mapX(seg.p2x), mapY(seg.p2y),
+            mapX(seg.p3x), mapY(seg.p3y),
+          );
+          break;
+      }
+    }
+    ctx.closePath();
+  }
+  ctx.fillStyle = "rgba(45, 49, 66, 0.15)";
+  ctx.fill("evenodd");
+  ctx.strokeStyle = "#2d3142";
+  ctx.lineWidth = 1;
+  ctx.stroke();
+}
+
+/** Nearest-neighbour blit of the atlas cell into an aspect-preserving
+ *  sub-rect of a PANEL×PANEL panel, masking to the requested channels.
+ *  Cell may be non-square — letterboxed to keep proportions honest. */
+function drawCell(
+  ctx: CanvasRenderingContext2D,
+  atlas: Atlas,
+  glyph: AtlasGlyph,
+  channelMask: number, // 7=RGB, 1=R, 2=G, 4=B
+): void {
+  const { w, h } = glyph;
+  ctx.clearRect(0, 0, PANEL, PANEL);
+  if (w === 0 || h === 0) return;
+  const small = document.createElement("canvas");
+  small.width = w;
+  small.height = h;
+  const sctx = small.getContext("2d")!;
+  const image = sctx.createImageData(w, h);
+  const out = image.data;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const src = ((glyph.y + y) * atlas.width + (glyph.x + x)) * 4;
+      const dst = (y * w + x) * 4;
+      out[dst] = channelMask & 1 ? atlas.texture[src]! : 0;
+      out[dst + 1] = channelMask & 2 ? atlas.texture[src + 1]! : 0;
+      out[dst + 2] = channelMask & 4 ? atlas.texture[src + 2]! : 0;
+      out[dst + 3] = 255;
+    }
+  }
+  sctx.putImageData(image, 0, 0);
+  ctx.imageSmoothingEnabled = false;
+  const { dx, dy, dw, dh } = fitRect(w, h);
+  ctx.drawImage(small, 0, 0, w, h, dx, dy, dw, dh);
+}
+
+/** Bilinearly reconstructs the glyph in an aspect-preserving sub-rect
+ *  of a PANEL×PANEL panel using the median shader math. Uses the atlas's
+ *  uniform pxrangeEm — the whole point of cropping instead of scaling. */
 function drawMedian(
   ctx: CanvasRenderingContext2D,
-  cell: GlyphCell,
-  pxrange: number,
+  atlas: Atlas,
+  glyph: AtlasGlyph,
   mode: SamplingMode,
 ): void {
-  const image = ctx.createImageData(PANEL, PANEL);
+  const { w, h } = glyph;
+  ctx.clearRect(0, 0, PANEL, PANEL);
+  if (w === 0 || h === 0) return;
+  const { dx, dy, dw, dh } = fitRect(w, h);
+  const dwI = Math.round(dw);
+  const dhI = Math.round(dh);
+  const image = ctx.createImageData(dwI, dhI);
   const out = image.data;
-  const outputScale = PANEL / cell.size;
-  const screenPxRange = pxrange * outputScale;
   const fg: [number, number, number] = [45, 49, 66];
   const bg: [number, number, number] = [255, 255, 255];
-  const k = cell.size / PANEL;
+  // screenPxRange = pxrangeEm × pixels-per-em-at-panel; equivalent to
+  // pxrangeTexels × (rectDim/cellDim) — same math, phrased in em.
+  const cellEmH = glyph.planeTop - glyph.planeBottom;
+  const screenPxRange = (atlas.pxrangeEm / cellEmH) * dhI;
+  const kx = w / dwI;
+  const ky = h / dhI;
   const shift = mode === "gpu" ? 0.5 : 0.0;
   const offset = mode === "gpu" ? -0.5 : 0.0;
-  for (let dy = 0; dy < PANEL; dy++) {
-    const sy = (dy + shift) * k + offset;
-    for (let dx = 0; dx < PANEL; dx++) {
-      const sx = (dx + shift) * k + offset;
-      const [r, g, b] = sampleCell(cell, sx, sy);
+  for (let py = 0; py < dhI; py++) {
+    const sy = (py + shift) * ky + offset;
+    for (let px = 0; px < dwI; px++) {
+      const sx = (px + shift) * kx + offset;
+      const [r, g, b] = sampleCell(atlas, glyph, sx, sy);
       const sd = median3(r, g, b) - 0.5;
       const opacity = Math.max(0, Math.min(1, screenPxRange * sd + 0.5));
-      const idx = (dy * PANEL + dx) * 4;
+      const idx = (py * dwI + px) * 4;
       out[idx] = bg[0] + (fg[0] - bg[0]) * opacity;
       out[idx + 1] = bg[1] + (fg[1] - bg[1]) * opacity;
       out[idx + 2] = bg[2] + (fg[2] - bg[2]) * opacity;
       out[idx + 3] = 255;
     }
   }
-  ctx.putImageData(image, 0, 0);
+  ctx.putImageData(image, Math.round(dx), Math.round(dy));
 }
 
 // ── Layout ───────────────────────────────────────────────────────────────────
@@ -393,8 +273,7 @@ function drawMedian(
 function buildHeader(root: HTMLElement): void {
   const header = document.createElement("div");
   header.className = "header";
-  const cols = ["", "vector", "rgb", "R", "G", "B", "median"];
-  for (const c of cols) {
+  for (const c of ["", "vector", "rgb", "R", "G", "B", "median"]) {
     const el = document.createElement("div");
     el.textContent = c;
     header.appendChild(el);
@@ -413,22 +292,18 @@ function makePanel(className = ""): HTMLCanvasElement {
 function renderGlyphRow(
   root: HTMLElement,
   font: Font,
+  atlas: Atlas,
   ch: string,
-  cellSize: number,
-  pxrange: number,
   sampling: SamplingMode,
 ): void {
   const codepoint = ch.codePointAt(0);
   if (codepoint === undefined) return;
+  const glyph = atlas.glyph(codepoint);
+  if (glyph.w === 0) return; // empty outline (space, etc.)
 
-  let cell: GlyphCell | null;
-  try {
-    cell = generateGlyphCell(font, codepoint, cellSize, pxrange);
-  } catch (e) {
-    console.warn(`glyph "${ch}" (U+${codepoint.toString(16)}) failed:`, e);
-    return;
-  }
-  if (!cell) return;
+  // Raw shape for the vector overlay (em-normalised, un-normalised outline).
+  const rawShape = font.shape(font.glyphId(codepoint));
+  emNormalizeShape(rawShape, font.metrics.unitsPerEm);
 
   const row = document.createElement("div");
   row.className = "row";
@@ -439,27 +314,17 @@ function renderGlyphRow(
   row.appendChild(label);
 
   const vec = makePanel("vector");
-  drawVector(vec.getContext("2d")!, cell, pxrange);
+  drawVector(vec.getContext("2d")!, glyph, rawShape, atlas.pxrangeEm);
   row.appendChild(vec);
 
-  const rgb = makePanel();
-  drawCell(rgb.getContext("2d")!, cell, 7);
-  row.appendChild(rgb);
-
-  const rOnly = makePanel();
-  drawCell(rOnly.getContext("2d")!, cell, 1);
-  row.appendChild(rOnly);
-
-  const gOnly = makePanel();
-  drawCell(gOnly.getContext("2d")!, cell, 2);
-  row.appendChild(gOnly);
-
-  const bOnly = makePanel();
-  drawCell(bOnly.getContext("2d")!, cell, 4);
-  row.appendChild(bOnly);
+  for (const mask of [7, 1, 2, 4]) {
+    const p = makePanel();
+    drawCell(p.getContext("2d")!, atlas, glyph, mask);
+    row.appendChild(p);
+  }
 
   const med = makePanel("median");
-  drawMedian(med.getContext("2d")!, cell, pxrange, sampling);
+  drawMedian(med.getContext("2d")!, atlas, glyph, sampling);
   row.appendChild(med);
 
   root.appendChild(row);
@@ -471,12 +336,13 @@ async function render(): Promise<void> {
   root.textContent = "Loading font…";
 
   const font = await loadFont(cfg.fontUrl);
+  const atlas = new Atlas(font, { pixelsPerEm: cfg.pixelsPerEm, pxrange: cfg.pxrange });
 
   root.textContent = "";
   buildHeader(root);
   const glyphs = [...cfg.glyphs];
   for (let i = 0; i < glyphs.length; i++) {
-    renderGlyphRow(root, font, glyphs[i]!, cfg.size, cfg.pxrange, cfg.sampling);
+    renderGlyphRow(root, font, atlas, glyphs[i]!, cfg.sampling);
     if ((i & 7) === 7) await new Promise((r) => setTimeout(r, 0));
   }
 }

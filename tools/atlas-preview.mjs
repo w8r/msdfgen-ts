@@ -83,14 +83,16 @@ for (const job of jobs) {
   const fontPath = resolve(ROOT, "test/fonts", job.font);
   const buf = readFileSync(fontPath);
   const font = new Font(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
-  const atlas = new Atlas(font, { pixelsPerEm: job.pixelsPerEm, pxrange: job.pxrange, atlasWidth: 512, atlasHeight: 512 });
+  const atlas = new Atlas(font, { pixelsPerEm: job.pixelsPerEm, pxrange: job.pxrange });
 
   let packed = 0;
+  const cps = [];
   for (const cp of job.codepoints) {
     if (font.glyphId(cp) === 0) continue; // skip .notdef (not in this font)
-    atlas.glyph(cp);
+    cps.push(cp);
     packed++;
   }
+  atlas.glyphs(cps); // one potpack for all glyphs
 
   const png = encodePNG(atlas.texture, atlas.width, atlas.height);
   const outPath = resolve(OUT_DIR, `${job.name}.png`);

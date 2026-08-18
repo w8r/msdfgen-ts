@@ -49,8 +49,6 @@ describe("Atlas", () => {
     const atlas = new Atlas(font, { pixelsPerEm: 32, pxrange: 4 });
     const rects: AtlasGlyph[] = [];
     for (let cp = 0x21; cp <= 0x7e; cp++) rects.push(atlas.glyph(cp));
-    // Force pack via a texture read.
-    void atlas.texture;
     for (let i = 0; i < rects.length; i++) {
       for (let j = i + 1; j < rects.length; j++) {
         expect(overlaps(rects[i]!, rects[j]!)).toBe(false);

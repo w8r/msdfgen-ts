@@ -1,10 +1,10 @@
 /**
- * Interactive pan/zoom WebGL2 demo — drag to pan, wheel/pinch to zoom toward
- * the cursor, over a single fixed-resolution atlas tier (no re-tiering yet;
- * see CLAUDE.md's M5 plan for the later regenerate-on-threshold step). A
- * resolution selector lets you swap tiers (24/32/48/64px) while keeping the
- * camera fixed, so the quality difference at a given zoom is directly
- * comparable.
+ * Interactive pan/zoom WebGPU demo — WebGPU twin of demo/webgl-zoom/main.ts.
+ * Drag to pan, wheel/pinch to zoom toward the cursor, over a single
+ * fixed-resolution atlas tier (no re-tiering yet; see CLAUDE.md's M5 plan
+ * for the later regenerate-on-threshold step). A resolution selector lets
+ * you swap tiers (24/32/48/64px) while keeping the camera fixed, so the
+ * quality difference at a given zoom is directly comparable.
  *
  * Camera state (world position under the viewport centre + zoom factor) is
  * kept in plain JS numbers (f64) and only ever narrowed to f32 at the very
@@ -15,17 +15,16 @@
  * mode even at deep zoom: the translate (world -> screen, f64) always happens
  * before the scale-sensitive part reaches GPU-precision numbers.
  *
- * Shares its shaders with demo/webgl/ (same reconstruction, same instance
+ * Shares its shader with demo/webgpu/ (same reconstruction, same instance
  * layout) — only the per-frame camera transform and tier switching are new.
  */
 import { Font, Atlas, type LaidOutGlyph } from "../../src/index";
-import vertSource from "../webgl/msdf.vert.glsl?raw";
-import fragSource from "../webgl/msdf.frag.glsl?raw";
+import shaderCode from "../webgpu/msdf.wgsl?raw";
 
 // See demo/canvas/main.ts for why this isn't a hardcoded leading-slash path.
 const FONT_URL = `${import.meta.env.BASE_URL}test/fonts/PTSerif-Regular.ttf`;
-const ATLAS_SIZES = [24, 32, 40, 48, 64] as const; // pixelsPerEm tiers
-const DEFAULT_ATLAS_SIZE = 40;
+const ATLAS_SIZES = [24, 32, 48, 64] as const; // pixelsPerEm tiers
+const DEFAULT_ATLAS_SIZE = 64;
 const PXRANGE_RATIO = 8; // pxrange = pixelsPerEm / PXRANGE_RATIO, matches the fixed corpus convention (32px -> pxrange4)
 const BASE_PX_PER_EM = 48; // pixel-per-em at zoom = 1
 const MIN_ZOOM = 0.05;
@@ -33,37 +32,10 @@ const MAX_ZOOM = 4096; // well past any tier's crisp range (softens, doesn't bre
 const ZOOM_SPEED = 0.0018; // wheel deltaY -> exponential zoom factor
 const CANVAS_CSS_WIDTH = 1100;
 const CANVAS_CSS_HEIGHT = 480;
-const TEXT = "*%#`²Hello Привет 123 @#&";
+const TEXT = "Hello Привет 123 @#&";
 const FG_COLOR: [number, number, number, number] = [0.08, 0.08, 0.08, 1];
 const BG_COLOR: [number, number, number, number] = [1, 1, 1, 1];
-
-function compileShader(gl: WebGL2RenderingContext, type: number, source: string): WebGLShader {
-  const shader = gl.createShader(type)!;
-  gl.shaderSource(shader, source);
-  gl.compileShader(shader);
-  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-    const log = gl.getShaderInfoLog(shader);
-    gl.deleteShader(shader);
-    throw new Error(`shader compile failed: ${log}`);
-  }
-  return shader;
-}
-
-function linkProgram(gl: WebGL2RenderingContext, vertSrc: string, fragSrc: string): WebGLProgram {
-  const vert = compileShader(gl, gl.VERTEX_SHADER, vertSrc);
-  const frag = compileShader(gl, gl.FRAGMENT_SHADER, fragSrc);
-  const program = gl.createProgram()!;
-  gl.attachShader(program, vert);
-  gl.attachShader(program, frag);
-  gl.linkProgram(program);
-  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-    const log = gl.getProgramInfoLog(program);
-    throw new Error(`program link failed: ${log}`);
-  }
-  gl.deleteShader(vert);
-  gl.deleteShader(frag);
-  return program;
-}
+const FLOATS_PER_INSTANCE = 8;
 
 /** World-space camera focus point (em units) + zoom factor. All f64. */
 interface Camera {
@@ -100,6 +72,21 @@ function buildTier(font: Font, pixelsPerEm: number): Tier {
 
 async function main(): Promise<void> {
   const root = document.getElementById("root")!;
+
+  if (!navigator.gpu) {
+    root.textContent = "WebGPU is not available in this browser (navigator.gpu is undefined).";
+    root.dataset.ready = "true"; // signal for tools/screenshot.mjs
+    return;
+  }
+  const adapter = await navigator.gpu.requestAdapter();
+  if (!adapter) {
+    root.textContent = "WebGPU adapter request failed (no compatible GPU found).";
+    root.dataset.ready = "true";
+    return;
+  }
+  const device = await adapter.requestDevice();
+  const format = navigator.gpu.getPreferredCanvasFormat();
+
   root.textContent = "";
 
   const controls = document.createElement("div");
@@ -124,87 +111,125 @@ async function main(): Promise<void> {
   canvas.height = Math.round(CANVAS_CSS_HEIGHT * dpr);
   canvas.style.width = `${CANVAS_CSS_WIDTH}px`;
   canvas.style.height = `${CANVAS_CSS_HEIGHT}px`;
-  canvas.className = "zoom-canvas";
-
-  const glOrNull = canvas.getContext("webgl2");
-  if (!glOrNull) {
-    root.textContent = "WebGL2 is not available in this browser.";
-    root.dataset.ready = "true"; // signal for tools/screenshot.mjs
-    return;
-  }
-  const gl: WebGL2RenderingContext = glOrNull; // narrowed once, used inside closures below
-
+  canvas.className = "gpu-canvas";
   root.appendChild(canvas);
   const readout = document.createElement("div");
   readout.className = "readout";
   root.appendChild(readout);
 
+  const context = canvas.getContext("webgpu")!;
+  context.configure({ device, format, alphaMode: "opaque" });
+
   const buf = await fetch(FONT_URL).then((r) => r.arrayBuffer());
   const font = new Font(buf);
 
-  // ── Program + shared (tier-independent) buffers ─────────────────────────
-  const program = linkProgram(gl, vertSource, fragSource);
-  const vao = gl.createVertexArray();
-  gl.bindVertexArray(vao);
+  // ── Sampler (shared across tiers) ────────────────────────────────────────
+  const sampler = device.createSampler({
+    magFilter: "linear",
+    minFilter: "linear",
+    addressModeU: "clamp-to-edge",
+    addressModeV: "clamp-to-edge",
+  });
 
+  // ── Unit quad + index buffer (shared across all instances and tiers) ────
   // prettier-ignore
   const quadCorners = new Float32Array([0, 0, 1, 0, 0, 1, 1, 1]);
-  const quadBuffer = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
-  gl.bufferData(gl.ARRAY_BUFFER, quadCorners, gl.STATIC_DRAW);
-  gl.enableVertexAttribArray(0);
-  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-
-  const FLOATS_PER_INSTANCE = 8;
-  // TEXT has a fixed glyph count regardless of tier, so this buffer's size
-  // never needs to change across tier switches.
-  const instanceData = new Float32Array([...TEXT].length * FLOATS_PER_INSTANCE);
-  const instanceBuffer = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, instanceBuffer);
-  gl.bufferData(gl.ARRAY_BUFFER, instanceData, gl.DYNAMIC_DRAW); // rewritten every frame
-  const stride = FLOATS_PER_INSTANCE * 4;
-  for (let loc = 1; loc <= 4; loc++) {
-    gl.enableVertexAttribArray(loc);
-    gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, stride, (loc - 1) * 8);
-    gl.vertexAttribDivisor(loc, 1);
-  }
+  const quadBuffer = device.createBuffer({
+    size: quadCorners.byteLength,
+    usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+  });
+  device.queue.writeBuffer(quadBuffer, 0, quadCorners);
 
   const quadIndices = new Uint16Array([0, 1, 2, 2, 1, 3]);
-  const indexBuffer = gl.createBuffer();
-  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
-  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, quadIndices, gl.STATIC_DRAW);
+  const indexBuffer = device.createBuffer({
+    size: quadIndices.byteLength,
+    usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
+  });
+  device.queue.writeBuffer(indexBuffer, 0, quadIndices);
 
-  gl.enable(gl.BLEND);
-  gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+  // TEXT has a fixed glyph count regardless of tier, so this buffer's size
+  // never needs to change across tier switches.
+  const glyphCount = [...TEXT].length;
+  const instanceData = new Float32Array(glyphCount * FLOATS_PER_INSTANCE);
+  const instanceBuffer = device.createBuffer({
+    size: instanceData.byteLength,
+    usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+  });
 
-  const uViewportSize = gl.getUniformLocation(program, "viewportSize");
-  const uScreenPxRange = gl.getUniformLocation(program, "screenPxRange");
-  const uFgColor = gl.getUniformLocation(program, "fgColor");
-  const uBgColor = gl.getUniformLocation(program, "bgColor");
-  const uAtlasTexture = gl.getUniformLocation(program, "atlasTexture");
+  const uniformData = new Float32Array(12); // viewportSize(2) + screenPxRange(1) + pad(1) + fgColor(4) + bgColor(4)
+  const uniformBuffer = device.createBuffer({
+    size: uniformData.byteLength,
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+  });
 
-  // ── Tier state (rebuilt on resolution change) ────────────────────────────
+  // ── Pipeline (shared — layout: "auto" derives one bind group layout) ────
+  const module = device.createShaderModule({ code: shaderCode });
+  const pipeline = device.createRenderPipeline({
+    layout: "auto",
+    vertex: {
+      module,
+      entryPoint: "vs_main",
+      buffers: [
+        {
+          arrayStride: 8,
+          stepMode: "vertex",
+          attributes: [{ shaderLocation: 0, offset: 0, format: "float32x2" }],
+        },
+        {
+          arrayStride: FLOATS_PER_INSTANCE * 4,
+          stepMode: "instance",
+          attributes: [
+            { shaderLocation: 1, offset: 0, format: "float32x2" },
+            { shaderLocation: 2, offset: 8, format: "float32x2" },
+            { shaderLocation: 3, offset: 16, format: "float32x2" },
+            { shaderLocation: 4, offset: 24, format: "float32x2" },
+          ],
+        },
+      ],
+    },
+    fragment: {
+      module,
+      entryPoint: "fs_main",
+      targets: [
+        {
+          format,
+          blend: {
+            color: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha" },
+            alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha" },
+          },
+        },
+      ],
+    },
+    primitive: { topology: "triangle-list" },
+  });
+  const bindGroupLayout = pipeline.getBindGroupLayout(0);
+
+  // ── Tier state (rebuilt on resolution change) — texture + bind group need
+  // recreating since a bind group is bound to a specific texture view. ────
   let tier = buildTier(font, DEFAULT_ATLAS_SIZE);
-  let atlasTexture = gl.createTexture();
+  let atlasTexture: GPUTexture;
+  let bindGroup: GPUBindGroup;
 
   function uploadAtlasTexture(): void {
-    gl.bindTexture(gl.TEXTURE_2D, atlasTexture);
-    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false); // atlas data is already y-down (see Atlas._blit)
-    gl.texImage2D(
-      gl.TEXTURE_2D,
-      0,
-      gl.RGBA,
-      tier.atlas.width,
-      tier.atlas.height,
-      0,
-      gl.RGBA,
-      gl.UNSIGNED_BYTE,
+    atlasTexture = device.createTexture({
+      size: [tier.atlas.width, tier.atlas.height],
+      format: "rgba8unorm",
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+    });
+    device.queue.writeTexture(
+      { texture: atlasTexture },
       tier.atlas.texture,
+      { bytesPerRow: tier.atlas.width * 4 },
+      { width: tier.atlas.width, height: tier.atlas.height },
     );
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    bindGroup = device.createBindGroup({
+      layout: bindGroupLayout,
+      entries: [
+        { binding: 0, resource: { buffer: uniformBuffer } },
+        { binding: 1, resource: sampler },
+        { binding: 2, resource: atlasTexture.createView() },
+      ],
+    });
   }
   uploadAtlasTexture();
 
@@ -212,8 +237,11 @@ async function main(): Promise<void> {
   const camera: Camera = { x: tier.widthEm / 2, y: -0.15, zoom: 1 };
 
   /**
-   * Writes this frame's instance data (translate world->screen in f64, then
-   * narrow to f32 only in the typed array) and draws one frame.
+   * Writes this frame's instance/uniform data (translate world->screen in
+   * f64, then narrow to f32 only in the typed arrays) and queues one frame.
+   * Does not await GPU completion — interactive redraws should not pile up
+   * latency; the caller awaits completion only for the very first frame
+   * (see the data-ready signal below).
    */
   function render(): void {
     const pixelPerEm = BASE_PX_PER_EM * camera.zoom;
@@ -243,24 +271,41 @@ async function main(): Promise<void> {
       instanceData[base + 6] = glyph.w / tier.atlas.width - 2 * tier.halfTexelU;
       instanceData[base + 7] = glyph.h / tier.atlas.height - 2 * tier.halfTexelV;
     }
-    gl.bindBuffer(gl.ARRAY_BUFFER, instanceBuffer);
-    gl.bufferSubData(gl.ARRAY_BUFFER, 0, instanceData, 0, tier.glyphs.length * FLOATS_PER_INSTANCE);
+    device.queue.writeBuffer(
+      instanceBuffer,
+      0,
+      instanceData,
+      0,
+      tier.glyphs.length * FLOATS_PER_INSTANCE,
+    );
 
-    gl.viewport(0, 0, canvas.width, canvas.height);
-    gl.clearColor(...BG_COLOR);
-    gl.clear(gl.COLOR_BUFFER_BIT);
+    uniformData[0] = canvas.width;
+    uniformData[1] = canvas.height;
+    uniformData[2] = screenPxRange;
+    uniformData[3] = 0;
+    uniformData.set(FG_COLOR, 4);
+    uniformData.set(BG_COLOR, 8);
+    device.queue.writeBuffer(uniformBuffer, 0, uniformData);
 
-    gl.useProgram(program);
-    gl.uniform2f(uViewportSize, canvas.width, canvas.height);
-    gl.uniform1f(uScreenPxRange, screenPxRange);
-    gl.uniform4fv(uFgColor, FG_COLOR);
-    gl.uniform4fv(uBgColor, BG_COLOR);
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, atlasTexture);
-    gl.uniform1i(uAtlasTexture, 0);
-
-    gl.bindVertexArray(vao);
-    gl.drawElementsInstanced(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0, tier.glyphs.length);
+    const encoder = device.createCommandEncoder();
+    const pass = encoder.beginRenderPass({
+      colorAttachments: [
+        {
+          view: context.getCurrentTexture().createView(),
+          clearValue: { r: BG_COLOR[0], g: BG_COLOR[1], b: BG_COLOR[2], a: BG_COLOR[3] },
+          loadOp: "clear",
+          storeOp: "store",
+        },
+      ],
+    });
+    pass.setPipeline(pipeline);
+    pass.setBindGroup(0, bindGroup);
+    pass.setVertexBuffer(0, quadBuffer);
+    pass.setVertexBuffer(1, instanceBuffer);
+    pass.setIndexBuffer(indexBuffer, "uint16");
+    pass.drawIndexed(6, tier.glyphs.length);
+    pass.end();
+    device.queue.submit([encoder.finish()]);
 
     readout.textContent = `zoom ${camera.zoom.toExponential(2)}x · effective screenPxRange ${screenPxRange.toFixed(1)}px · atlas ${tier.pixelsPerEm}px/em, pxrange ${tier.pxrange} (fixed tier)`;
   }
@@ -270,8 +315,6 @@ async function main(): Promise<void> {
     tier = buildTier(font, size);
     // camera.x/y/zoom deliberately untouched — same view, new tier, so the
     // quality difference at this exact zoom is directly comparable.
-    gl.deleteTexture(atlasTexture);
-    atlasTexture = gl.createTexture();
     uploadAtlasTexture();
     render();
   });
@@ -294,11 +337,8 @@ async function main(): Promise<void> {
     lastScreenX = ev.clientX;
     lastScreenY = ev.clientY;
     const pixelPerEm = BASE_PX_PER_EM * camera.zoom;
-    // render()'s screen-space formula has opposite signs for the two axes
-    // (screenX = centerX + (worldX-camera.x)*pixelPerEm, but
-    //  screenY = centerY - (worldY-camera.y)*pixelPerEm — the Y flip that
-    // makes camera.y increase "look up" like world-space, not screen-space),
-    // so dragging content to follow the cursor needs opposite signs too.
+    // Opposite signs for the two axes — see the matching comment in
+    // demo/webgl-zoom/main.ts's pointermove handler.
     camera.x -= (dxCss * dpr) / pixelPerEm;
     camera.y += (dyCss * dpr) / pixelPerEm;
     render();
@@ -337,25 +377,7 @@ async function main(): Promise<void> {
   );
 
   render();
-
-  // ── Underlying atlas texture preview (matches demo/canvas) ──────────────
-  const atlasLabel = document.createElement("div");
-  atlasLabel.className = "readout";
-  atlasLabel.style.marginTop = "16px";
-  atlasLabel.textContent = `underlying atlas texture (${tier.atlas.width}×${tier.atlas.height}, raw MSDF channels)`;
-  root.appendChild(atlasLabel);
-  const atlasCanvas = document.createElement("canvas");
-  atlasCanvas.width = tier.atlas.width;
-  atlasCanvas.height = tier.atlas.height;
-  atlasCanvas.style.display = "block";
-  atlasCanvas.style.border = "1px solid #ddd";
-  atlasCanvas.style.background = "white";
-  const actx = atlasCanvas.getContext("2d")!;
-  const atlasImage = actx.createImageData(tier.atlas.width, tier.atlas.height);
-  atlasImage.data.set(tier.atlas.texture);
-  actx.putImageData(atlasImage, 0, 0);
-  root.appendChild(atlasCanvas);
-
+  await device.queue.onSubmittedWorkDone(); // wait for the first GPU frame to actually finish before signaling ready
   root.dataset.ready = "true"; // signal for tools/screenshot.mjs
 }
 

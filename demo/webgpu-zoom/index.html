@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>msdfgen-ts — WebGL2 pan/zoom demo</title>
+    <title>msdfgen-ts — WebGPU pan/zoom demo</title>
     <style>
       body {
         margin: 0;
@@ -18,14 +18,14 @@
         color: #555;
         font-size: 14px;
       }
-      .zoom-canvas {
+      .gpu-canvas {
         display: block;
         border: 1px solid #ddd;
         background: white;
         touch-action: none;
         cursor: grab;
       }
-      .zoom-canvas:active {
+      .gpu-canvas:active {
         cursor: grabbing;
       }
       .readout {
@@ -49,14 +49,14 @@
     </style>
   </head>
   <body>
-    <h1>msdfgen-ts — WebGL2 pan/zoom demo</h1>
+    <h1>msdfgen-ts — WebGPU pan/zoom demo</h1>
     <p>
       Drag to pan, wheel/pinch to zoom (toward the cursor), over one fixed atlas tier — no
       re-tiering yet, so past a point you're magnifying the same source texels and it
       softens. That's expected here, not a bug; tiering is a later step. Switch resolution
       below to compare tiers at the same zoom/pan.
     </p>
-    <div id="root">Requesting WebGL2 context…</div>
+    <div id="root">Requesting WebGPU adapter…</div>
     <script type="module" src="./main.ts"></script>
   </body>
 </html>

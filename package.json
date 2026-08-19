@@ -3,6 +3,16 @@
   "version": "0.0.1-dev",
   "type": "module",
   "license": "MIT",
+  "main": "./dist/msdfgen-ts.js",
+  "module": "./dist/msdfgen-ts.js",
+  "types": "./dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/msdfgen-ts.js",
+      "default": "./dist/msdfgen-ts.js"
+    }
+  },
   "files": [
     "dist"
   ],
@@ -24,7 +34,7 @@
     "dev:webgl": "vite --open /demo/webgl/index.html",
     "dev:webgl-zoom": "vite --open /demo/webgl-zoom/index.html",
     "dev:webgpu-zoom": "vite --open /demo/webgpu-zoom/index.html",
-    "build": "vite build",
+    "build": "vite build && tsc -p tsconfig.build.json",
     "build:demo": "vite build --config vite.demo.config.ts",
     "predeploy": "npm run build:demo",
     "deploy": "gh-pages -d demo-dist",

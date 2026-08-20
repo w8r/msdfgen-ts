@@ -205,11 +205,13 @@ async function main(): Promise<void> {
   const buf = await fetch(FONT_URL).then((r) => r.arrayBuffer());
   const font = new Font(buf);
   const atlas = new Atlas(font, { pixelsPerEm: PIXELS_PER_EM, pxrange: PXRANGE });
+  const genStart = performance.now();
   const { glyphs, widthEm } = atlas.layout(TEXT);
+  const genMs = performance.now() - genStart;
 
   root.textContent = "";
   const info = document.createElement("p");
-  info.textContent = `One ${PIXELS_PER_EM}px/em atlas (pxrange ${PXRANGE}) via WebGL2, rendered at: ${OUTPUT_SIZES.join(", ")}px — same source texels every time.`;
+  info.textContent = `One ${PIXELS_PER_EM}px/em atlas (pxrange ${PXRANGE}) via WebGL2, rendered at: ${OUTPUT_SIZES.join(", ")}px — same source texels every time. Atlas gen: ${genMs.toFixed(2)}ms.`;
   root.appendChild(info);
 
   for (const size of OUTPUT_SIZES) {

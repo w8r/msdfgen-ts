@@ -1,10 +1,16 @@
 /**
  * Interactive pan/zoom WebGPU demo — WebGPU twin of demo/webgl-zoom/main.ts.
- * Drag to pan, wheel/pinch to zoom toward the cursor, over a single
- * fixed-resolution atlas tier (no re-tiering yet; see CLAUDE.md's M5 plan
- * for the later regenerate-on-threshold step). A resolution selector lets
- * you swap tiers (24/32/48/64px) while keeping the camera fixed, so the
- * quality difference at a given zoom is directly comparable.
+ * Drag to pan, wheel/pinch to zoom toward the cursor. "Auto tier" (on by
+ * default) regenerates the atlas at the nearest resolution tier as the
+ * effective on-screen glyph density crosses a threshold, so zoom stays
+ * crisp well past any single tier's native resolution ("infinite zoom" —
+ * see CLAUDE.md M5). Uncheck it to pin one fixed tier and use the resolution
+ * selector for an A/B quality comparison at the same zoom/pan instead.
+ *
+ * Tier regen here is SYNCHRONOUS on the main thread, not the worker path
+ * CLAUDE.md's M5 section describes. This demo's text is short (~20 glyphs),
+ * so a full regen is well under a frame; the worker wrapper is deferred
+ * until M6's bench numbers show it's actually needed for longer text.
  *
  * Camera state (world position under the viewport centre + zoom factor) is
  * kept in plain JS numbers (f64) and only ever narrowed to f32 at the very
@@ -28,8 +34,14 @@ const DEFAULT_ATLAS_SIZE = 64;
 const PXRANGE_RATIO = 8; // pxrange = pixelsPerEm / PXRANGE_RATIO, matches the fixed corpus convention (32px -> pxrange4)
 const BASE_PX_PER_EM = 48; // pixel-per-em at zoom = 1
 const MIN_ZOOM = 0.05;
-const MAX_ZOOM = 4096; // well past any tier's crisp range (softens, doesn't break) — no tiering yet
+const MAX_ZOOM = 4096; // well past the top tier's crisp range — softens by design past that point
 const ZOOM_SPEED = 0.0018; // wheel deltaY -> exponential zoom factor
+// Regen threshold margins (auto-tier mode). Prevents thrashing (regen every
+// frame) right at a boundary during a smooth zoom gesture: upgrade only once
+// clearly past the current tier's native resolution, downgrade only once
+// clearly within a smaller tier's headroom.
+const TIER_UP_MARGIN = 1.2;
+const TIER_DOWN_MARGIN = 1.2;
 const CANVAS_CSS_WIDTH = 1100;
 const CANVAS_CSS_HEIGHT = 480;
 const TEXT = "Hello Привет 123 @#&";
@@ -44,6 +56,13 @@ interface Camera {
   zoom: number;
 }
 
+/** Human-readable zoom factor — plain "1.5x"/"75x"/"24,576x", not `1.50e+0x`. */
+function formatZoom(zoom: number): string {
+  if (zoom < 10) return `${zoom.toFixed(2)}x`;
+  if (zoom < 100) return `${zoom.toFixed(1)}x`;
+  return `${Math.round(zoom).toLocaleString()}x`;
+}
+
 /** Everything that gets rebuilt when the atlas tier (resolution) changes. */
 interface Tier {
   pixelsPerEm: number;
@@ -53,12 +72,16 @@ interface Tier {
   widthEm: number;
   halfTexelU: number;
   halfTexelV: number;
+  /** Wall-clock time spent generating + packing this tier's atlas (ms). */
+  genMs: number;
 }
 
 function buildTier(font: Font, pixelsPerEm: number): Tier {
   const pxrange = pixelsPerEm / PXRANGE_RATIO;
   const atlas = new Atlas(font, { pixelsPerEm, pxrange });
+  const genStart = performance.now();
   const { glyphs, widthEm } = atlas.layout(TEXT);
+  const genMs = performance.now() - genStart;
   return {
     pixelsPerEm,
     pxrange,
@@ -67,7 +90,37 @@ function buildTier(font: Font, pixelsPerEm: number): Tier {
     widthEm,
     halfTexelU: 0.5 / atlas.width,
     halfTexelV: 0.5 / atlas.height,
+    genMs,
   };
+}
+
+/**
+ * Picks the smallest atlas tier that still covers the current on-screen
+ * glyph density (`pixelPerEm`: em -> device pixels this frame) — smaller
+ * tier = less texture memory + cheaper regen, so always prefer it once
+ * there's real headroom. The up/down margins only add hysteresis right at
+ * a boundary (don't flip tiers every frame during a slow zoom); once a
+ * switch is warranted, it jumps straight to the smallest sufficient tier
+ * in one call, both directions (regen cost is the same either way — see
+ * demo/webgpu-zoom/main.ts's top-of-file note on why this is sync, not a
+ * worker).
+ */
+function pickTier(
+  pixelPerEm: number,
+  currentSize: (typeof ATLAS_SIZES)[number],
+): (typeof ATLAS_SIZES)[number] {
+  if (pixelPerEm > currentSize * TIER_UP_MARGIN) {
+    for (const size of ATLAS_SIZES) {
+      if (size >= pixelPerEm) return size;
+    }
+    return ATLAS_SIZES[ATLAS_SIZES.length - 1]!; // already at the top tier
+  }
+  if (pixelPerEm <= currentSize / TIER_DOWN_MARGIN) {
+    for (const size of ATLAS_SIZES) {
+      if (size >= pixelPerEm) return size; // smallest tier with enough headroom
+    }
+  }
+  return currentSize;
 }
 
 async function main(): Promise<void> {
@@ -91,8 +144,16 @@ async function main(): Promise<void> {
 
   const controls = document.createElement("div");
   controls.className = "controls";
+  const autoLabel = document.createElement("label");
+  const autoCheckbox = document.createElement("input");
+  autoCheckbox.type = "checkbox";
+  autoCheckbox.checked = true;
+  autoLabel.appendChild(autoCheckbox);
+  autoLabel.appendChild(document.createTextNode(" Auto tier (infinite zoom)"));
+  controls.appendChild(autoLabel);
+
   const sizeLabel = document.createElement("label");
-  sizeLabel.textContent = "Atlas size ";
+  sizeLabel.textContent = "  Atlas size ";
   const sizeSelect = document.createElement("select");
   for (const size of ATLAS_SIZES) {
     const opt = document.createElement("option");
@@ -101,6 +162,7 @@ async function main(): Promise<void> {
     if (size === DEFAULT_ATLAS_SIZE) opt.selected = true;
     sizeSelect.appendChild(opt);
   }
+  sizeSelect.disabled = autoCheckbox.checked;
   sizeLabel.appendChild(sizeSelect);
   controls.appendChild(sizeLabel);
   root.appendChild(controls);
@@ -235,6 +297,7 @@ async function main(): Promise<void> {
 
   // ── Camera: start centred on the text, zoomed to fit ────────────────────
   const camera: Camera = { x: tier.widthEm / 2, y: -0.15, zoom: 1 };
+  let autoTier = autoCheckbox.checked;
 
   /**
    * Writes this frame's instance/uniform data (translate world->screen in
@@ -245,6 +308,16 @@ async function main(): Promise<void> {
    */
   function render(): void {
     const pixelPerEm = BASE_PX_PER_EM * camera.zoom;
+
+    if (autoTier) {
+      const wanted = pickTier(pixelPerEm, tier.pixelsPerEm as (typeof ATLAS_SIZES)[number]);
+      if (wanted !== tier.pixelsPerEm) {
+        tier = buildTier(font, wanted);
+        uploadAtlasTexture();
+        sizeSelect.value = String(wanted);
+      }
+    }
+
     const centerX = canvas.width / 2;
     const centerY = canvas.height / 2;
     // pxrangeEm is uniform across all glyphs (crop, not scale — see atlas-gen.ts),
@@ -307,10 +380,20 @@ async function main(): Promise<void> {
     pass.end();
     device.queue.submit([encoder.finish()]);
 
-    readout.textContent = `zoom ${camera.zoom.toExponential(2)}x · effective screenPxRange ${screenPxRange.toFixed(1)}px · atlas ${tier.pixelsPerEm}px/em, pxrange ${tier.pxrange} (fixed tier)`;
+    readout.textContent = `zoom ${formatZoom(camera.zoom)} · effective screenPxRange ${screenPxRange.toFixed(1)}px · atlas ${tier.pixelsPerEm}px/em, pxrange ${tier.pxrange} (${autoTier ? "auto" : "fixed"} tier) · last atlas gen ${tier.genMs.toFixed(2)}ms`;
   }
 
+  autoCheckbox.addEventListener("change", () => {
+    autoTier = autoCheckbox.checked;
+    sizeSelect.disabled = autoTier;
+    render(); // snaps to the right tier immediately if auto was just turned on
+  });
+
   sizeSelect.addEventListener("change", () => {
+    // Picking a size manually is an explicit A/B-comparison request —
+    // disables auto so it doesn't get immediately overridden next frame.
+    autoTier = false;
+    autoCheckbox.checked = false;
     const size = Number(sizeSelect.value);
     tier = buildTier(font, size);
     // camera.x/y/zoom deliberately untouched — same view, new tier, so the

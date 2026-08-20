@@ -110,7 +110,7 @@ function parseContour(r: ShapeDescReader): { edges: EdgeSegment[]; colorsSpecifi
   if (firstCoord === null) {
     // Empty contour — consume '}'
     if (r.peekChar() === "}") r.readChar();
-    return edges;
+    return { edges, colorsSpecified };
   }
 
   let p0x = firstCoord[0];

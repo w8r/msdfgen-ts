@@ -5,7 +5,7 @@ minimal built-in TrueType parser, runtime atlas generation, and a WebGPU text re
 
 ## Mission
 
-A zero-dependency TypeScript library that, at runtime in the browser:
+A near-zero-dependency TypeScript library that, at runtime in the browser:
 
 1. Parses TrueType fonts (`glyf` outlines) directly from an `ArrayBuffer`
 2. Generates MSDF/MTSDF bitmaps per glyph, numerically matching C++ msdfgen
@@ -55,9 +55,15 @@ distance normalization to range, fill rule).
 
 - **Threading:** core generation is a pure synchronous function over transferable typed
   arrays (`generateMSDF(shape, params, out: Float32Array)`) — no DOM, no async inside.
-  A thin optional worker wrapper (`atlas/worker.ts` + `atlas.ts` accepting a
+  A thin optional worker wrapper (`atlas-worker.ts` + `atlas-gen.ts` accepting a
   `generator: (job) => Promise<Result> | Result`) makes the worker path a drop-in.
   Gates run the sync path; M5's tier regeneration uses the worker path.
+- **Runtime dependency exception — potpack:** `potpack` (MIT, ~40 lines, rectangle
+  bin-packer) is an approved `dependencies` entry, used by `atlas-gen.ts` for glyph
+  packing. Rectangle packing is solved, well-tested, and not worth re-owning — this is
+  the one deliberate exception to "zero-dependency." Do not add any other runtime
+  dependency without the same explicit sign-off; `opentype.js` stays devDependencies-only
+  (see Working agreement).
 - **Atlas format:** plain MSDF, 3 channels. GPU upload is still `rgba8unorm` (WebGPU has
   no 3-channel sampled format) — alpha written as 255 and ignored by the shader.
   Keep `generateMTSDF` out of scope; do not scaffold it.
@@ -68,9 +74,11 @@ distance normalization to range, fill rule).
   supported in the pinned version; otherwise enforce with a 5-line grep script wired into
   `gate:m2`. Formatting is oxfmt's defaults — never hand-tune style, never disable rules
   inline without a comment explaining why.
-- **CI:** GitHub Actions from M0. Reference msdfgen binary built once and cached by
-  pinned commit hash; every PR runs `gate:m0` … up to the highest green milestone.
-  A gate that was green may never go red on main.
+- **CI:** GitHub Actions from M0. Every PR runs `npm run gate:all` (chains every green
+  milestone gate, m0 … up to the highest green milestone). Reference msdfgen binary is
+  only rebuilt in the separate `verify-golden-regen` job (push-to-main only, checks
+  fixtures still regenerate byte-identical from source). A gate that was green may
+  never go red on main.
 
 ## Repository layout
 
@@ -98,9 +106,7 @@ src/
     distance.ts        # signed (pseudo-)distance per segment. HOTTEST code in the repo.
     generate.ts        # generateMSDF / generateMTSDF into Float32Array
     error-correction.ts# full MSDFErrorCorrection port — required, not optional
-  atlas/
-    packer.ts          # shelf packer, power-of-two growth
-    atlas.ts           # glyph cache: codepoint -> {uv rect, metrics}; on miss: parse+gen
+  atlas-gen.ts         # Atlas class: glyph cache + potpack packing + MSDF generation, in one file
   index.ts             # explicit named exports — this file defines the public API surface
 demo/
   webgpu/              # instanced quads, WGSL median shader, screenPxRange uniform
@@ -219,8 +225,9 @@ Closure-friendly constraints (cheap now, painful to retrofit):
   fully exist. Red → green, then stop.
 - Never modify `test/golden/**`, tolerance constants, or gate criteria. If a gate seems
   wrong, stop and explain why to the human instead.
-- Never add a runtime dependency. `opentype.js` is `devDependencies` only and must not be
-  imported outside `test/`.
+- Never add a runtime dependency beyond the approved `potpack` exception (see Stack
+  decisions). `opentype.js` is `devDependencies` only and must not be imported outside
+  `test/`.
 - When porting a C++ function, put a comment with the source file + function name
   (`// port of core/edge-segments.cpp: QuadraticSegment::signedDistance`) and keep the
   algorithm structure recognizable. Cleverness that diverges from the reference is a bug

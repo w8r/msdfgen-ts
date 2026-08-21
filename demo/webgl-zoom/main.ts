@@ -8,11 +8,12 @@
  * at the same zoom/pan instead. See demo/webgpu-zoom/main.ts for the WebGPU
  * twin — the tiering logic here is a straight copy of that file's.
  *
- * Tier regen defaults to SYNCHRONOUS on the main thread — check "Smooth
- * regen (worker)" to route builds through src/atlas-worker.ts instead (also
- * published as the `msdfgen-ts/worker` package entry) so regen never blocks
- * the render thread; see demo/webgpu-zoom/main.ts's docstring for the full
- * rationale, this file's worker wiring is a straight copy of that one's.
+ * "Smooth regen (worker)" (on by default) routes tier builds through
+ * src/atlas-worker.ts instead (also published as the `msdfgen-ts/worker`
+ * package entry) so regen never blocks the render thread. Uncheck it to
+ * fall back to SYNCHRONOUS regen on the main thread; see
+ * demo/webgpu-zoom/main.ts's docstring for the full rationale, this file's
+ * worker wiring is a straight copy of that one's.
  *
  * Camera state (world position under the viewport centre + zoom factor) is
  * kept in plain JS numbers (f64) and only ever narrowed to f32 at the very
@@ -203,7 +204,7 @@ async function main(): Promise<void> {
   const smoothLabel = document.createElement("label");
   const smoothCheckbox = document.createElement("input");
   smoothCheckbox.type = "checkbox";
-  smoothCheckbox.checked = false;
+  smoothCheckbox.checked = true;
   smoothLabel.appendChild(smoothCheckbox);
   smoothLabel.appendChild(document.createTextNode("  Smooth regen (worker)"));
   controls.appendChild(smoothLabel);

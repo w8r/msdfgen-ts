@@ -7,19 +7,16 @@
  * see CLAUDE.md M5). Uncheck it to pin one fixed tier and use the resolution
  * selector for an A/B quality comparison at the same zoom/pan instead.
  *
- * Tier regen defaults to SYNCHRONOUS on the main thread — this demo's text
- * is short (~20 glyphs), so a full regen is well under a frame on most
- * machines. Where it isn't (visible stutter on a tier crossing), check
- * "Smooth regen (worker)" — this routes tier builds through
+ * "Smooth regen (worker)" (on by default) routes tier builds through
  * src/atlas-worker.ts (the worker path CLAUDE.md's M5 section describes,
  * also published as the `msdfgen-ts/worker` package entry — see
  * package.json's `exports` and vite.worker.config.ts), so regen never
- * blocks the render thread; the previous tier keeps
- * rendering, stale, until the new one lands (a few frames, per spec). It's
- * opt-in rather than the default because nothing here has needed it yet —
- * see docs/m5-qa-checklist.md's Findings log for the report that prompted
- * it, and revisit "default on" once M6's bench numbers weigh in on longer
- * text.
+ * blocks the render thread; the previous tier keeps rendering, stale, until
+ * the new one lands (a few frames, per spec). Uncheck it to fall back to
+ * SYNCHRONOUS regen on the main thread — this demo's text is short (~20
+ * glyphs), so a full sync regen is well under a frame on most machines, but
+ * it visibly stutters on some (see docs/m5-qa-checklist.md's Findings log
+ * for the report that made worker the default).
  *
  * Camera state (world position under the viewport centre + zoom factor) is
  * kept in plain JS numbers (f64) and only ever narrowed to f32 at the very
@@ -209,7 +206,7 @@ async function main(): Promise<void> {
   const smoothLabel = document.createElement("label");
   const smoothCheckbox = document.createElement("input");
   smoothCheckbox.type = "checkbox";
-  smoothCheckbox.checked = false;
+  smoothCheckbox.checked = true;
   smoothLabel.appendChild(smoothCheckbox);
   smoothLabel.appendChild(document.createTextNode("  Smooth regen (worker)"));
   controls.appendChild(smoothLabel);

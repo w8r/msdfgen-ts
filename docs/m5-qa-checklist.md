@@ -43,13 +43,15 @@ DevTools' Rendering tab -> "Frame Rendering Stats").
       demo/webgpu-zoom/main.ts temporarily) — the shipped demo's ~20-char string is
       fast enough that a real slowdown on longer text wouldn't show up otherwise,
       and that's exactly the case the sync-vs-worker decision cares about.
-- [ ] **"Smooth regen (worker)" knob** — check it, zoom slowly through a tier
-      boundary: no stutter, previous tier stays crisp-enough on screen for the
-      few frames until the worker's result lands (readout's mode suffix flips
-      sync -> worker), then swap is clean. Uncheck it: behavior reverts to the
-      sync path exactly as before (readout mode suffix back to `sync`).
-      Run this row against both demos — webgpu-zoom and webgl-zoom now share
-      the identical worker wiring (same src/atlas-worker.ts, same knob).
+- [ ] **"Smooth regen (worker)" knob** — on by default: load the page, zoom
+      slowly through a tier boundary with no other interaction: no stutter,
+      previous tier stays crisp-enough on screen for the few frames until the
+      worker's result lands (readout's mode suffix should already read
+      `worker`), then swap is clean. Uncheck it: behavior reverts to the sync
+      path (readout mode suffix flips to `sync`) — confirm the stutter is
+      back (that's the point of the comparison, not a regression). Run this
+      row against both demos — webgpu-zoom and webgl-zoom share the
+      identical worker wiring (same src/atlas-worker.ts, same knob).
 
 ## If anything fails
 
@@ -107,3 +109,16 @@ DevTools' Rendering tab -> "Frame Rendering Stats").
   a whole-string layout total (scales with glyph count), not a per-glyph
   number, so a longer test string reads slower by design — worth remembering
   when M6's bench harness lands, so it measures per-glyph, not per-string.
+  **Follow-up, same day:** user asked whether auto-tier + the worker knob
+  should default off. Clarified scope via a question rather than guessing —
+  auto-tier is the M5 demo's headline "infinite zoom" feature (CLAUDE.md:
+  "on by default"), flipping that would contradict the doc and undercut the
+  demo's point, so it stays on. Landed on: keep auto-tier on, flip "Smooth
+  regen (worker)" to **on by default** in both demos (it fixed the reported
+  stutter and costs nothing visible) — sync remains available via the
+  checkbox, for direct A/B comparison against worker regen. Resolves the
+  earlier mismatch between CLAUDE.md's Stack-decisions line ("M5's tier
+  regeneration uses the worker path") and the demo's previous sync-default —
+  now literally true. Updated both demos' top-of-file docstrings and the
+  checklist row above accordingly. `gate:m5`, `typecheck`, `oxlint`, `oxfmt`,
+  `build:demo` all green after the flip.

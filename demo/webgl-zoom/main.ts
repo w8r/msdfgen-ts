@@ -51,7 +51,7 @@ const CANVAS_CSS_WIDTH = 1100;
 const CANVAS_CSS_HEIGHT = 480;
 // `\n` splits into multiple lines — see Atlas.layoutMultiline. Fixed glyph
 // count regardless of tier, so the instance buffer never needs resizing.
-const TEXT = Array.from({ length: 10 }, () => "*%#`²Hello Привет 123 @#&").join("\n");
+const TEXT = "*%#`²Hello Привет 123 @#&";
 const FG_COLOR: [number, number, number, number] = [0.08, 0.08, 0.08, 1];
 const BG_COLOR: [number, number, number, number] = [1, 1, 1, 1];
 

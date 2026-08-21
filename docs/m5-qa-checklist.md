@@ -48,7 +48,7 @@ DevTools' Rendering tab -> "Frame Rendering Stats").
       demo/webgpu-zoom/main.ts temporarily) — the shipped demo's ~20-char string is
       fast enough that a real slowdown on longer text wouldn't show up otherwise,
       and that's exactly the case the sync-vs-worker decision cares about.
-- [ ] **"Smooth regen (worker)" knob** — on by default (only takes effect
+- [x] **"Smooth regen (worker)" knob** — on by default (only takes effect
       once "Auto tier" is checked): check "Auto tier", zoom slowly through a
       tier boundary: no stutter, previous tier stays crisp-enough on screen
       for the few frames until the worker's result lands (readout's mode

@@ -71,8 +71,12 @@ export interface AtlasGlyph {
 /** One glyph positioned in a text run. */
 export interface LaidOutGlyph {
   glyph: AtlasGlyph;
-  /** Pen position (em, world-space X, baseline y=0). */
+  /** Pen position (em, world-space X, relative to the glyph's own line). */
   penX: number;
+  /** Baseline Y (em, world-space, y-up) — 0 for {@link Atlas.layout}'s
+   *  single line; successive lines from {@link Atlas.layoutMultiline} get
+   *  more negative, y-up matching the rest of this codebase's convention. */
+  penY: number;
 }
 
 /**
@@ -128,7 +132,10 @@ export class Atlas {
     let added = 0;
     for (const cp of codepoints) {
       const cached = this._cache.get(cp);
-      if (cached) { result.push(cached.glyph); continue; }
+      if (cached) {
+        result.push(cached.glyph);
+        continue;
+      }
       result.push(this._generate(cp));
       added++;
     }
@@ -157,9 +164,15 @@ export class Atlas {
     // Empty outline (space, .notdef with no glyf): no atlas slot needed.
     if (shape.contours.length === 0) {
       const glyph: AtlasGlyph = {
-        x: 0, y: 0, w: 0, h: 0,
+        x: 0,
+        y: 0,
+        w: 0,
+        h: 0,
         advance,
-        planeLeft: 0, planeBottom: 0, planeRight: 0, planeTop: 0,
+        planeLeft: 0,
+        planeBottom: 0,
+        planeRight: 0,
+        planeTop: 0,
       };
       this._cache.set(codepoint, { glyph, msdf: null });
       return glyph;
@@ -186,7 +199,10 @@ export class Atlas {
     msdfErrorCorrection(msdf, shape, w, h, s, tx, ty, pxr);
 
     const glyph: AtlasGlyph = {
-      x: 0, y: 0, w, h,
+      x: 0,
+      y: 0,
+      w,
+      h,
       advance,
       planeLeft: -tx,
       planeBottom: -ty,
@@ -198,9 +214,11 @@ export class Atlas {
   }
 
   /**
-   * Lays out `text` left-to-right, applying kerning. Generates any missing
-   * glyphs and packs the atlas **once** for the whole run.
-   * Baseline is y=0; each `penX` is the pen position in em.
+   * Lays out `text` left-to-right on a single line, applying kerning.
+   * Generates any missing glyphs and packs the atlas **once** for the
+   * whole run. Baseline is y=0 (`penY` on every result is 0); each `penX`
+   * is the pen position in em. `text` must not contain `\n` — use
+   * {@link Atlas.layoutMultiline} for multi-line input.
    */
   layout(text: string): { glyphs: LaidOutGlyph[]; widthEm: number } {
     const codepoints: number[] = [];
@@ -216,18 +234,56 @@ export class Atlas {
       const gid = font.glyphId(cp);
       if (prevGid >= 0) penX += font.kerning(prevGid, gid) / upe;
       const glyph = this._cache.get(cp)!.glyph;
-      laid.push({ glyph, penX });
+      laid.push({ glyph, penX, penY: 0 });
       penX += glyph.advance;
       prevGid = gid;
     }
     return { glyphs: laid, widthEm: penX };
   }
 
+  /**
+   * Lays out `text` as one or more `\n`-separated lines, each run through
+   * {@link Atlas.layout} independently (so kerning never crosses a line
+   * break) and stacked with `penY` decreasing by one line height per line
+   * (y-up, matching this codebase's convention — line 0's baseline stays
+   * at y=0). Line height is the font's own metrics:
+   * `(ascender − descender + lineGap) / unitsPerEm`, matching typical
+   * single-spaced typesetting — not a msdfgen concept, original to this
+   * file (msdfgen has no text layout at all).
+   *
+   * `widthEm` is the widest line's; `heightEm` spans from line 0's top to
+   * the last line's bottom, both approximate (ascender/descender-based,
+   * not per-glyph ink bounds) — fine for camera framing, not for tight
+   * cropping.
+   */
+  layoutMultiline(text: string): { glyphs: LaidOutGlyph[]; widthEm: number; heightEm: number } {
+    const font = this._font;
+    const upe = font.metrics.unitsPerEm;
+    const lineHeightEm =
+      (font.metrics.ascender - font.metrics.descender + font.metrics.lineGap) / upe;
+    const lines = text.split("\n");
+    const glyphs: LaidOutGlyph[] = [];
+    let widthEm = 0;
+    for (let i = 0; i < lines.length; i++) {
+      const { glyphs: lineGlyphs, widthEm: lineWidthEm } = this.layout(lines[i]!);
+      const penY = -i * lineHeightEm;
+      for (const g of lineGlyphs) glyphs.push({ glyph: g.glyph, penX: g.penX, penY });
+      if (lineWidthEm > widthEm) widthEm = lineWidthEm;
+    }
+    return { glyphs, widthEm, heightEm: lines.length * lineHeightEm };
+  }
+
   /** Repacks every cached glyph with potpack, reallocates the texture,
    *  and re-blits each MSDF at its assigned rect. Called by `glyphs()`
    *  after any batch of new inserts — once per batch. */
   private _repack(): void {
-    const boxes: { w: number; h: number; x: number; y: number; entry: { glyph: AtlasGlyph; msdf: Float32Array | null } }[] = [];
+    const boxes: {
+      w: number;
+      h: number;
+      x: number;
+      y: number;
+      entry: { glyph: AtlasGlyph; msdf: Float32Array | null };
+    }[] = [];
     for (const entry of this._cache.values()) {
       if (entry.msdf === null) continue; // empty outline
       boxes.push({ w: entry.glyph.w, h: entry.glyph.h, x: 0, y: 0, entry });
@@ -273,7 +329,10 @@ const _pt: number[] = [0, 0];
  * of slop at any realistic `pixelsPerEm` — good enough for cropping.
  */
 function _shapeBounds(shape: Shape): {
-  minX: number; minY: number; maxX: number; maxY: number;
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
 } {
   let minX = Infinity;
   let minY = Infinity;

@@ -26,25 +26,25 @@ DevTools' Rendering tab -> "Frame Rendering Stats").
       jumps).
 - [x] **No visible softening within a tier's comfortable range** — zoom to just
       under the next tier's threshold; text should still look crisp, not soft.
-- [ ] **Expected softening past the top tier (64px/em)** — zoom well past the top
+- [x] **Expected softening past the top tier (64px/em)** — zoom well past the top
       tier's native resolution (readout shows "atlas 64px/em" and isn't changing
       anymore). Confirm it softens gracefully (blur, not corruption/artifacts) —
       this is documented, expected behavior (see MAX_ZOOM's comment), not a bug.
-- [ ] **Auto/manual toggle works cleanly** — starting from the default
+- [x] **Auto/manual toggle works cleanly** — starting from the default
       (unchecked), confirm the dropdown is usable and pins one tier
       regardless of zoom; check "Auto tier", confirm it immediately snaps to
       the zoom-appropriate tier; uncheck it again, confirm it stays pinned
       at whatever tier auto last landed on (not a snap back to
       DEFAULT_ATLAS_SIZE).
-- [ ] **"last atlas gen" readout looks sane** — no multi-second stalls on a tier
+- [x] **"last atlas gen" readout looks sane** — no multi-second stalls on a tier
       switch. With the worker knob on (default), a stall wouldn't block the
       frame but would still show up as a large `genMs` number and a
       visibly-late tier swap; with it off (sync path), a stall would block
       the frame directly — either way, flag it and try the other knob
       setting to isolate whether it's the regen itself or something else.
-- [ ] **Mixed-script text (Cyrillic + Latin + punctuation) reads correctly** at
+- [x] **Mixed-script text (Cyrillic + Latin + punctuation) reads correctly** at
       every tier — no mis-shaped glyphs, no missing glyphs, kerning looks right.
-- [ ] **Repeat the above with a longer pasted-in paragraph** (edit `TEXT` in
+- [x] **Repeat the above with a longer pasted-in paragraph** (edit `TEXT` in
       demo/webgpu-zoom/main.ts temporarily) — the shipped demo's ~20-char string is
       fast enough that a real slowdown on longer text wouldn't show up otherwise,
       and that's exactly the case the sync-vs-worker decision cares about.
@@ -140,3 +140,30 @@ DevTools' Rendering tab -> "Frame Rendering Stats").
   auto/manual toggle row, the smooth-regen-knob row, the atlas-gen-readout
   row) to instruct checking it explicitly first. `gate:m5`, `typecheck`,
   `oxlint`, `oxfmt`, `build:demo` all green after this second flip.
+  **Follow-up, same day:** user manually testing the "longer paragraph"
+  checklist row (see above) had set `webgl-zoom`'s `TEXT` to 10 repeated
+  lines joined by real `\n` characters — discovered `\n` wasn't a line break
+  at all, `Atlas.layout()` has no concept of one (it lays out one baseline).
+  Asked whether demos could support `\n`. Added it at the library level
+  rather than duplicating line-splitting per demo: new `Atlas.layoutMultiline
+  (text)` in `src/atlas-gen.ts`, splitting on `\n`, each line run through the
+  existing `.layout()` independently (kerning never crosses a break), stacked
+  by the font's own line-height metric (`(ascender − descender + lineGap) /
+  unitsPerEm`). `LaidOutGlyph` gained a `penY` field (0 for `.layout()`,
+  additive/non-breaking — existing consumers destructuring `{glyph, penX}`
+  are unaffected). `src/atlas-worker.ts`'s protocol updated to match
+  (`BuiltGlyph.penY`, `BuiltResponse.heightEm`) so the worker path stays in
+  sync with sync `buildTier()`. Both zoom demos switched from `.layout(TEXT)`
+  to `.layoutMultiline(TEXT)`; `glyphCount`/instance-buffer sizing now
+  excludes `\n` from the codepoint count; camera Y centers on the whole
+  block's vertical span (`tier.heightEm`) when `TEXT` has more than one line,
+  unchanged (`-0.15`, the original hand-tuned single-line value) otherwise —
+  so `webgpu-zoom`'s single-line `TEXT` sees no behavior change. This is a
+  reasonable library addition, not a new public entry point (no
+  `package.json` change) — `Atlas` was already exported; `layoutMultiline` is
+  just a new method on it. `gate:all` (2979/2979), `typecheck`, `oxlint`,
+  `oxfmt`, `build`, `build:demo`, `npm run size` (13.5 KB gzip, was 13.4 —
+  the new method itself, unaffected library size budget) all green. Not
+  visually confirmed in a real browser this session (no WebGPU/WebGL
+  environment available here) — worth an explicit look during the next QA
+  pass, especially `webgl-zoom`'s 10-line block.

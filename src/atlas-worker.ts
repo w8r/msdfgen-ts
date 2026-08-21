@@ -2,9 +2,10 @@
 /**
  * Optional worker wrapper around {@link Atlas} — off-main-thread atlas builds.
  *
- * Runs the exact same synchronous `Atlas.layout()` pipeline as the main-thread
- * path in `atlas-gen.ts` — just inside a dedicated Worker, so a build (e.g. a
- * resolution-tier regen during zoom) never blocks the render thread (see
+ * Runs the exact same synchronous `Atlas.layoutMultiline()` pipeline as the
+ * main-thread path in `atlas-gen.ts` — just inside a dedicated Worker, so a
+ * build (e.g. a resolution-tier regen during zoom) never blocks the render
+ * thread (see
  * CLAUDE.md's M5 "Stack decisions": "a thin optional worker wrapper... makes
  * the worker path a drop-in"). This is the pragmatic form of that wrapper: it
  * reruns the whole `Atlas` build per request rather than exposing a generic
@@ -58,6 +59,8 @@ export interface BuildRequest {
   font?: ArrayBuffer;
   pixelsPerEm: number;
   pxrange: number;
+  /** `\n`-separated lines are laid out via `Atlas.layoutMultiline` — see
+   *  its doc for line-height handling. */
   text: string;
 }
 
@@ -65,6 +68,7 @@ export interface BuildRequest {
  *  position, flattened into one plain object for structured clone. */
 export interface BuiltGlyph extends AtlasGlyph {
   penX: number;
+  penY: number;
 }
 
 /** Successful build result. `texture` is transferred, not copied. */
@@ -79,6 +83,7 @@ export interface BuiltResponse {
   texture: ArrayBuffer;
   glyphs: BuiltGlyph[];
   widthEm: number;
+  heightEm: number;
   /** Wall-clock time spent generating + packing this tier's atlas (ms). */
   genMs: number;
 }
@@ -111,9 +116,13 @@ self.onmessage = (ev: MessageEvent<BuildRequest>): void => {
     }
     const genStart = performance.now();
     const atlas = new Atlas(font, { pixelsPerEm: req.pixelsPerEm, pxrange: req.pxrange });
-    const { glyphs, widthEm } = atlas.layout(req.text);
+    const { glyphs, widthEm, heightEm } = atlas.layoutMultiline(req.text);
     const genMs = performance.now() - genStart;
-    const glyphsOut: BuiltGlyph[] = glyphs.map(({ glyph, penX }) => ({ ...glyph, penX }));
+    const glyphsOut: BuiltGlyph[] = glyphs.map(({ glyph, penX, penY }) => ({
+      ...glyph,
+      penX,
+      penY,
+    }));
     // .slice() copies out of Atlas's internal buffer into a fresh,
     // exactly-sized ArrayBuffer we're free to transfer (detach) below.
     const texture = atlas.texture.slice().buffer;
@@ -128,6 +137,7 @@ self.onmessage = (ev: MessageEvent<BuildRequest>): void => {
       texture,
       glyphs: glyphsOut,
       widthEm,
+      heightEm,
       genMs,
     };
     self.postMessage(response, [texture]);

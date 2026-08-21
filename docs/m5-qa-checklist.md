@@ -12,19 +12,19 @@ DevTools' Rendering tab -> "Frame Rendering Stats").
 
 ## Checklist
 
-- [ ] **60fps pan** — drag continuously across the canvas at a middling zoom
+- [x] **60fps pan** — drag continuously across the canvas at a middling zoom
       (auto tier on). No stutter, no dropped-frame feel.
-- [ ] **60fps zoom** — wheel/pinch zoom continuously in then out across the full
+- [x] **60fps zoom** — wheel/pinch zoom continuously in then out across the full
       range. No stutter during the zoom gesture itself (regen happens on a tier
       crossing — see next row for what THAT should look like).
-- [ ] **Tier swap has no visible pop, only the intended fade/instant swap** — watch
+- [x] **Tier swap has no visible pop, only the intended fade/instant swap** — watch
       the glyphs closely while zooming slowly through a tier boundary (readout's
       "atlas Npx/em" value changes). Sync regen (current implementation, see
       demo/webgpu-zoom/main.ts's docstring) swaps instantly — confirm that instant
       swap doesn't read as a jarring pop (a sub-frame resolution change is expected
       to be imperceptible at 60fps; flag if it visibly flickers or the glyph shape
       jumps).
-- [ ] **No visible softening within a tier's comfortable range** — zoom to just
+- [x] **No visible softening within a tier's comfortable range** — zoom to just
       under the next tier's threshold; text should still look crisp, not soft.
 - [ ] **Expected softening past the top tier (64px/em)** — zoom well past the top
       tier's native resolution (readout shows "atlas 64px/em" and isn't changing
@@ -48,6 +48,8 @@ DevTools' Rendering tab -> "Frame Rendering Stats").
       few frames until the worker's result lands (readout's mode suffix flips
       sync -> worker), then swap is clean. Uncheck it: behavior reverts to the
       sync path exactly as before (readout mode suffix back to `sync`).
+      Run this row against both demos — webgpu-zoom and webgl-zoom now share
+      the identical worker wiring (same src/atlas-worker.ts, same knob).
 
 ## If anything fails
 
@@ -91,3 +93,17 @@ DevTools' Rendering tab -> "Frame Rendering Stats").
   change to the main one. Doesn't affect the M6 size budget (separate chunk,
   confirmed via `npm run size` — unchanged at 13.4 KB gzip). `gate:all` green,
   `build`/`build:demo`/`typecheck`/`oxlint`/`oxfmt` all clean after the change.
+  **Follow-up, same day:** ported the identical "Smooth regen (worker)" knob
+  + worker wiring to `demo/webgl-zoom/main.ts` (was sync-only) — same
+  `AtlasLike`/`Tier`/`tierFromBuilt`/`ensureWorker` shape as webgpu-zoom's,
+  adapted only for WebGL2's texture recreate calls
+  (`gl.deleteTexture`/`gl.createTexture` in place of WebGPU's
+  bind-group-needs-a-fresh-texture-view dance). Vite dedupes
+  `src/atlas-worker.ts` into one shared chunk across both demos (confirmed:
+  identical chunk hash in `build:demo` output). User also flagged atlas
+  generation times as "alarming" while testing longer text per the checklist
+  row above — noted as expected and explicitly M6's scope (median glyph gen
+  < 3ms budget, `tools/bench.mjs`, not built yet); the readout's `genMs` is
+  a whole-string layout total (scales with glyph count), not a per-glyph
+  number, so a longer test string reads slower by design — worth remembering
+  when M6's bench harness lands, so it measures per-glyph, not per-string.

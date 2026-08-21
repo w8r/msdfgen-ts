@@ -48,11 +48,11 @@ interface TextBenchCase {
 const TEXT_CASES: TextBenchCase[] = [
   {
     name: "webgpu-zoom",
-    pixelsPerEm: 64,
-    pxrange: 8,
+    pixelsPerEm: 40,
+    pxrange: 5,
     text: "Hello Привет 123 @#& *º savagery",
   },
-  { name: "webgl-zoom", pixelsPerEm: 64, pxrange: 8, text: "*%#`²Hello Привет 123 @#&" },
+  { name: "webgl-zoom", pixelsPerEm: 40, pxrange: 5, text: "*%#`²Hello Привет 123 @#&" },
 ];
 const TEXT_WARMUP = 3;
 const TEXT_ITERATIONS = 15;

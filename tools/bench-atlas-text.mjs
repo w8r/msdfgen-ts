@@ -27,14 +27,14 @@ const FONT_PATH = resolve(__dirname, "../test/fonts/PTSerif-Regular.ttf");
 const DEMOS = [
   {
     name: "webgpu-zoom",
-    pixelsPerEm: 64,
-    pxrange: 8,
+    pixelsPerEm: 40,
+    pxrange: 5,
     text: "Hello Привет 123 @#& *º savagery",
   },
   {
     name: "webgl-zoom",
-    pixelsPerEm: 64,
-    pxrange: 8,
+    pixelsPerEm: 40,
+    pxrange: 5,
     text: "*%#`²Hello Привет 123 @#&",
   },
 ];

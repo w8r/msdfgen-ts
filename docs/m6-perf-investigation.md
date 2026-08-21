@@ -476,6 +476,18 @@ almost exactly, confirming the model. `gate:all` (2979/2979) and
 `build:demo` unaffected — this only touches demo defaults, not the hot
 path.
 
+**Correction, same day:** target resolution is 40px/em, not 64 — unified
+the other direction instead. `webgpu-zoom`'s `ATLAS_SIZES` gained a `40`
+tier (it didn't have one — was `[24, 32, 48, 64]`, now
+`[24, 32, 40, 48, 64]`, matching `webgl-zoom`'s list exactly) and its
+`DEFAULT_ATLAS_SIZE` changed 64 → 40; `webgl-zoom`'s reverted 64 → 40
+(back to its original value). `tools/bench-atlas-text.mjs` and
+`demo/bench/main.ts`'s `webgpu-zoom`/`webgl-zoom` cases both updated to
+40px/em, pxrange 5. Re-measured: `webgpu-zoom` 60.48ms vs. `webgl-zoom`
+50.76ms — 1.19x, exactly the unique-glyph-count ratio (25/21), same
+confirmation as above just at the actual target resolution. `gate:all`
+(2979/2979) and `build:demo` clean.
+
 ## Reproducing
 
 ```bash

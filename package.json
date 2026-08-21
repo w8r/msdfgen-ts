@@ -1,8 +1,11 @@
 {
   "name": "msdfgen-ts",
   "version": "0.0.1-dev",
-  "type": "module",
   "license": "MIT",
+  "files": [
+    "dist"
+  ],
+  "type": "module",
   "main": "./dist/msdfgen-ts.js",
   "module": "./dist/msdfgen-ts.js",
   "types": "./dist/types/index.d.ts",
@@ -11,11 +14,13 @@
       "types": "./dist/types/index.d.ts",
       "import": "./dist/msdfgen-ts.js",
       "default": "./dist/msdfgen-ts.js"
+    },
+    "./worker": {
+      "types": "./dist/types/atlas-worker.d.ts",
+      "import": "./dist/atlas-worker.js",
+      "default": "./dist/atlas-worker.js"
     }
   },
-  "files": [
-    "dist"
-  ],
   "scripts": {
     "gate:m0": "vitest run test/diff.test.ts",
     "gate:m1": "vitest run test/parser/",
@@ -36,13 +41,16 @@
     "dev:webgl": "vite --open /demo/webgl/index.html",
     "dev:webgl-zoom": "vite --open /demo/webgl-zoom/index.html",
     "dev:webgpu-zoom": "vite --open /demo/webgpu-zoom/index.html",
-    "build": "vite build && tsc -p tsconfig.build.json",
+    "build": "vite build && vite build --config vite.worker.config.ts && tsc -p tsconfig.build.json",
     "build:demo": "vite build --config vite.demo.config.ts",
     "predeploy": "npm run build:demo",
     "deploy": "gh-pages -d demo-dist",
     "size": "vite build && gzip -c dist/msdfgen-ts.iife.js | wc -c | awk '{printf \"%.1f KB (iife, gzip)\\n\", $1/1024}'",
     "lint": "oxlint src/ test/",
     "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "potpack": "2.1.0"
   },
   "devDependencies": {
     "@types/node": "22.0.0",
@@ -56,8 +64,5 @@
     "typescript": "7.0.2",
     "vite": "6.3.0",
     "vitest": "3.2.0"
-  },
-  "dependencies": {
-    "potpack": "2.1.0"
   }
 }

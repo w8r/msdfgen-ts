@@ -43,6 +43,11 @@ DevTools' Rendering tab -> "Frame Rendering Stats").
       demo/webgpu-zoom/main.ts temporarily) — the shipped demo's ~20-char string is
       fast enough that a real slowdown on longer text wouldn't show up otherwise,
       and that's exactly the case the sync-vs-worker decision cares about.
+- [ ] **"Smooth regen (worker)" knob** — check it, zoom slowly through a tier
+      boundary: no stutter, previous tier stays crisp-enough on screen for the
+      few frames until the worker's result lands (readout's mode suffix flips
+      sync -> worker), then swap is clean. Uncheck it: behavior reverts to the
+      sync path exactly as before (readout mode suffix back to `sync`).
 
 ## If anything fails
 
@@ -50,6 +55,39 @@ DevTools' Rendering tab -> "Frame Rendering Stats").
   issue, not tiering — check WebGPU vs WebGL2 in isolation first.
 - Visible pop/flicker exactly at a tier boundary: check `TIER_UP_MARGIN` /
   `TIER_DOWN_MARGIN` in demo/webgpu-zoom/main.ts — might need more hysteresis.
-- Multi-second stalls on longer text: this is the signal to build the worker path
-  (CLAUDE.md's M5 spec, `atlas-worker.ts` — deferred per this milestone's decision
-  log, not scaffolded yet).
+- Multi-second stalls on longer text: try the "Smooth regen (worker)" knob — the
+  worker path (`src/atlas-worker.ts`, CLAUDE.md's M5 spec) exists now, see the
+  Findings log below.
+
+## Findings log
+
+- **2026-08-21** — user-reported light stutter on px/em tier switch
+  (`demo/webgpu-zoom/main.ts`). Root cause confirmed by inspection: `render()`
+  calls `buildTier()` (MSDF regen) + `uploadAtlasTexture()` synchronously in the
+  same frame as the tier crossing (main.ts:315). Matches the documented sync-regen
+  tradeoff (main.ts:10-13) — not a new bug.
+  **Follow-up, same day:** rather than flipping the default, added the worker path
+  as an opt-in knob — "Smooth regen (worker)" checkbox, off by default. New
+  `src/atlas-worker.ts` runs the same `Atlas.layout()` build inside a dedicated
+  Worker (structured-clone protocol, transferable texture buffer); the demo keeps
+  rendering the current tier, stale, until the worker's result lands, then swaps.
+  Sync path is untouched and stays the default — this is additive, not a
+  replacement. See the "Smooth regen (worker) knob" checklist row above for
+  manual QA; not yet run.
+  **User follow-up, same day:** confirmed the worker knob fixed the stutter
+  ("almost gone" — remaining blip is `uploadAtlasTexture()`'s GPU
+  create+writeTexture call, still on the main thread by design; regen itself
+  is what moved off-thread). User then asked to ship the worker as public
+  API. Generalized `atlas-worker.ts` from demo-specific (hardcoded
+  `fetch(fontUrl)` + fixed `TEXT`) to a public protocol: caller supplies font
+  bytes via a transferred `ArrayBuffer` keyed by caller-chosen `fontKey`
+  (worker caches the parsed `Font`, no more `fetch` inside the worker — pure
+  compute, no DOM/network dependency), arbitrary `text` per request. Published
+  as `msdfgen-ts/worker` (`package.json` `exports`, new `vite.worker.config.ts`
+  building it as its own ES chunk — `vite build`'s "iife" format used for the
+  main entry doesn't support multiple entries, hence the separate config).
+  This is a deliberate, explicit exception to CLAUDE.md's "Public API = named
+  exports from `src/index.ts` only" — a second, opt-in entry point, not a
+  change to the main one. Doesn't affect the M6 size budget (separate chunk,
+  confirmed via `npm run size` — unchanged at 13.4 KB gzip). `gate:all` green,
+  `build`/`build:demo`/`typecheck`/`oxlint`/`oxfmt` all clean after the change.

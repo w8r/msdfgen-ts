@@ -416,12 +416,50 @@ itself in isolation again post-hoist (its per-call cost may have changed
 now that it's not sharing a call site with the setup block it used to be
 adjacent to) before guessing at the next target.
 
+## Update: real-world check — the demos' actual whole-string atlas gen
+
+User noticed the `webgpu-zoom`/`webgl-zoom` demos' "last atlas gen" readout
+didn't look "monumentally" faster after both optimizations, despite the
+per-glyph numbers above. Worth checking with a real number instead of
+eyeballing a live readout — `tools/bench-atlas-text.mjs` (new, non-gating
+diagnostic companion to `bench.mjs`) measures the exact thing the readout
+shows: `Atlas.layoutMultiline()` over each demo's actual `TEXT` constant,
+at its actual `pixelsPerEm`/`pxrange`, with its actual font
+(`PTSerif-Regular.ttf` — the bench glyphs above used Roboto, a different
+font with different edge counts per glyph, so this is also the first
+same-font check).
+
+```
+              before      after      speedup
+webgpu-zoom:  362.64ms   147.32ms   2.46x  (25 unique glyphs, 64px/em, pxrange 8)
+webgl-zoom:   123.39ms    51.52ms   2.39x  (21 unique glyphs, 40px/em, pxrange 5)
+```
+
+("before" measured by temporarily restoring `src/msdf/generate.ts` +
+`src/shape/segments.ts` to their state at commit `f0efe9d`, the last
+commit before either optimization, then restoring — not a permanent
+revert, `git diff` was empty afterward.)
+
+The improvement is real and substantial (2.4-2.5x, consistent with the
+per-glyph numbers) — it just doesn't _feel_ as dramatic live because both
+before and after are far above a 16ms interactive frame budget either way
+(362ms and 147ms both read as "a stall" to the eye), so the relative win
+is easy to underestimate without a controlled measurement. This is
+exactly the kind of check worth having on hand rather than re-deriving:
+`tools/bench-atlas-text.mjs` is reusable — re-run it after any future
+change to the hot path to catch a regression (or confirm a further win)
+against this exact real-world workload, not just the synthetic
+single-glyph one `gate:m6` checks.
+
 ## Reproducing
 
 ```bash
-npx tsx --expose-gc tools/bench.mjs
+npx tsx --expose-gc tools/bench.mjs        # gate:m6's actual check (single worst-case glyph)
+npx tsx tools/bench-atlas-text.mjs         # non-gating: both demos' real TEXT, real font, real params
 ```
 
-Prints median/min/max timing and the allocation heap delta, exits non-zero
-on either budget miss. `test/size.test.ts` (the other M6 gate half, size
-budget) passes independently and is unaffected by any of this.
+`bench.mjs` prints median/min/max timing and the allocation heap delta,
+exits non-zero on either budget miss. `test/size.test.ts` (the other M6
+gate half, size budget) passes independently and is unaffected by any of
+this. `bench-atlas-text.mjs` is diagnostic only — not part of `gate:m6`,
+no pass/fail, just a number to compare against next time.

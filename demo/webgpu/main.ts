@@ -18,12 +18,48 @@ import shaderCode from "./msdf.wgsl?raw";
 
 // See demo/canvas/main.ts for why this isn't a hardcoded leading-slash path.
 const FONT_URL = `${import.meta.env.BASE_URL}test/fonts/PTSerif-Regular.ttf`;
-const PIXELS_PER_EM = 40; // atlas generation resolution
+const PIXELS_PER_EM = 40; // atlas generation resolution (single-atlas row)
 const PXRANGE = 8;
 const OUTPUT_SIZES = [16, 32, 64, 128, 256];
 const TEXT = "Hello Привет 123 @#&";
 const FG_COLOR: [number, number, number, number] = [0.08, 0.08, 0.08, 1];
 const BG_COLOR: [number, number, number, number] = [1, 1, 1, 1];
+
+// ── Auto-tier row ────────────────────────────────────────────────────────
+const ATLAS_SIZES = [16, 24, 32, 48, 64] as const; // pixelsPerEm tiers available for auto-selection
+const TIER_PXRANGE_RATIO = 8; // pxrange = pixelsPerEm / TIER_PXRANGE_RATIO, matches the zoom demos' convention
+
+/** Smallest tier whose native resolution covers `targetSize`, or the top tier past that. */
+function pickTierForSize(targetSize: number): (typeof ATLAS_SIZES)[number] {
+  for (const size of ATLAS_SIZES) {
+    if (size >= targetSize) return size;
+  }
+  return ATLAS_SIZES[ATLAS_SIZES.length - 1]!;
+}
+
+/** Appends a label + small 2D canvas showing `atlas.texture` as-is (raw RGBA) —
+ *  debug view of what the reconstruction shader is actually sampling. Uses
+ *  a 2D canvas rather than another WebGPU context because this is just a
+ *  1:1 texel dump, not a shader-reconstructed render. */
+function appendAtlasPreview(root: HTMLElement, tag: string, atlas: Atlas): void {
+  const label = document.createElement("div");
+  label.className = "label";
+  label.textContent = `underlying atlas texture — ${tag} (${atlas.width}×${atlas.height}, raw MSDF channels)`;
+  root.appendChild(label);
+  const canvas = document.createElement("canvas");
+  canvas.width = atlas.width;
+  canvas.height = atlas.height;
+  canvas.className = "atlas-preview";
+  canvas.style.display = "block";
+  canvas.style.border = "1px solid #ddd";
+  canvas.style.background = "white";
+  canvas.style.imageRendering = "pixelated";
+  const ctx = canvas.getContext("2d")!;
+  const image = ctx.createImageData(atlas.width, atlas.height);
+  image.data.set(atlas.texture);
+  ctx.putImageData(image, 0, 0);
+  root.appendChild(canvas);
+}
 
 /**
  * Renders `glyphs` (laid out in em units) at `targetSizeCss` px-per-em onto a
@@ -34,7 +70,8 @@ async function renderAtSize(
   device: GPUDevice,
   pipeline: GPURenderPipeline,
   bindGroupLayout: GPUBindGroupLayout,
-  uniformEntries: (buffer: GPUBuffer) => GPUBindGroupEntry[],
+  sampler: GPUSampler,
+  atlasTexture: GPUTexture,
   quadBuffer: GPUBuffer,
   indexBuffer: GPUBuffer,
   atlas: Atlas,
@@ -110,7 +147,11 @@ async function renderAtSize(
 
   const bindGroup = device.createBindGroup({
     layout: bindGroupLayout,
-    entries: uniformEntries(uniformBuffer),
+    entries: [
+      { binding: 0, resource: { buffer: uniformBuffer } },
+      { binding: 1, resource: sampler },
+      { binding: 2, resource: atlasTexture.createView() },
+    ],
   });
 
   const encoder = device.createCommandEncoder();
@@ -165,17 +206,7 @@ async function main(): Promise<void> {
   const genMs = performance.now() - genStart;
 
   // ── Atlas texture + sampler (shared across all output sizes) ────────────
-  const atlasTexture = device.createTexture({
-    size: [atlas.width, atlas.height],
-    format: "rgba8unorm",
-    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
-  });
-  device.queue.writeTexture(
-    { texture: atlasTexture },
-    atlas.texture,
-    { bytesPerRow: atlas.width * 4 },
-    { width: atlas.width, height: atlas.height },
-  );
+  const atlasTexture = createAtlasTexture(device, atlas);
   // Adjacent atlas cells are packed with zero gap — sampling exactly at a
   // cell's edge with bilinear filtering would blend in the next glyph's texels.
   // Inset the sampled UV rect by half a texel on each side so no sample ever
@@ -246,11 +277,6 @@ async function main(): Promise<void> {
     primitive: { topology: "triangle-list" },
   });
   const bindGroupLayout = pipeline.getBindGroupLayout(0);
-  const uniformEntries = (uniformBuffer: GPUBuffer): GPUBindGroupEntry[] => [
-    { binding: 0, resource: { buffer: uniformBuffer } },
-    { binding: 1, resource: sampler },
-    { binding: 2, resource: atlasTexture.createView() },
-  ];
 
   root.textContent = "";
   const info = document.createElement("p");
@@ -266,7 +292,8 @@ async function main(): Promise<void> {
       device,
       pipeline,
       bindGroupLayout,
-      uniformEntries,
+      sampler,
+      atlasTexture,
       quadBuffer,
       indexBuffer,
       atlas,
@@ -279,7 +306,98 @@ async function main(): Promise<void> {
     root.appendChild(canvas);
   }
 
+  // ── Auto-tier row: one atlas + GPU texture per distinct tier picked, built
+  // on demand and cached — same pickTier selection the zoom demos use
+  // continuously, resolved once per fixed OUTPUT_SIZES entry here. ────────
+  const tierInfo = document.createElement("p");
+  tierInfo.textContent = `Auto-tiered: each size below uses the smallest of [${ATLAS_SIZES.join(", ")}]px/em whose atlas covers it — compare against the single-atlas row above.`;
+  root.appendChild(tierInfo);
+
+  interface TierEntry {
+    atlas: Atlas;
+    texture: GPUTexture;
+    glyphs: LaidOutGlyph[];
+    widthEm: number;
+    genMs: number;
+  }
+  const tierAtlases = new Map<number, TierEntry>();
+  function tierEntry(pixelsPerEm: number): TierEntry {
+    let entry = tierAtlases.get(pixelsPerEm);
+    if (!entry) {
+      const a = new Atlas(font, { pixelsPerEm, pxrange: pixelsPerEm / TIER_PXRANGE_RATIO });
+      const t0 = performance.now();
+      const laid = a.layout(TEXT);
+      const genMsTier = performance.now() - t0;
+      entry = {
+        atlas: a,
+        texture: createAtlasTexture(device, a),
+        glyphs: laid.glyphs,
+        widthEm: laid.widthEm,
+        genMs: genMsTier,
+      };
+      tierAtlases.set(pixelsPerEm, entry);
+    }
+    return entry;
+  }
+
+  for (const size of OUTPUT_SIZES) {
+    const tierSize = pickTierForSize(size);
+    const entry = tierEntry(tierSize);
+    const label = document.createElement("div");
+    label.className = "label";
+    label.textContent = `${size}px (atlas ${tierSize}px/em)`;
+    root.appendChild(label);
+    const canvas = await renderAtSize(
+      device,
+      pipeline,
+      bindGroupLayout,
+      sampler,
+      entry.texture,
+      quadBuffer,
+      indexBuffer,
+      entry.atlas,
+      entry.glyphs,
+      entry.widthEm,
+      size,
+      dpr,
+      format,
+    );
+    root.appendChild(canvas);
+  }
+
+  const tierGenSummary = document.createElement("p");
+  const tierGenParts = [...tierAtlases.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([px, e]) => `${px}px/em ${e.genMs.toFixed(2)}ms`);
+  const tierGenTotal = [...tierAtlases.values()].reduce((a, e) => a + e.genMs, 0);
+  tierGenSummary.textContent = `Atlas gen (tiers actually built): ${tierGenParts.join(" · ")} — total ${tierGenTotal.toFixed(2)}ms.`;
+  root.appendChild(tierGenSummary);
+
+  // ── Underlying atlas texture previews — the single-atlas row's atlas,
+  // then one per tier actually built. Debug view of what the shader samples.
+  appendAtlasPreview(root, "single-atlas row", atlas);
+  const builtSizes = [...tierAtlases.keys()].sort((a, b) => a - b);
+  for (const px of builtSizes) {
+    appendAtlasPreview(root, `auto-tier ${px}px/em`, tierAtlases.get(px)!.atlas);
+  }
+
   root.dataset.ready = "true"; // signal for tools/screenshot.mjs
+}
+
+/** Creates an rgba8unorm GPU texture, uploads `atlas.texture`, returns it. */
+function createAtlasTexture(device: GPUDevice, atlas: Atlas): GPUTexture {
+  const texture = device.createTexture({
+    size: [atlas.width, atlas.height],
+    format: "rgba8unorm",
+    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+  });
+  device.queue.writeTexture(
+    { texture },
+    atlas.texture,
+    { bytesPerRow: atlas.width * 4 },
+    { width: atlas.width, height: atlas.height },
+  );
+  return texture;
 }
 
 main().catch((err: unknown) => {

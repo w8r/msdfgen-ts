@@ -189,6 +189,34 @@ async function main(): Promise<void> {
   readout.className = "readout";
   root.appendChild(readout);
 
+  // ── Underlying atlas texture preview (matches demo/canvas). Refreshed
+  // on every tier switch via refreshAtlasPreview() — the whole point of
+  // this element is to visualise what the shader is actually sampling
+  // right now, so a stale first-tier snapshot would be a lie during
+  // auto-tier zoom. ─────────────────────────────────────────────────────
+  const atlasLabel = document.createElement("div");
+  atlasLabel.className = "readout";
+  atlasLabel.style.marginTop = "16px";
+  root.appendChild(atlasLabel);
+  const atlasCanvas = document.createElement("canvas");
+  atlasCanvas.style.display = "block";
+  atlasCanvas.style.border = "1px solid #ddd";
+  atlasCanvas.style.background = "white";
+  atlasCanvas.style.imageRendering = "pixelated";
+  root.appendChild(atlasCanvas);
+  const atlasPreviewCtx = atlasCanvas.getContext("2d")!;
+
+  function refreshAtlasPreview(): void {
+    if (atlasCanvas.width !== tier.atlas.width || atlasCanvas.height !== tier.atlas.height) {
+      atlasCanvas.width = tier.atlas.width;
+      atlasCanvas.height = tier.atlas.height;
+    }
+    const image = atlasPreviewCtx.createImageData(tier.atlas.width, tier.atlas.height);
+    image.data.set(tier.atlas.texture);
+    atlasPreviewCtx.putImageData(image, 0, 0);
+    atlasLabel.textContent = `underlying atlas texture — ${tier.pixelsPerEm}px/em (${tier.atlas.width}×${tier.atlas.height}, raw MSDF channels)`;
+  }
+
   const buf = await fetch(FONT_URL).then((r) => r.arrayBuffer());
   const font = new Font(buf);
 
@@ -255,6 +283,7 @@ async function main(): Promise<void> {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    refreshAtlasPreview();
   }
   uploadAtlasTexture();
 
@@ -412,22 +441,9 @@ async function main(): Promise<void> {
   render();
 
   // ── Underlying atlas texture preview (matches demo/canvas) ──────────────
-  const atlasLabel = document.createElement("div");
-  atlasLabel.className = "readout";
-  atlasLabel.style.marginTop = "16px";
-  atlasLabel.textContent = `underlying atlas texture (${tier.atlas.width}×${tier.atlas.height}, raw MSDF channels)`;
-  root.appendChild(atlasLabel);
-  const atlasCanvas = document.createElement("canvas");
-  atlasCanvas.width = tier.atlas.width;
-  atlasCanvas.height = tier.atlas.height;
-  atlasCanvas.style.display = "block";
-  atlasCanvas.style.border = "1px solid #ddd";
-  atlasCanvas.style.background = "white";
-  const actx = atlasCanvas.getContext("2d")!;
-  const atlasImage = actx.createImageData(tier.atlas.width, tier.atlas.height);
-  atlasImage.data.set(tier.atlas.texture);
-  actx.putImageData(atlasImage, 0, 0);
-  root.appendChild(atlasCanvas);
+  // Element created above; uploadAtlasTexture() has already primed its
+  // contents via refreshAtlasPreview() and will keep it in sync on every
+  // tier switch (auto-tier zoom and manual size-select alike).
 
   root.dataset.ready = "true"; // signal for tools/screenshot.mjs
 }

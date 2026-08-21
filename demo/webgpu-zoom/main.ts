@@ -241,6 +241,37 @@ async function main(): Promise<void> {
   readout.className = "readout";
   root.appendChild(readout);
 
+  // ── Underlying atlas texture preview (matches demo/webgl-zoom). Refreshed
+  // on every tier switch via refreshAtlasPreview() — the whole point of
+  // this element is to visualise what the shader is actually sampling right
+  // now, so a stale first-tier snapshot would be a lie during auto-tier
+  // zoom or after a worker regen lands. Uses a plain 2D canvas because
+  // this is a 1:1 texel dump, not a shader-reconstructed render. ───────
+  const atlasLabel = document.createElement("div");
+  atlasLabel.className = "readout";
+  atlasLabel.style.marginTop = "16px";
+  root.appendChild(atlasLabel);
+  const atlasCanvas = document.createElement("canvas");
+  atlasCanvas.style.display = "block";
+  atlasCanvas.style.border = "1px solid #ddd";
+  atlasCanvas.style.background = "white";
+  atlasCanvas.style.imageRendering = "pixelated";
+  root.appendChild(atlasCanvas);
+  const atlasPreviewCtx = atlasCanvas.getContext("2d")!;
+
+  function refreshAtlasPreview(): void {
+    if (atlasCanvas.width !== tier.atlas.width || atlasCanvas.height !== tier.atlas.height) {
+      atlasCanvas.width = tier.atlas.width;
+      atlasCanvas.height = tier.atlas.height;
+    }
+    const image = atlasPreviewCtx.createImageData(tier.atlas.width, tier.atlas.height);
+    // AtlasLike.texture is Uint8Array; ImageData.data is Uint8ClampedArray —
+    // .set() accepts the plain view fine (typed-array covariance).
+    image.data.set(tier.atlas.texture);
+    atlasPreviewCtx.putImageData(image, 0, 0);
+    atlasLabel.textContent = `underlying atlas texture — ${tier.pixelsPerEm}px/em (${tier.atlas.width}×${tier.atlas.height}, raw MSDF channels, ${tier.regenMode} regen)`;
+  }
+
   const context = canvas.getContext("webgpu")!;
   context.configure({ device, format, alphaMode: "opaque" });
 
@@ -354,6 +385,7 @@ async function main(): Promise<void> {
         { binding: 2, resource: atlasTexture.createView() },
       ],
     });
+    refreshAtlasPreview();
   }
   uploadAtlasTexture();
 

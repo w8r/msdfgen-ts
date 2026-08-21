@@ -224,20 +224,33 @@ async function main(): Promise<void> {
   tierGenSummary.textContent = `Atlas gen (tiers actually built): ${tierGenParts.join(" · ")} — total ${tierGenTotal.toFixed(2)}ms.`;
   root.appendChild(tierGenSummary);
 
-  const atlasLabel = document.createElement("div");
-  atlasLabel.className = "label";
-  atlasLabel.textContent = `underlying atlas texture (${atlas.width}×${atlas.height}, raw MSDF channels)`;
-  root.appendChild(atlasLabel);
-  const atlasCanvas = document.createElement("canvas");
-  atlasCanvas.width = atlas.width;
-  atlasCanvas.height = atlas.height;
-  atlasCanvas.className = "glyph-canvas";
-  const actx = atlasCanvas.getContext("2d")!;
-  const atlasImage = actx.createImageData(atlas.width, atlas.height);
-  atlasImage.data.set(atlas.texture);
-  actx.putImageData(atlasImage, 0, 0);
-  root.appendChild(atlasCanvas);
+  // Underlying atlas texture previews — one per tier actually built above,
+  // in ascending pixelsPerEm order. Debug view: what the reconstruction
+  // shader is actually sampling. Zero gap between cells + raw MSDF channels
+  // (no median), so glyph edges show as coloured seams.
+  appendAtlasPreview(root, "single-atlas row", atlas);
+  const builtSizes = [...tierAtlases.keys()].sort((a, b) => a - b);
+  for (const px of builtSizes) {
+    appendAtlasPreview(root, `auto-tier ${px}px/em`, tierAtlases.get(px)!);
+  }
   root.dataset.ready = "true"; // signal for tools/screenshot.mjs
+}
+
+/** Appends a label + small canvas showing `atlas.texture` as-is (raw RGBA). */
+function appendAtlasPreview(root: HTMLElement, tag: string, atlas: Atlas): void {
+  const label = document.createElement("div");
+  label.className = "label";
+  label.textContent = `underlying atlas texture — ${tag} (${atlas.width}×${atlas.height}, raw MSDF channels)`;
+  root.appendChild(label);
+  const canvas = document.createElement("canvas");
+  canvas.width = atlas.width;
+  canvas.height = atlas.height;
+  canvas.className = "glyph-canvas";
+  const ctx = canvas.getContext("2d")!;
+  const image = ctx.createImageData(atlas.width, atlas.height);
+  image.data.set(atlas.texture);
+  ctx.putImageData(image, 0, 0);
+  root.appendChild(canvas);
 }
 
 main().catch((err: unknown) => {

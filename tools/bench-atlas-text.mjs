@@ -33,8 +33,8 @@ const DEMOS = [
   },
   {
     name: "webgl-zoom",
-    pixelsPerEm: 40,
-    pxrange: 5,
+    pixelsPerEm: 64,
+    pxrange: 8,
     text: "*%#`²Hello Привет 123 @#&",
   },
 ];

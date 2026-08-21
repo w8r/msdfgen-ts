@@ -451,6 +451,31 @@ change to the hot path to catch a regression (or confirm a further win)
 against this exact real-world workload, not just the synthetic
 single-glyph one `gate:m6` checks.
 
+## Update: unified the two demos' default resolution
+
+User noticed `webgpu-zoom`'s whole-string readout was ~3x `webgl-zoom`'s
+and asked why. Not a bug: `webgpu-zoom`'s `DEFAULT_ATLAS_SIZE` was 64px/em,
+`webgl-zoom`'s was 40px/em — generation cost is roughly
+`O(texel area × edges)`, and area scales with `pixelsPerEm²`. Verified on
+a shared glyph (`e`, PTSerif): 43×50 = 2150 texels at 64px/em vs. 27×31 =
+837 texels at 40px/em — a 2.57x ratio, matching `(64/40)² = 2.56`
+almost exactly. Combined with `webgpu-zoom` having ~19% more unique
+glyphs in its `TEXT` (25 vs. 21), predicted `2.56 × 1.19 = 3.05x`, close
+to the `2.86x` actually observed above — the two demos were never meant
+to be compared against each other, they just happened to default to
+different tiers.
+
+Per request, unified them: `webgl-zoom`'s `DEFAULT_ATLAS_SIZE` changed
+40 → 64 (already a valid tier in its own `ATLAS_SIZES`, so a one-line
+change; `PXRANGE_RATIO` was already 8 in both, so `pxrange` follows
+automatically). `tools/bench-atlas-text.mjs` and `demo/bench/main.ts`'s
+`webgl-zoom` case updated to match (pixelsPerEm/pxrange 40/5 → 64/8).
+Re-measured: `webgpu-zoom` 148.78ms vs. `webgl-zoom` 133.13ms — 1.12x,
+matching the remaining unique-glyph-count difference (25/21 = 1.19x)
+almost exactly, confirming the model. `gate:all` (2979/2979) and
+`build:demo` unaffected — this only touches demo defaults, not the hot
+path.
+
 ## Reproducing
 
 ```bash

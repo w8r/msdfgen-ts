@@ -102,7 +102,7 @@ DevTools' Rendering tab -> "Frame Rendering Stats").
   confirmed via `npm run size` — unchanged at 13.4 KB gzip). `gate:all` green,
   `build`/`build:demo`/`typecheck`/`oxlint`/`oxfmt` all clean after the change.
   **Follow-up, same day:** ported the identical "Smooth regen (worker)" knob
-  + worker wiring to `demo/webgl-zoom/main.ts` (was sync-only) — same
+  and worker wiring to `demo/webgl-zoom/main.ts` (was sync-only) — same
   `AtlasLike`/`Tier`/`tierFromBuilt`/`ensureWorker` shape as webgpu-zoom's,
   adapted only for WebGL2's texture recreate calls
   (`gl.deleteTexture`/`gl.createTexture` in place of WebGPU's
@@ -167,3 +167,12 @@ DevTools' Rendering tab -> "Frame Rendering Stats").
   visually confirmed in a real browser this session (no WebGPU/WebGL
   environment available here) — worth an explicit look during the next QA
   pass, especially `webgl-zoom`'s 10-line block.
+- **2026-08-21, later** — user confirmed both `webgpu-zoom` and
+  `webgl-zoom` work in a real browser after PR #10 (multi-line text,
+  `Atlas.layoutMultiline`) merged into `main` and after the M6
+  `cubicRoots` swap landed in `src/shape/segments.ts`'s hot
+  `signedDistance` path (PR #11, still open at time of writing). No
+  regression reported. This is the first real-browser confirmation this
+  session — everything up to this point (worker offload, both default
+  flips, multiline, the cubic solver swap) had only gate/CI verification,
+  no live check.

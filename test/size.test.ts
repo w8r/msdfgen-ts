@@ -27,7 +27,10 @@ describe("M6: size budget", () => {
   it(`dist/msdfgen-ts.iife.js gzips under ${MAX_GZIP_BYTES / 1024} KB`, async () => {
     await build({ root: ROOT, configFile: resolve(ROOT, "vite.config.ts"), logLevel: "silent" });
     const bundle = readFileSync(resolve(ROOT, "dist/msdfgen-ts.iife.js"));
-    const gzipped = gzipSync(bundle);
+    // Buffer's .buffer is typed ArrayBufferLike (could be SharedArrayBuffer),
+    // which gzipSync's stricter InputType no longer accepts directly — copy
+    // into a plain Uint8Array (cheap, one-time, not a hot path).
+    const gzipped = gzipSync(Uint8Array.from(bundle));
     expect(gzipped.byteLength).toBeLessThan(MAX_GZIP_BYTES);
   }, 30000);
 });

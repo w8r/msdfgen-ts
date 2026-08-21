@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>msdfgen-ts — perf report</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 24px;
+        background: #f2f2f2;
+        font-family: system-ui, sans-serif;
+        color: #111;
+        max-width: 780px;
+      }
+      h1 {
+        font-size: 18px;
+        margin-bottom: 4px;
+      }
+      h2 {
+        font-size: 14px;
+        margin: 28px 0 4px;
+      }
+      p {
+        color: #555;
+        font-size: 13px;
+        line-height: 1.5;
+      }
+      button {
+        font: inherit;
+        font-size: 13px;
+        padding: 6px 14px;
+        border: 1px solid #ccc;
+        background: white;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+      button:hover {
+        background: #f8f8f8;
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      .table-scroll {
+        max-height: 360px;
+        overflow-y: auto;
+        border: 1px solid #ddd;
+        margin-top: 8px;
+        background: white;
+      }
+      table {
+        border-collapse: collapse;
+        font-family: ui-monospace, monospace;
+        font-size: 12px;
+        width: 100%;
+      }
+      thead th {
+        position: sticky;
+        top: 0;
+        background: #fafafa;
+      }
+      .summary {
+        font-family: ui-monospace, monospace;
+        font-size: 12px;
+        margin-top: 12px;
+      }
+      th,
+      td {
+        padding: 4px 12px;
+        text-align: right;
+        border-bottom: 1px solid #eee;
+      }
+      th:first-child,
+      td:first-child {
+        text-align: left;
+      }
+      th {
+        color: #888;
+        font-weight: 600;
+        font-size: 11px;
+        text-transform: uppercase;
+      }
+      td.under {
+        color: #1a7f37;
+      }
+      td.over {
+        color: #cf222e;
+      }
+      .status {
+        font-family: ui-monospace, monospace;
+        font-size: 12px;
+        color: #888;
+        margin-top: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>msdfgen-ts — perf report</h1>
+    <p>
+      Live, in-browser companion to <code>tools/bench.mjs</code> and
+      <code>tools/bench-atlas-text.mjs</code> — same methodology, run in this browser's JS engine
+      instead of Node, so a viewer can see the real number for their own machine/browser rather than
+      trusting a number from CI or a different machine. Not a gate: <code>gate:m6</code> (Node,
+      <code>tools/bench.mjs</code>) is the actual pass/fail authority — see
+      <a href="https://github.com/w8r/msdfgen-ts/blob/main/docs/m6-perf-investigation.md"
+        >docs/m6-perf-investigation.md</a
+      >
+      for the full writeup this page's numbers are checked against.
+    </p>
+    <div id="root">
+      <button id="run">Run benchmarks</button>
+      <div id="status" class="status"></div>
+
+      <h2>Per-glyph generation (Roboto.ttf, 48px/em, pxrange 4)</h2>
+      <p>
+        Matches <code>tools/bench.mjs</code>'s methodology exactly (fresh <code>Atlas</code> per
+        iteration, so every generation is genuinely uncached), over a wide representative range —
+        full Latin upper/lowercase, digits, common punctuation, and a Cyrillic sample, matching
+        CLAUDE.md M0's corpus scope — rather than a handful of curated cases. Median of 15 runs
+        after warmup (fewer than the Node tool's 200 — enough for a stable median across ~150 glyphs
+        without freezing the tab). CLAUDE.md's M6 gate: median &lt; 3ms.
+      </p>
+      <div id="glyph-summary" class="summary"></div>
+      <div class="table-scroll">
+        <table id="glyph-table">
+          <thead>
+            <tr>
+              <th>glyph</th>
+              <th>median</th>
+              <th>min</th>
+              <th>max</th>
+              <th>vs budget</th>
+            </tr>
+          </thead>
+          <tbody id="glyph-tbody"></tbody>
+        </table>
+      </div>
+
+      <h2>Whole-string atlas generation (PTSerif-Regular.ttf)</h2>
+      <p>
+        Matches <code>tools/bench-atlas-text.mjs</code>: the exact <code>TEXT</code>,
+        <code>pixelsPerEm</code>/<code>pxrange</code>, and font each zoom demo actually uses — the
+        real number behind their "last atlas gen" readout on first load.
+      </p>
+      <table id="text-table">
+        <thead>
+          <tr>
+            <th>demo</th>
+            <th>median</th>
+            <th>min</th>
+            <th>max</th>
+            <th>unique glyphs</th>
+          </tr>
+        </thead>
+        <tbody id="text-tbody"></tbody>
+      </table>
+    </div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

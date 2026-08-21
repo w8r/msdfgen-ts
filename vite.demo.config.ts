@@ -36,6 +36,7 @@ export default defineConfig({
         webglZoom: resolve(__dirname, "demo/webgl-zoom/index.html"),
         debug: resolve(__dirname, "demo/debug/index.html"),
         lucide: resolve(__dirname, "demo/lucide/index.html"),
+        bench: resolve(__dirname, "demo/bench/index.html"),
       },
     },
   },

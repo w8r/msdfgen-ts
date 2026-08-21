@@ -43,6 +43,7 @@
     "dev:webgl-zoom": "vite --open /demo/webgl-zoom/index.html",
     "dev:webgpu-zoom": "vite --open /demo/webgpu-zoom/index.html",
     "dev:lucide": "vite --open /demo/lucide/index.html",
+    "dev:bench": "vite --open /demo/bench/index.html",
     "build": "vite build && vite build --config vite.worker.config.ts && tsc -p tsconfig.build.json",
     "build:demo": "vite build --config vite.demo.config.ts",
     "predeploy": "npm run build:demo",

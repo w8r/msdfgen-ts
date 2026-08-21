@@ -10,6 +10,7 @@
  */
 
 import { solveQuadratic, solveCubic, sign, nonZeroSign, mix } from "../math/scalar";
+import { cubicRoots } from "../math/cubic";
 
 /** Segment type tags — match C++ msdfgen's EdgeType enum. */
 export const LINEAR = 0 as const;
@@ -498,7 +499,23 @@ export class EdgeSegment {
         const b = 3 * (abx * brx + aby * bry);
         const c = 2 * (abx * abx + aby * aby) + (qax * brx + qay * bry);
         const d = qax * abx + qay * aby;
-        const solutions = solveCubic(_roots, a, b, c, d);
+        // NOT a port of msdfgen's solveCubicNormed — deliberate algorithm
+        // substitution, not a structural divergence. msdfgen's method
+        // (trig-based, Viète's substitution) and cubicRoots's (bracketed
+        // Newton + bisection fallback, src/math/cubic.ts) solve the same
+        // well-defined problem (real roots of a cubic on a bounded domain);
+        // only the numerical method differs, and only t ∈ (0,1) is ever
+        // consulted below either way. ~1.4-1.8x faster on curve-heavy
+        // glyphs (no Math.acos/Math.cos in the hot path) — see
+        // docs/m6-perf-investigation.md for the full writeup. Verified
+        // against the entire golden corpus (gate:m3, 1158 cases) plus
+        // 700k+ synthetic cases (random, degenerate, near-curve) comparing
+        // final signedDistance() output: max diff 4.1e-8, far inside the
+        // 1e-4 golden tolerance. Domain restricted to [0,1] — msdfgen's
+        // solveCubic returns all real roots unbounded and the caller
+        // filters to (0,1); cubicRoots does the restriction internally
+        // (where most of its speed comes from — see its own doc comment).
+        const solutions = cubicRoots(a, b, c, d, 0, 1, _roots);
 
         // epDir = direction(0) = ab (nonzero for a real quadratic)
         let epDirx = abx,

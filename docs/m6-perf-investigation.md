@@ -315,10 +315,18 @@ share of the total.
 
 ### Current state / what's next
 
-- `src/math/cubic.ts`'s bug is fixed (uncommitted, sitting in the working
-  tree). The `segments.ts` integration was a temporary, reverted
-  experiment (`git checkout -- src/shape/segments.ts`) — nothing wired in
-  yet, pending a decision on whether/how to adopt it.
+- **Adopted.** `cubicRoots` is wired into `src/shape/segments.ts`'s
+  QUADRATIC `signedDistance` (replacing `solveCubic`), with a provenance
+  comment at the call site pointing back here. Full gate suite (2979/2979,
+  including `gate:m3`'s 1158 golden cases) green with it in place.
+  Documented as a settled decision in CLAUDE.md's "Reference notes"
+  ("Numerical method substitution is allowed...") — the general principle,
+  not just this one call site: match msdfgen's _output_, not necessarily
+  its _method_, when a substitute is verified to the same depth this one
+  was.
+- `gate:m6`'s timing check is still red with the adoption in place —
+  18.2ms median for `@`, down from 32.6ms, still ~6x over budget. This was
+  always a partial win, not a full fix (see the timing table above).
 - Whoever picks this up next: the cubic solver was the _most obviously
   expensive single call_, but per the numbers above, it was never going to
   be the _whole_ answer. The `direction()`/`point()` calls (called 4x per

@@ -49,6 +49,8 @@ const TIER_UP_MARGIN = 1.2;
 const TIER_DOWN_MARGIN = 1.2;
 const CANVAS_CSS_WIDTH = 1100;
 const CANVAS_CSS_HEIGHT = 480;
+// `\n` splits into multiple lines — see Atlas.layoutMultiline. Fixed glyph
+// count regardless of tier, so the instance buffer never needs resizing.
 const TEXT = "*%#`²Hello Привет 123 @#&";
 const FG_COLOR: [number, number, number, number] = [0.08, 0.08, 0.08, 1];
 const BG_COLOR: [number, number, number, number] = [1, 1, 1, 1];
@@ -112,6 +114,7 @@ interface Tier {
   atlas: AtlasLike;
   glyphs: LaidOutGlyph[];
   widthEm: number;
+  heightEm: number;
   halfTexelU: number;
   halfTexelV: number;
   /** Wall-clock time spent generating + packing this tier's atlas (ms). */
@@ -124,7 +127,7 @@ function buildTier(font: Font, pixelsPerEm: number): Tier {
   const pxrange = pixelsPerEm / PXRANGE_RATIO;
   const atlas = new Atlas(font, { pixelsPerEm, pxrange });
   const genStart = performance.now();
-  const { glyphs, widthEm } = atlas.layout(TEXT);
+  const { glyphs, widthEm, heightEm } = atlas.layoutMultiline(TEXT);
   const genMs = performance.now() - genStart;
   return {
     pixelsPerEm,
@@ -132,6 +135,7 @@ function buildTier(font: Font, pixelsPerEm: number): Tier {
     atlas,
     glyphs,
     widthEm,
+    heightEm,
     halfTexelU: 0.5 / atlas.width,
     halfTexelV: 0.5 / atlas.height,
     genMs,
@@ -155,7 +159,7 @@ function tierFromBuilt(msg: BuiltResponse): Tier {
       planeRight: g.planeRight,
       planeTop: g.planeTop,
     };
-    return { glyph, penX: g.penX };
+    return { glyph, penX: g.penX, penY: g.penY };
   });
   return {
     pixelsPerEm: msg.pixelsPerEm,
@@ -163,6 +167,7 @@ function tierFromBuilt(msg: BuiltResponse): Tier {
     atlas: { width: msg.width, height: msg.height, texture, pxrangeEm: msg.pxrangeEm },
     glyphs,
     widthEm: msg.widthEm,
+    heightEm: msg.heightEm,
     halfTexelU: 0.5 / msg.width,
     halfTexelV: 0.5 / msg.height,
     genMs: msg.genMs,
@@ -294,8 +299,11 @@ async function main(): Promise<void> {
 
   const FLOATS_PER_INSTANCE = 8;
   // TEXT has a fixed glyph count regardless of tier, so this buffer's size
-  // never needs to change across tier switches.
-  const instanceData = new Float32Array([...TEXT].length * FLOATS_PER_INSTANCE);
+  // never needs to change across tier switches. `\n`s are line breaks, not
+  // glyphs (see Atlas.layoutMultiline) — excluded from the count.
+  const instanceData = new Float32Array(
+    [...TEXT].filter((ch) => ch !== "\n").length * FLOATS_PER_INSTANCE,
+  );
   const instanceBuffer = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, instanceBuffer);
   gl.bufferData(gl.ARRAY_BUFFER, instanceData, gl.DYNAMIC_DRAW); // rewritten every frame
@@ -347,7 +355,16 @@ async function main(): Promise<void> {
   uploadAtlasTexture();
 
   // ── Camera: start centred on the text, zoomed to fit ────────────────────
-  const camera: Camera = { x: tier.widthEm / 2, y: -0.15, zoom: 1 };
+  // Single line keeps the original hand-tuned -0.15 (roughly centers a
+  // typical line's cap-height around the baseline); multi-line text centers
+  // on the whole block's vertical span instead, using layoutMultiline's
+  // heightEm — -0.15 alone would leave later lines off-screen below.
+  const lineCount = TEXT.split("\n").length;
+  const camera: Camera = {
+    x: tier.widthEm / 2,
+    y: lineCount > 1 ? -tier.heightEm / 2 : -0.15,
+    zoom: 1,
+  };
   let autoTier = autoCheckbox.checked;
   let smoothRegen = smoothCheckbox.checked;
 
@@ -438,10 +455,10 @@ async function main(): Promise<void> {
     const screenPxRange = tier.atlas.pxrangeEm * pixelPerEm;
 
     for (let i = 0; i < tier.glyphs.length; i++) {
-      const { glyph, penX } = tier.glyphs[i]!;
+      const { glyph, penX, penY } = tier.glyphs[i]!;
       // World -> screen (f64) happens here, before anything narrows to f32.
       const originXScreen = centerX + (penX - camera.x) * pixelPerEm;
-      const originYScreen = centerY - (0 - camera.y) * pixelPerEm;
+      const originYScreen = centerY - (penY - camera.y) * pixelPerEm;
       const cellLeft = originXScreen + glyph.planeLeft * pixelPerEm;
       const cellTop = originYScreen - glyph.planeTop * pixelPerEm;
       const cellWidthPx = (glyph.planeRight - glyph.planeLeft) * pixelPerEm;

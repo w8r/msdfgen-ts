@@ -12,8 +12,8 @@ DevTools' Rendering tab -> "Frame Rendering Stats").
 
 ## Checklist
 
-- [x] **60fps pan** — drag continuously across the canvas at a middling zoom
-      (auto tier on). No stutter, no dropped-frame feel.
+- [x] **60fps pan** — check "Auto tier" (off by default), drag continuously
+      across the canvas at a middling zoom. No stutter, no dropped-frame feel.
 - [x] **60fps zoom** — wheel/pinch zoom continuously in then out across the full
       range. No stutter during the zoom gesture itself (regen happens on a tier
       crossing — see next row for what THAT should look like).
@@ -30,26 +30,32 @@ DevTools' Rendering tab -> "Frame Rendering Stats").
       tier's native resolution (readout shows "atlas 64px/em" and isn't changing
       anymore). Confirm it softens gracefully (blur, not corruption/artifacts) —
       this is documented, expected behavior (see MAX_ZOOM's comment), not a bug.
-- [ ] **Auto/manual toggle works cleanly** — uncheck "Auto tier", confirm the
-      dropdown becomes usable and pins one tier regardless of zoom; re-check it,
-      confirm it immediately snaps back to the zoom-appropriate tier.
+- [ ] **Auto/manual toggle works cleanly** — starting from the default
+      (unchecked), confirm the dropdown is usable and pins one tier
+      regardless of zoom; check "Auto tier", confirm it immediately snaps to
+      the zoom-appropriate tier; uncheck it again, confirm it stays pinned
+      at whatever tier auto last landed on (not a snap back to
+      DEFAULT_ATLAS_SIZE).
 - [ ] **"last atlas gen" readout looks sane** — no multi-second stalls on a tier
-      switch (would indicate the sync-regen assumption in demo/webgpu-zoom/main.ts's
-      docstring needs revisiting — see its note on deferring the worker path until
-      M6 bench numbers say otherwise).
+      switch. With the worker knob on (default), a stall wouldn't block the
+      frame but would still show up as a large `genMs` number and a
+      visibly-late tier swap; with it off (sync path), a stall would block
+      the frame directly — either way, flag it and try the other knob
+      setting to isolate whether it's the regen itself or something else.
 - [ ] **Mixed-script text (Cyrillic + Latin + punctuation) reads correctly** at
       every tier — no mis-shaped glyphs, no missing glyphs, kerning looks right.
 - [ ] **Repeat the above with a longer pasted-in paragraph** (edit `TEXT` in
       demo/webgpu-zoom/main.ts temporarily) — the shipped demo's ~20-char string is
       fast enough that a real slowdown on longer text wouldn't show up otherwise,
       and that's exactly the case the sync-vs-worker decision cares about.
-- [ ] **"Smooth regen (worker)" knob** — on by default: load the page, zoom
-      slowly through a tier boundary with no other interaction: no stutter,
-      previous tier stays crisp-enough on screen for the few frames until the
-      worker's result lands (readout's mode suffix should already read
-      `worker`), then swap is clean. Uncheck it: behavior reverts to the sync
-      path (readout mode suffix flips to `sync`) — confirm the stutter is
-      back (that's the point of the comparison, not a regression). Run this
+- [ ] **"Smooth regen (worker)" knob** — on by default (only takes effect
+      once "Auto tier" is checked): check "Auto tier", zoom slowly through a
+      tier boundary: no stutter, previous tier stays crisp-enough on screen
+      for the few frames until the worker's result lands (readout's mode
+      suffix should already read `worker`), then swap is clean. Uncheck the
+      worker knob (leave Auto tier on): behavior reverts to the sync path
+      (readout mode suffix flips to `sync`) — confirm the stutter is back
+      (that's the point of the comparison, not a regression). Run this
       row against both demos — webgpu-zoom and webgl-zoom share the
       identical worker wiring (same src/atlas-worker.ts, same knob).
 
@@ -122,3 +128,15 @@ DevTools' Rendering tab -> "Frame Rendering Stats").
   now literally true. Updated both demos' top-of-file docstrings and the
   checklist row above accordingly. `gate:m5`, `typecheck`, `oxlint`, `oxfmt`,
   `build:demo` all green after the flip.
+  **Correction, same day:** user clarified the ask was in fact auto-tier off
+  by default too (the earlier read was wrong — the "on by default" phrasing
+  I attributed to CLAUDE.md was actually only in the demo's own docstring,
+  not a CLAUDE.md constraint, so nothing in CLAUDE.md blocks this). Flipped
+  `autoCheckbox.checked` to `false` in both demos — page now opens pinned at
+  `DEFAULT_ATLAS_SIZE`, same as manual mode; auto-tier is opt-in via the
+  checkbox. "Smooth regen (worker)" stays on by default but is now inert
+  until "Auto tier" is checked (documented in both docstrings). Updated the
+  checklist rows that assumed auto-tier-on-by-default (60fps pan, the
+  auto/manual toggle row, the smooth-regen-knob row, the atlas-gen-readout
+  row) to instruct checking it explicitly first. `gate:m5`, `typecheck`,
+  `oxlint`, `oxfmt`, `build:demo` all green after this second flip.

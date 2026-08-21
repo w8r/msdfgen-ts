@@ -1,19 +1,22 @@
 /**
  * Interactive pan/zoom WebGL2 demo — drag to pan, wheel/pinch to zoom toward
- * the cursor. "Auto tier" (on by default) regenerates the atlas at the
- * nearest resolution tier as the effective on-screen glyph density crosses a
- * threshold, so zoom stays crisp well past any single tier's native
- * resolution ("infinite zoom" — see CLAUDE.md M5). Uncheck it to pin one
- * fixed tier and use the resolution selector for an A/B quality comparison
- * at the same zoom/pan instead. See demo/webgpu-zoom/main.ts for the WebGPU
- * twin — the tiering logic here is a straight copy of that file's.
+ * the cursor. Check "Auto tier" (off by default — the demo opens pinned at
+ * DEFAULT_ATLAS_SIZE, matching the resolution selector) to regenerate the
+ * atlas at the nearest resolution tier as the effective on-screen glyph
+ * density crosses a threshold, so zoom stays crisp well past any single
+ * tier's native resolution ("infinite zoom" — see CLAUDE.md M5). Leave it
+ * unchecked to pin one fixed tier and use the resolution selector for an
+ * A/B quality comparison at the same zoom/pan instead. See
+ * demo/webgpu-zoom/main.ts for the WebGPU twin — the tiering logic here is
+ * a straight copy of that file's.
  *
- * "Smooth regen (worker)" (on by default) routes tier builds through
- * src/atlas-worker.ts instead (also published as the `msdfgen-ts/worker`
- * package entry) so regen never blocks the render thread. Uncheck it to
- * fall back to SYNCHRONOUS regen on the main thread; see
- * demo/webgpu-zoom/main.ts's docstring for the full rationale, this file's
- * worker wiring is a straight copy of that one's.
+ * "Smooth regen (worker)" (on by default, only matters once "Auto tier" is
+ * checked — it governs how a tier switch regenerates, not whether one
+ * happens) routes tier builds through src/atlas-worker.ts instead (also
+ * published as the `msdfgen-ts/worker` package entry) so regen never blocks
+ * the render thread. Uncheck it to fall back to SYNCHRONOUS regen on the
+ * main thread; see demo/webgpu-zoom/main.ts's docstring for the full
+ * rationale, this file's worker wiring is a straight copy of that one's.
  *
  * Camera state (world position under the viewport centre + zoom factor) is
  * kept in plain JS numbers (f64) and only ever narrowed to f32 at the very
@@ -196,7 +199,7 @@ async function main(): Promise<void> {
   const autoLabel = document.createElement("label");
   const autoCheckbox = document.createElement("input");
   autoCheckbox.type = "checkbox";
-  autoCheckbox.checked = true;
+  autoCheckbox.checked = false;
   autoLabel.appendChild(autoCheckbox);
   autoLabel.appendChild(document.createTextNode(" Auto tier (infinite zoom)"));
   controls.appendChild(autoLabel);

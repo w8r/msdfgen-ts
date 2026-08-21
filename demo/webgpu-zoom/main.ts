@@ -1,13 +1,17 @@
 /**
  * Interactive pan/zoom WebGPU demo — WebGPU twin of demo/webgl-zoom/main.ts.
- * Drag to pan, wheel/pinch to zoom toward the cursor. "Auto tier" (on by
- * default) regenerates the atlas at the nearest resolution tier as the
- * effective on-screen glyph density crosses a threshold, so zoom stays
- * crisp well past any single tier's native resolution ("infinite zoom" —
- * see CLAUDE.md M5). Uncheck it to pin one fixed tier and use the resolution
- * selector for an A/B quality comparison at the same zoom/pan instead.
+ * Drag to pan, wheel/pinch to zoom toward the cursor. Check "Auto tier"
+ * (off by default — the demo opens pinned at DEFAULT_ATLAS_SIZE, matching
+ * the resolution selector) to regenerate the atlas at the nearest
+ * resolution tier as the effective on-screen glyph density crosses a
+ * threshold, so zoom stays crisp well past any single tier's native
+ * resolution ("infinite zoom" — see CLAUDE.md M5). Leave it unchecked to
+ * pin one fixed tier and use the resolution selector for an A/B quality
+ * comparison at the same zoom/pan instead.
  *
- * "Smooth regen (worker)" (on by default) routes tier builds through
+ * "Smooth regen (worker)" (on by default, only matters once "Auto tier" is
+ * checked — it governs how a tier switch regenerates, not whether one
+ * happens) routes tier builds through
  * src/atlas-worker.ts (the worker path CLAUDE.md's M5 section describes,
  * also published as the `msdfgen-ts/worker` package entry — see
  * package.json's `exports` and vite.worker.config.ts), so regen never
@@ -198,7 +202,7 @@ async function main(): Promise<void> {
   const autoLabel = document.createElement("label");
   const autoCheckbox = document.createElement("input");
   autoCheckbox.type = "checkbox";
-  autoCheckbox.checked = true;
+  autoCheckbox.checked = false;
   autoLabel.appendChild(autoCheckbox);
   autoLabel.appendChild(document.createTextNode(" Auto tier (infinite zoom)"));
   controls.appendChild(autoLabel);

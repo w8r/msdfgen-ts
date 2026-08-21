@@ -54,6 +54,36 @@ let _cdB: Float64Array = new Float64Array(0);
 let _windings: Int32Array = new Int32Array(0);
 const _wPt: number[] = [0, 0];
 
+// ── Per-edge precomputed perpendicular-selector geometry (reused across
+// pixels — see the precompute pass at the top of generateMSDF) ────────────
+// Everything here is a pure function of the edge's own control points (and
+// its neighbours', for the prev/next tangent blend) — none of it depends on
+// the query pixel, so it's wasteful to recompute per pixel per edge (it
+// was, before this cache: ~14ms of an ~18ms glyph for '@', 85 edges ×
+// 2491 pixels — see docs/m6-perf-investigation.md). Computed once per
+// generateMSDF call in the precompute pass below, indexed by a flat
+// "global edge index" via `_eOffset`.
+// Layout: index gi = _eOffset[ci] + ei.
+let _eCap = 0; // last allocated size (total edges across all contours)
+let _eP0x: Float64Array = new Float64Array(0); // edge.point(0)
+let _eP0y: Float64Array = new Float64Array(0);
+let _eP1x: Float64Array = new Float64Array(0); // edge.point(1)
+let _eP1y: Float64Array = new Float64Array(0);
+let _eADx: Float64Array = new Float64Array(0); // edge.direction(0), normalized
+let _eADy: Float64Array = new Float64Array(0);
+let _eBDx: Float64Array = new Float64Array(0); // edge.direction(1), normalized
+let _eBDy: Float64Array = new Float64Array(0);
+// unit(prevEdge.direction(1) + edge.direction(0)) — used for the `add` dot product.
+let _eAddUx: Float64Array = new Float64Array(0);
+let _eAddUy: Float64Array = new Float64Array(0);
+// -unit(edge.direction(1) + nextEdge.direction(0)) — the negation is folded
+// in here since `bdd` is always used negated (see the original formula).
+let _eNegBddUx: Float64Array = new Float64Array(0);
+let _eNegBddUy: Float64Array = new Float64Array(0);
+
+let _eOffCap = 0; // last allocated size (number of contours + 1)
+let _eOffset: Int32Array = new Int32Array(0); // _eOffset[ci] = first global edge index of contour ci
+
 // ── Private helpers ───────────────────────────────────────────────────────────
 
 /**
@@ -250,6 +280,91 @@ export function generateMSDF(
   if (_windings.length < nc) _windings = new Int32Array(nc);
   for (let ci = 0; ci < nc; ci++) _windings[ci] = _contourWinding(contours[ci]!);
 
+  // Pre-compute per-edge perpendicular-selector geometry once per shape
+  // (see the module-scope arrays' doc comment above) — this used to run
+  // once per (pixel, edge) pair; the values never depended on the pixel.
+  if (_eOffCap < nc + 1) {
+    _eOffset = new Int32Array(nc + 1);
+    _eOffCap = nc + 1;
+  }
+  let totalEdges = 0;
+  for (let ci = 0; ci < nc; ci++) {
+    _eOffset[ci] = totalEdges;
+    totalEdges += contours[ci]!.length;
+  }
+  _eOffset[nc] = totalEdges;
+
+  if (_eCap < totalEdges) {
+    _eP0x = new Float64Array(totalEdges);
+    _eP0y = new Float64Array(totalEdges);
+    _eP1x = new Float64Array(totalEdges);
+    _eP1y = new Float64Array(totalEdges);
+    _eADx = new Float64Array(totalEdges);
+    _eADy = new Float64Array(totalEdges);
+    _eBDx = new Float64Array(totalEdges);
+    _eBDy = new Float64Array(totalEdges);
+    _eAddUx = new Float64Array(totalEdges);
+    _eAddUy = new Float64Array(totalEdges);
+    _eNegBddUx = new Float64Array(totalEdges);
+    _eNegBddUy = new Float64Array(totalEdges);
+    _eCap = totalEdges;
+  }
+
+  for (let ci = 0; ci < nc; ci++) {
+    const contour = contours[ci]!;
+    const n = contour.length;
+    const off = _eOffset[ci]!;
+    for (let ei = 0; ei < n; ei++) {
+      const edge = contour[ei]!;
+      const prevEdge = contour[(ei + n - 1) % n]!;
+      const nextEdge = contour[(ei + 1) % n]!;
+      const gi = off + ei;
+
+      edge.point(0, _pt);
+      _eP0x[gi] = _pt[0]!;
+      _eP0y[gi] = _pt[1]!;
+      edge.point(1, _pt);
+      _eP1x[gi] = _pt[0]!;
+      _eP1y[gi] = _pt[1]!;
+
+      edge.direction(0, _dir);
+      let dlen = Math.sqrt(_dir[0]! * _dir[0]! + _dir[1]! * _dir[1]!);
+      const aDx = dlen > 0 ? _dir[0]! / dlen : 0;
+      const aDy = dlen > 0 ? _dir[1]! / dlen : 0;
+      _eADx[gi] = aDx;
+      _eADy[gi] = aDy;
+
+      edge.direction(1, _dir);
+      dlen = Math.sqrt(_dir[0]! * _dir[0]! + _dir[1]! * _dir[1]!);
+      const bDx = dlen > 0 ? _dir[0]! / dlen : 0;
+      const bDy = dlen > 0 ? _dir[1]! / dlen : 0;
+      _eBDx[gi] = bDx;
+      _eBDy[gi] = bDy;
+
+      prevEdge.direction(1, _dir);
+      dlen = Math.sqrt(_dir[0]! * _dir[0]! + _dir[1]! * _dir[1]!);
+      const pDx = dlen > 0 ? _dir[0]! / dlen : 0;
+      const pDy = dlen > 0 ? _dir[1]! / dlen : 0;
+
+      nextEdge.direction(0, _dir);
+      dlen = Math.sqrt(_dir[0]! * _dir[0]! + _dir[1]! * _dir[1]!);
+      const nDx = dlen > 0 ? _dir[0]! / dlen : 0;
+      const nDy = dlen > 0 ? _dir[1]! / dlen : 0;
+
+      const addSx = pDx + aDx,
+        addSy = pDy + aDy;
+      const addSl = Math.sqrt(addSx * addSx + addSy * addSy);
+      _eAddUx[gi] = addSl > 0 ? addSx / addSl : 0;
+      _eAddUy[gi] = addSl > 0 ? addSy / addSl : 0;
+
+      const bddSx = bDx + nDx,
+        bddSy = bDy + nDy;
+      const bddSl = Math.sqrt(bddSx * bddSx + bddSy * bddSy);
+      _eNegBddUx[gi] = bddSl > 0 ? -(bddSx / bddSl) : 0;
+      _eNegBddUy[gi] = bddSl > 0 ? -(bddSy / bddSl) : 0;
+    }
+  }
+
   // Ensure per-contour state arrays are large enough.
   if (_cNC < nc) {
     const n3 = nc * 3;
@@ -284,6 +399,7 @@ export function generateMSDF(
         const contour = contours[ci]!;
         const n = contour.length;
         const ci3 = ci * 3;
+        const ciOff = _eOffset[ci]!; // base index into the _e* per-edge arrays
 
         // Reset per-contour state.
         // Matches PerpendicularDistanceSelectorBase default ctor:
@@ -301,8 +417,6 @@ export function generateMSDF(
         // port of MultiDistanceSelector::addEdge() (per edge)
         for (let ei = 0; ei < n; ei++) {
           const edge = contour[ei]!;
-          const prevEdge = contour[(ei + n - 1) % n]!;
-          const nextEdge = contour[(ei + 1) % n]!;
 
           const col = edge.color;
           const doR = (col & RED) !== 0;
@@ -345,50 +459,27 @@ export function generateMSDF(
             }
           }
 
-          // Perpendicular distances at edge endpoints.
-          // ap = p - edge.point(0), bp = p - edge.point(1)
-          edge.point(0, _pt);
-          const apx = px - _pt[0]!,
-            apy = py - _pt[1]!;
-          edge.point(1, _pt);
-          const bpx = px - _pt[0]!,
-            bpy = py - _pt[1]!;
+          // Perpendicular distances at edge endpoints — geometry (points,
+          // tangent directions, the add/bdd blend directions) is looked up
+          // from the precompute pass above, not recomputed per pixel; only
+          // the ap/bp subtraction and the add/bdd dot products are actually
+          // pixel-dependent. See the module-scope _e* arrays' doc comment.
+          const gei = ciOff + ei; // global edge index into the _e* arrays
+          const apx = px - _eP0x[gei]!,
+            apy = py - _eP0y[gei]!;
+          const bpx = px - _eP1x[gei]!,
+            bpy = py - _eP1y[gei]!;
 
-          // aDir = edge.direction(0).normalize(true)
-          edge.direction(0, _dir);
-          let dlen = Math.sqrt(_dir[0]! * _dir[0]! + _dir[1]! * _dir[1]!);
-          const aDx = dlen > 0 ? _dir[0]! / dlen : 0;
-          const aDy = dlen > 0 ? _dir[1]! / dlen : 0;
-
-          // bDir = edge.direction(1).normalize(true)
-          edge.direction(1, _dir);
-          dlen = Math.sqrt(_dir[0]! * _dir[0]! + _dir[1]! * _dir[1]!);
-          const bDx = dlen > 0 ? _dir[0]! / dlen : 0;
-          const bDy = dlen > 0 ? _dir[1]! / dlen : 0;
-
-          // prevDir = prevEdge.direction(1).normalize(true)
-          prevEdge.direction(1, _dir);
-          dlen = Math.sqrt(_dir[0]! * _dir[0]! + _dir[1]! * _dir[1]!);
-          const pDx = dlen > 0 ? _dir[0]! / dlen : 0;
-          const pDy = dlen > 0 ? _dir[1]! / dlen : 0;
-
-          // nextDir = nextEdge.direction(0).normalize(true)
-          nextEdge.direction(0, _dir);
-          dlen = Math.sqrt(_dir[0]! * _dir[0]! + _dir[1]! * _dir[1]!);
-          const nDx = dlen > 0 ? _dir[0]! / dlen : 0;
-          const nDy = dlen > 0 ? _dir[1]! / dlen : 0;
+          const aDx = _eADx[gei]!,
+            aDy = _eADy[gei]!;
+          const bDx = _eBDx[gei]!,
+            bDy = _eBDy[gei]!;
 
           // add = dotProduct(ap, (prevDir + aDir).normalize(true))
-          const addSx = pDx + aDx,
-            addSy = pDy + aDy;
-          const addSl = Math.sqrt(addSx * addSx + addSy * addSy);
-          const add = addSl > 0 ? apx * (addSx / addSl) + apy * (addSy / addSl) : 0;
-
-          // bdd = -dotProduct(bp, (bDir + nextDir).normalize(true))
-          const bddSx = bDx + nDx,
-            bddSy = bDy + nDy;
-          const bddSl = Math.sqrt(bddSx * bddSx + bddSy * bddSy);
-          const bdd = bddSl > 0 ? -(bpx * (bddSx / bddSl) + bpy * (bddSy / bddSl)) : 0;
+          const add = apx * _eAddUx[gei]! + apy * _eAddUy[gei]!;
+          // bdd = -dotProduct(bp, (bDir + nextDir).normalize(true)) — the
+          // negation is already folded into _eNegBddU{x,y}.
+          const bdd = bpx * _eNegBddUx[gei]! + bpy * _eNegBddUy[gei]!;
 
           // add > 0: perpendicular at edge START.
           // getPerpendicularDistance(pd, ap, -aDir): ts=dot(ap,-aDir) > 0 → pd=cross(ap,aDir)

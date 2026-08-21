@@ -327,13 +327,94 @@ share of the total.
 - `gate:m6`'s timing check is still red with the adoption in place —
   18.2ms median for `@`, down from 32.6ms, still ~6x over budget. This was
   always a partial win, not a full fix (see the timing table above).
-- Whoever picks this up next: the cubic solver was the _most obviously
-  expensive single call_, but per the numbers above, it was never going to
-  be the _whole_ answer. The `direction()`/`point()` calls (called 4x per
-  edge per pixel for the perpendicular pass, on top of the 1x
-  `signedDistance()` call) haven't been profiled in isolation yet — that's
-  the next thing worth measuring before reaching for a bigger structural
-  change.
+
+## Update: hoisting the perpendicular-distance setup out of the pixel loop
+
+Profiled the `direction()`/`point()` calls flagged above as the next thing
+to measure — isolated the exact block at
+`src/msdf/generate.ts:463-506` (the `point()`/`direction()` calls +
+normalization that feed the `add`/`bdd` perpendicular-distance blend) and
+found it was **entirely pixel-independent**: every value it computes is a
+pure function of the edge's own control points (and its neighbours', for
+the prev/next tangent blend) — none of it reads `px`/`py`. It was being
+recomputed identically on every one of `width × height` pixel iterations
+per edge, when it only needs computing once per edge per `generateMSDF`
+call.
+
+Isolated microbenchmark, `@`'s glyph (2491 pixels × 85 edges = 211,735
+edge visits):
+
+```
+current (recomputed per pixel):  14.34ms
+hoisted (computed once per edge): 0.01ms
+```
+
+**~1270x reduction on this block alone.** Implemented the hoist for real:
+a precompute pass at the top of `generateMSDF` (before the pixel loop)
+fills new module-scope `Float64Array`s (`_eP0x`/`_eP0y`, `_eP1x`/`_eP1y`,
+`_eADx`/`_eADy`, `_eBDx`/`_eBDy`, `_eAddUx`/`_eAddUy`,
+`_eNegBddUx`/`_eNegBddUy` — same reallocate-only-if-undersized pattern as
+the existing `_cTD`/`_cNeg`/etc. arrays), indexed by a flat "global edge
+index" (`_eOffset[ci] + ei`). The pixel loop's per-edge block shrinks to
+just the pixel-dependent parts: the `ap`/`bp` subtraction and the
+`add`/`bdd` dot products, looked up against the cache.
+
+This is **not** a numerical-method substitution like the cubic solver —
+it's pure hoisting, the exact same arithmetic in the exact same order,
+just computed once instead of `width × height` times. Verified
+accordingly:
+
+- **Bit-exact, not just within tolerance.** Captured `generateMSDF` +
+  `distanceSignCorrection` + `msdfErrorCorrection` output for 11 glyphs
+  (`A o e g @ M W % & i j`, covering LINEAR-only, QUADRATIC-heavy, and
+  multi-contour cases) before and after the change (via `git stash`),
+  compared every float value: **0 differing values across all 11 glyphs**
+  (33,281 total float values compared), max diff `0`.
+- `gate:m3` (1158 golden cases) + full non-e2e suite: **2979/2979 pass**
+  (same run that produced the bit-exact capture above — belt and
+  suspenders).
+
+### The combined result
+
+With both the cubic solver swap and this hoist in place:
+
+```
+        original   +cubic fix   +hoisting    total speedup
+'A':    2.957ms    3.054ms      2.115ms      1.40x  (now under budget)
+'o':    6.578ms    4.329ms      2.788ms      2.36x  (now under budget)
+'e':    5.775ms    4.090ms      2.527ms      2.29x  (now under budget)
+'M':    3.498ms    3.643ms      2.420ms      1.44x  (now under budget)
+'g':   10.561ms    7.461ms      4.657ms      2.27x
+'W':    5.237ms    5.164ms      3.490ms      1.50x
+'&':   12.352ms    8.404ms      4.988ms      2.48x
+'%':   15.312ms   10.814ms      6.227ms      2.46x
+'@':   32.398ms   21.146ms     10.140ms      3.20x  (bench.mjs's own careful run)
+```
+
+**Four of nine test glyphs are now under the 3ms budget** (`A`, `o`, `e`,
+`M`). The rest are much closer — `@` (the worst case, deliberately
+pathological) went from 10.8x over budget to 3.4x over. `gate:m6`'s
+allocation check is unaffected (still 8.8 KB / 1000 iterations, no leak —
+the new `_e*` arrays follow the same grow-once, reuse-forever pattern as
+every other module-scope scratch array here).
+
+**Adopted** — this is even lower-risk than the cubic solver swap (bit-exact
+verified, not "within `1e-4`"), so it went straight into
+`src/msdf/generate.ts` rather than sitting as a pending decision.
+
+### What's next
+
+The remaining cost for curve-heavy glyphs is now split between
+`signedDistance()` itself (still doing real work — cubic root-finding
+isn't free even at `cubicRoots`' better constant factor) and the
+`OverlappingContourCombiner` merge/select logic
+(`src/msdf/generate.ts:554-870` — but note: `@` only has 2 contours, so
+this is probably not where `@`'s remaining cost lives; it may matter more
+for glyphs with many contours, like accented characters or `%`/`&`-style
+multi-loop glyphs — not yet isolated). Worth profiling `signedDistance()`
+itself in isolation again post-hoist (its per-call cost may have changed
+now that it's not sharing a call site with the setup block it used to be
+adjacent to) before guessing at the next target.
 
 ## Reproducing
 

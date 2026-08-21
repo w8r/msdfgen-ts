@@ -225,6 +225,19 @@ zero allocations in the per-pixel loop verified by a heap-delta assertion around
    arrays, no per-pixel objects.
 6. Doubles everywhere in math (JS numbers); only convert to `Uint8Array` at the atlas
    boundary (`clamp(v * 256, 0, 255) | 0` — match msdfgen's `pixelFloatToByte` exactly).
+7. **Hoist pixel-independent work out of the pixel loop.** `generate.ts`'s per-edge
+   perpendicular-distance setup (`point()`/`direction()` calls + normalization feeding the
+   `add`/`bdd` blend) was being recomputed identically on every pixel — pure per-edge
+   geometry, none of it reads `px`/`py` — before a precompute pass moved it to run once per
+   edge per `generateMSDF` call instead (module-scope `_e*` `Float64Array`s, same
+   grow-once-reuse-forever pattern as `_cTD`/`_cNeg`/etc., indexed by a flat global edge
+   index). ~1270x reduction on that block in isolation, real ~1.4-3.2x on full glyph
+   generation depending on edge count (see `docs/m6-perf-investigation.md`). Verified
+   bit-exact against the pre-hoist output (not just within `1e-4` — a pure hoist changes
+   nothing about the arithmetic, so it shouldn't change the result at all, and didn't).
+   When adding to or reviewing `generate.ts`'s pixel loop: before adding anything to the
+   per-edge inner loop, ask whether it depends on `px`/`py` — if it doesn't, it belongs in
+   a precompute pass, not the pixel loop, however small it looks per-call.
 
 ## Code style
 

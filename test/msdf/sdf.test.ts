@@ -137,7 +137,9 @@ function referenceSDFFromShapeDesc(
     { stdio: ["ignore", "ignore", "pipe"] },
   );
   const raw = readFileSync(outPath);
-  const fl32 = fl32FromBuffer(raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength));
+  const fl32 = fl32FromBuffer(
+    raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer,
+  );
   if (fl32.channels !== 1) {
     throw new Error(`Expected 1-channel SDF output, got ${fl32.channels} channels (${outPath})`);
   }

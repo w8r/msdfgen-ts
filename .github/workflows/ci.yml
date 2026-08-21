@@ -11,8 +11,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # ── M0-M4 gates: test infra, parser, distance, MSDF golden, atlas ──────────
+  # ── M0-M5 gates: test infra, parser, distance, MSDF golden, atlas, e2e ──────
   # Fixtures/fonts are committed, so this runs without rebuilding msdfgen.
+  # gate:m5 (test/e2e.test.ts) needs headless Chromium; if the install step
+  # is ever skipped/fails, the test itself loud-skips rather than failing
+  # (see test/e2e.test.ts's launchOrSkip) — never silently green either way.
   gate:
     runs-on: ubuntu-latest
     steps:
@@ -26,7 +29,10 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
-      - name: gate:all (m0-m4)
+      - name: Install headless Chromium (for gate:m5's e2e check)
+        run: npx playwright install --with-deps chromium
+
+      - name: gate:all (m0-m5)
         run: npm run gate:all
 
   # ── Optional: verify fixtures can be regenerated from source ────────────────

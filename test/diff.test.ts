@@ -159,7 +159,7 @@ describe("golden fixtures", () => {
 
         const raw = readFileSync(fl32Path);
         const fl32 = fl32FromBuffer(
-          raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength),
+          raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer,
         );
 
         // Header dimensions must match the manifest written at generation time.
@@ -201,7 +201,9 @@ describe("golden fixtures", () => {
     }
 
     const raw = readFileSync(resolve(fixtureDir, "bitmap.fl32"));
-    const fl32 = fl32FromBuffer(raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength));
+    const fl32 = fl32FromBuffer(
+      raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer,
+    );
     const { data, width, channels } = fl32;
 
     /** Max channel value across an entire row (0-based from data start = bottom). */

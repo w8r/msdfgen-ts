@@ -1,10 +1,26 @@
 /**
  * Interactive pan/zoom WebGPU demo — WebGPU twin of demo/webgl-zoom/main.ts.
- * Drag to pan, wheel/pinch to zoom toward the cursor, over a single
- * fixed-resolution atlas tier (no re-tiering yet; see CLAUDE.md's M5 plan
- * for the later regenerate-on-threshold step). A resolution selector lets
- * you swap tiers (24/32/48/64px) while keeping the camera fixed, so the
- * quality difference at a given zoom is directly comparable.
+ * Drag to pan, wheel/pinch to zoom toward the cursor. Check "Auto tier"
+ * (off by default — the demo opens pinned at DEFAULT_ATLAS_SIZE, matching
+ * the resolution selector) to regenerate the atlas at the nearest
+ * resolution tier as the effective on-screen glyph density crosses a
+ * threshold, so zoom stays crisp well past any single tier's native
+ * resolution ("infinite zoom" — see CLAUDE.md M5). Leave it unchecked to
+ * pin one fixed tier and use the resolution selector for an A/B quality
+ * comparison at the same zoom/pan instead.
+ *
+ * "Smooth regen (worker)" (on by default, only matters once "Auto tier" is
+ * checked — it governs how a tier switch regenerates, not whether one
+ * happens) routes tier builds through
+ * src/atlas-worker.ts (the worker path CLAUDE.md's M5 section describes,
+ * also published as the `msdfgen-ts/worker` package entry — see
+ * package.json's `exports` and vite.worker.config.ts), so regen never
+ * blocks the render thread; the previous tier keeps rendering, stale, until
+ * the new one lands (a few frames, per spec). Uncheck it to fall back to
+ * SYNCHRONOUS regen on the main thread — this demo's text is short (~20
+ * glyphs), so a full sync regen is well under a frame on most machines, but
+ * it visibly stutters on some (see docs/m5-qa-checklist.md's Findings log
+ * for the report that made worker the default).
  *
  * Camera state (world position under the viewport centre + zoom factor) is
  * kept in plain JS numbers (f64) and only ever narrowed to f32 at the very
@@ -18,8 +34,9 @@
  * Shares its shader with demo/webgpu/ (same reconstruction, same instance
  * layout) — only the per-frame camera transform and tier switching are new.
  */
-import { Font, Atlas, type LaidOutGlyph } from "../../src/index";
+import { Font, Atlas, type LaidOutGlyph, type AtlasGlyph } from "../../src/index";
 import shaderCode from "../webgpu/msdf.wgsl?raw";
+import type { BuildRequest, BuiltResponse, ErrorResponse } from "../../src/atlas-worker";
 
 // See demo/canvas/main.ts for why this isn't a hardcoded leading-slash path.
 const FONT_URL = `${import.meta.env.BASE_URL}test/fonts/PTSerif-Regular.ttf`;
@@ -28,11 +45,17 @@ const DEFAULT_ATLAS_SIZE = 64;
 const PXRANGE_RATIO = 8; // pxrange = pixelsPerEm / PXRANGE_RATIO, matches the fixed corpus convention (32px -> pxrange4)
 const BASE_PX_PER_EM = 48; // pixel-per-em at zoom = 1
 const MIN_ZOOM = 0.05;
-const MAX_ZOOM = 4096; // well past any tier's crisp range (softens, doesn't break) — no tiering yet
+const MAX_ZOOM = 4096; // well past the top tier's crisp range — softens by design past that point
 const ZOOM_SPEED = 0.0018; // wheel deltaY -> exponential zoom factor
+// Regen threshold margins (auto-tier mode). Prevents thrashing (regen every
+// frame) right at a boundary during a smooth zoom gesture: upgrade only once
+// clearly past the current tier's native resolution, downgrade only once
+// clearly within a smaller tier's headroom.
+const TIER_UP_MARGIN = 1.2;
+const TIER_DOWN_MARGIN = 1.2;
 const CANVAS_CSS_WIDTH = 1100;
 const CANVAS_CSS_HEIGHT = 480;
-const TEXT = "Hello Привет 123 @#&";
+const TEXT = "Hello Привет 123 @#& *º savagery";
 const FG_COLOR: [number, number, number, number] = [0.08, 0.08, 0.08, 1];
 const BG_COLOR: [number, number, number, number] = [1, 1, 1, 1];
 const FLOATS_PER_INSTANCE = 8;
@@ -44,21 +67,44 @@ interface Camera {
   zoom: number;
 }
 
+/** Human-readable zoom factor — plain "1.5x"/"75x"/"24,576x", not `1.50e+0x`. */
+function formatZoom(zoom: number): string {
+  if (zoom < 10) return `${zoom.toFixed(2)}x`;
+  if (zoom < 100) return `${zoom.toFixed(1)}x`;
+  return `${Math.round(zoom).toLocaleString()}x`;
+}
+
+/** The subset of `Atlas` a rendered `Tier` actually reads — satisfied by a
+ *  real `Atlas` (sync path) or by a plain object rebuilt from a worker
+ *  `BuiltResponse` (see `tierFromBuilt`). */
+interface AtlasLike {
+  width: number;
+  height: number;
+  texture: Uint8Array;
+  pxrangeEm: number;
+}
+
 /** Everything that gets rebuilt when the atlas tier (resolution) changes. */
 interface Tier {
   pixelsPerEm: number;
   pxrange: number;
-  atlas: Atlas;
+  atlas: AtlasLike;
   glyphs: LaidOutGlyph[];
   widthEm: number;
   halfTexelU: number;
   halfTexelV: number;
+  /** Wall-clock time spent generating + packing this tier's atlas (ms). */
+  genMs: number;
+  /** Which path built this tier — surfaced in the readout for QA. */
+  regenMode: "sync" | "worker";
 }
 
 function buildTier(font: Font, pixelsPerEm: number): Tier {
   const pxrange = pixelsPerEm / PXRANGE_RATIO;
   const atlas = new Atlas(font, { pixelsPerEm, pxrange });
+  const genStart = performance.now();
   const { glyphs, widthEm } = atlas.layout(TEXT);
+  const genMs = performance.now() - genStart;
   return {
     pixelsPerEm,
     pxrange,
@@ -67,7 +113,69 @@ function buildTier(font: Font, pixelsPerEm: number): Tier {
     widthEm,
     halfTexelU: 0.5 / atlas.width,
     halfTexelV: 0.5 / atlas.height,
+    genMs,
+    regenMode: "sync",
   };
+}
+
+/** Reassembles a `Tier` from a worker `BuiltResponse` — the off-main-thread
+ *  twin of `buildTier`. */
+function tierFromBuilt(msg: BuiltResponse): Tier {
+  const texture = new Uint8Array(msg.texture);
+  const glyphs: LaidOutGlyph[] = msg.glyphs.map((g) => {
+    const glyph: AtlasGlyph = {
+      x: g.x,
+      y: g.y,
+      w: g.w,
+      h: g.h,
+      advance: g.advance,
+      planeLeft: g.planeLeft,
+      planeBottom: g.planeBottom,
+      planeRight: g.planeRight,
+      planeTop: g.planeTop,
+    };
+    return { glyph, penX: g.penX };
+  });
+  return {
+    pixelsPerEm: msg.pixelsPerEm,
+    pxrange: msg.pxrange,
+    atlas: { width: msg.width, height: msg.height, texture, pxrangeEm: msg.pxrangeEm },
+    glyphs,
+    widthEm: msg.widthEm,
+    halfTexelU: 0.5 / msg.width,
+    halfTexelV: 0.5 / msg.height,
+    genMs: msg.genMs,
+    regenMode: "worker",
+  };
+}
+
+/**
+ * Picks the smallest atlas tier that still covers the current on-screen
+ * glyph density (`pixelPerEm`: em -> device pixels this frame) — smaller
+ * tier = less texture memory + cheaper regen, so always prefer it once
+ * there's real headroom. The up/down margins only add hysteresis right at
+ * a boundary (don't flip tiers every frame during a slow zoom); once a
+ * switch is warranted, it jumps straight to the smallest sufficient tier
+ * in one call, both directions (regen cost is the same either way — see
+ * demo/webgpu-zoom/main.ts's top-of-file note on the sync-vs-worker regen
+ * paths).
+ */
+function pickTier(
+  pixelPerEm: number,
+  currentSize: (typeof ATLAS_SIZES)[number],
+): (typeof ATLAS_SIZES)[number] {
+  if (pixelPerEm > currentSize * TIER_UP_MARGIN) {
+    for (const size of ATLAS_SIZES) {
+      if (size >= pixelPerEm) return size;
+    }
+    return ATLAS_SIZES[ATLAS_SIZES.length - 1]!; // already at the top tier
+  }
+  if (pixelPerEm <= currentSize / TIER_DOWN_MARGIN) {
+    for (const size of ATLAS_SIZES) {
+      if (size >= pixelPerEm) return size; // smallest tier with enough headroom
+    }
+  }
+  return currentSize;
 }
 
 async function main(): Promise<void> {
@@ -91,8 +199,24 @@ async function main(): Promise<void> {
 
   const controls = document.createElement("div");
   controls.className = "controls";
+  const autoLabel = document.createElement("label");
+  const autoCheckbox = document.createElement("input");
+  autoCheckbox.type = "checkbox";
+  autoCheckbox.checked = false;
+  autoLabel.appendChild(autoCheckbox);
+  autoLabel.appendChild(document.createTextNode(" Auto tier (infinite zoom)"));
+  controls.appendChild(autoLabel);
+
+  const smoothLabel = document.createElement("label");
+  const smoothCheckbox = document.createElement("input");
+  smoothCheckbox.type = "checkbox";
+  smoothCheckbox.checked = true;
+  smoothLabel.appendChild(smoothCheckbox);
+  smoothLabel.appendChild(document.createTextNode("  Smooth regen (worker)"));
+  controls.appendChild(smoothLabel);
+
   const sizeLabel = document.createElement("label");
-  sizeLabel.textContent = "Atlas size ";
+  sizeLabel.textContent = "  Atlas size ";
   const sizeSelect = document.createElement("select");
   for (const size of ATLAS_SIZES) {
     const opt = document.createElement("option");
@@ -101,6 +225,7 @@ async function main(): Promise<void> {
     if (size === DEFAULT_ATLAS_SIZE) opt.selected = true;
     sizeSelect.appendChild(opt);
   }
+  sizeSelect.disabled = autoCheckbox.checked;
   sizeLabel.appendChild(sizeSelect);
   controls.appendChild(sizeLabel);
   root.appendChild(controls);
@@ -116,6 +241,37 @@ async function main(): Promise<void> {
   const readout = document.createElement("div");
   readout.className = "readout";
   root.appendChild(readout);
+
+  // ── Underlying atlas texture preview (matches demo/webgl-zoom). Refreshed
+  // on every tier switch via refreshAtlasPreview() — the whole point of
+  // this element is to visualise what the shader is actually sampling right
+  // now, so a stale first-tier snapshot would be a lie during auto-tier
+  // zoom or after a worker regen lands. Uses a plain 2D canvas because
+  // this is a 1:1 texel dump, not a shader-reconstructed render. ───────
+  const atlasLabel = document.createElement("div");
+  atlasLabel.className = "readout";
+  atlasLabel.style.marginTop = "16px";
+  root.appendChild(atlasLabel);
+  const atlasCanvas = document.createElement("canvas");
+  atlasCanvas.style.display = "block";
+  atlasCanvas.style.border = "1px solid #ddd";
+  atlasCanvas.style.background = "white";
+  atlasCanvas.style.imageRendering = "pixelated";
+  root.appendChild(atlasCanvas);
+  const atlasPreviewCtx = atlasCanvas.getContext("2d")!;
+
+  function refreshAtlasPreview(): void {
+    if (atlasCanvas.width !== tier.atlas.width || atlasCanvas.height !== tier.atlas.height) {
+      atlasCanvas.width = tier.atlas.width;
+      atlasCanvas.height = tier.atlas.height;
+    }
+    const image = atlasPreviewCtx.createImageData(tier.atlas.width, tier.atlas.height);
+    // AtlasLike.texture is Uint8Array; ImageData.data is Uint8ClampedArray —
+    // .set() accepts the plain view fine (typed-array covariance).
+    image.data.set(tier.atlas.texture);
+    atlasPreviewCtx.putImageData(image, 0, 0);
+    atlasLabel.textContent = `underlying atlas texture — ${tier.pixelsPerEm}px/em (${tier.atlas.width}×${tier.atlas.height}, raw MSDF channels, ${tier.regenMode} regen)`;
+  }
 
   const context = canvas.getContext("webgpu")!;
   context.configure({ device, format, alphaMode: "opaque" });
@@ -230,11 +386,44 @@ async function main(): Promise<void> {
         { binding: 2, resource: atlasTexture.createView() },
       ],
     });
+    refreshAtlasPreview();
   }
   uploadAtlasTexture();
 
   // ── Camera: start centred on the text, zoomed to fit ────────────────────
   const camera: Camera = { x: tier.widthEm / 2, y: -0.15, zoom: 1 };
+  let autoTier = autoCheckbox.checked;
+  let smoothRegen = smoothCheckbox.checked;
+
+  // ── Worker path for "Smooth regen" — lazily started on first use. Only
+  // the latest request's `id` is honoured (see onmessage below), so a fast
+  // zoom gesture that requests several tiers in a row never applies a
+  // superseded, now-stale one out of order. ────────────────────────────────
+  let worker: Worker | null = null;
+  let workerBuildId = 0;
+  let workerPendingSize = -1; // pixelsPerEm currently in flight, -1 = none
+  let fontSentToWorker = false; // font bytes go over once, then the worker caches by fontKey
+
+  function ensureWorker(): Worker {
+    if (worker) return worker;
+    worker = new Worker(new URL("../../src/atlas-worker.ts", import.meta.url), {
+      type: "module",
+    });
+    worker.onmessage = (ev: MessageEvent<BuiltResponse | ErrorResponse>) => {
+      const msg = ev.data;
+      if (msg.id !== workerBuildId) return; // superseded by a later request
+      workerPendingSize = -1;
+      if (msg.type === "error") {
+        console.error("atlas-worker build failed:", msg.message);
+        return;
+      }
+      tier = tierFromBuilt(msg);
+      uploadAtlasTexture();
+      sizeSelect.value = String(tier.pixelsPerEm);
+      render();
+    };
+    return worker;
+  }
 
   /**
    * Writes this frame's instance/uniform data (translate world->screen in
@@ -245,6 +434,46 @@ async function main(): Promise<void> {
    */
   function render(): void {
     const pixelPerEm = BASE_PX_PER_EM * camera.zoom;
+
+    if (autoTier) {
+      const wanted = pickTier(pixelPerEm, tier.pixelsPerEm as (typeof ATLAS_SIZES)[number]);
+      if (wanted !== tier.pixelsPerEm) {
+        if (smoothRegen) {
+          // Off-main-thread regen: keep rendering the current (stale) tier
+          // this frame — the worker's onmessage swaps it in once ready, a
+          // few frames from now. Only ever one request in flight per wanted
+          // size; a wheel gesture racing past several tiers just supersedes
+          // the earlier request (see workerBuildId in onmessage above).
+          if (wanted !== workerPendingSize) {
+            workerPendingSize = wanted;
+            const id = ++workerBuildId;
+            const req: BuildRequest = {
+              type: "build",
+              id,
+              fontKey: FONT_URL,
+              pixelsPerEm: wanted,
+              pxrange: wanted / PXRANGE_RATIO,
+              text: TEXT,
+            };
+            const transfer: Transferable[] = [];
+            if (!fontSentToWorker) {
+              // buf is still owned by the main-thread `font` (Font holds a
+              // live reference into it), so hand the worker its own copy —
+              // transferring buf itself would detach it out from under font.
+              req.font = buf.slice(0);
+              transfer.push(req.font);
+              fontSentToWorker = true;
+            }
+            ensureWorker().postMessage(req, transfer);
+          }
+        } else {
+          tier = buildTier(font, wanted);
+          uploadAtlasTexture();
+          sizeSelect.value = String(wanted);
+        }
+      }
+    }
+
     const centerX = canvas.width / 2;
     const centerY = canvas.height / 2;
     // pxrangeEm is uniform across all glyphs (crop, not scale — see atlas-gen.ts),
@@ -307,10 +536,27 @@ async function main(): Promise<void> {
     pass.end();
     device.queue.submit([encoder.finish()]);
 
-    readout.textContent = `zoom ${camera.zoom.toExponential(2)}x · effective screenPxRange ${screenPxRange.toFixed(1)}px · atlas ${tier.pixelsPerEm}px/em, pxrange ${tier.pxrange} (fixed tier)`;
+    readout.textContent = `zoom ${formatZoom(camera.zoom)} · effective screenPxRange ${screenPxRange.toFixed(1)}px · atlas ${tier.pixelsPerEm}px/em, pxrange ${tier.pxrange} (${autoTier ? "auto" : "fixed"} tier, ${tier.regenMode} regen) · last atlas gen ${tier.genMs.toFixed(2)}ms`;
   }
 
+  autoCheckbox.addEventListener("change", () => {
+    autoTier = autoCheckbox.checked;
+    sizeSelect.disabled = autoTier;
+    render(); // snaps to the right tier immediately if auto was just turned on
+  });
+
+  smoothCheckbox.addEventListener("change", () => {
+    smoothRegen = smoothCheckbox.checked;
+    // No cancellation of an in-flight request on toggle-off: it's harmless
+    // if it lands late (onmessage just applies a valid, if unrequested-by-
+    // the-current-mode, tier), and simpler than plumbing an abort.
+  });
+
   sizeSelect.addEventListener("change", () => {
+    // Picking a size manually is an explicit A/B-comparison request —
+    // disables auto so it doesn't get immediately overridden next frame.
+    autoTier = false;
+    autoCheckbox.checked = false;
     const size = Number(sizeSelect.value);
     tier = buildTier(font, size);
     // camera.x/y/zoom deliberately untouched — same view, new tier, so the

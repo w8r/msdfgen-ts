@@ -106,6 +106,18 @@ export class Font {
   }
 
   /**
+   * Total glyph count (`maxp.numGlyphs`), including `.notdef` at index 0.
+   * Valid glyph IDs for {@link Font.shape}/{@link Font.advance} are
+   * `0..numGlyphs-1`. Icon fonts (e.g. Lucide) often have far more glyphs
+   * than reachable Unicode codepoints — this is how a consumer enumerates
+   * "every glyph" rather than "every mapped character"; derived from
+   * `loca` (always `numGlyphs + 1` entries), no extra stored state.
+   */
+  get numGlyphs(): number {
+    return this._loca.length - 1;
+  }
+
+  /**
    * Advance width of a glyph in font units.
    *
    * @param glyphId Glyph index.

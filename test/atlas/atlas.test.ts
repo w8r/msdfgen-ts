@@ -108,6 +108,101 @@ describe("Atlas", () => {
     expect(glyphs[1]!.penX).toBeCloseTo(glyphs[0]!.glyph.advance, 10);
   });
 
+  // ── glyphByIndex / glyphsByIndex — raw-glyph-ID addressing for icon
+  // fonts (Lucide) with no usable cmap for most of their glyph set. ────────
+
+  it("glyphByIndex caches by glyph ID, independent of glyphs()'s codepoint cache", () => {
+    const font = loadFont("Lucide.ttf");
+    const atlas = new Atlas(font, { pixelsPerEm: 32, pxrange: 4 });
+    expect(atlas.glyphByIndex(10)).toBe(atlas.glyphByIndex(10));
+    // Codepoint 10 ('\n', not present in Lucide's cmap -> .notdef, empty
+    // outline) and glyph index 10 (a real icon) must not collide even
+    // though they're the same number in different addressing spaces.
+    const byCodepoint = atlas.glyph(10);
+    const byIndex = atlas.glyphByIndex(10);
+    expect(byCodepoint.w).toBe(0); // .notdef / unmapped -> empty outline
+    expect(byIndex.w).toBeGreaterThan(0); // a real icon glyph
+  });
+
+  it("glyphsByIndex packs the requested glyph-index range with no overlapping rects, sharing one texture with glyphs()", () => {
+    const font = loadFont("Lucide.ttf");
+    const atlas = new Atlas(font, { pixelsPerEm: 32, pxrange: 4 });
+    atlas.glyph(0x41); // via the codepoint path first
+    const byIndex: AtlasGlyph[] = [];
+    for (let gid = 1; gid < Math.min(30, font.numGlyphs); gid++) {
+      byIndex.push(atlas.glyphByIndex(gid));
+    }
+    const byCodepoint = atlas.glyph(0x41);
+    const all = [byCodepoint, ...byIndex];
+    for (let i = 0; i < all.length; i++) {
+      for (let j = i + 1; j < all.length; j++) {
+        expect(overlaps(all[i]!, all[j]!)).toBe(false);
+      }
+    }
+    for (const r of all) {
+      if (r.w === 0) continue;
+      expect(r.x + r.w).toBeLessThanOrEqual(atlas.width);
+      expect(r.y + r.h).toBeLessThanOrEqual(atlas.height);
+    }
+  });
+
+  it("font.numGlyphs matches loca's glyph count", () => {
+    const font = loadFont("Lucide.ttf");
+    expect(font.numGlyphs).toBeGreaterThan(1000); // Lucide has ~1700+ icons
+    // .notdef (index 0) plus every valid index up to numGlyphs-1 must shape
+    // without throwing (this is exactly what a "render every icon" demo
+    // needs to be able to do).
+    expect(() => font.shape(0)).not.toThrow();
+    expect(() => font.shape(font.numGlyphs - 1)).not.toThrow();
+  });
+
+  // Round-trip byte match for the glyph-index path, mirroring the
+  // codepoint-path test below — closes the same loop back to the C++
+  // reference. Lucide's own golden fixtures (test/golden/lucide/) were
+  // generated via msdfgen's `g<N>` glyph-index CLI syntax (see their
+  // meta.json's `charSpec`), i.e. already glyph-index-addressed — so
+  // glyphByIndex(10) at 32px/em, pxrange 4 is directly the same glyph
+  // test/golden/lucide/g10_32px was generated from.
+  it("glyphsByIndex: atlas.texture bytes match a direct-pipeline reference at the atlas's projection (Lucide)", () => {
+    const font = loadFont("Lucide.ttf");
+    const atlas = new Atlas(font, { pixelsPerEm: 32, pxrange: 4 });
+
+    for (const gid of [10, 20, 30, 100, 500]) {
+      const g = atlas.glyphByIndex(gid);
+      if (g.w === 0) continue; // empty outline
+
+      const shape = font.shape(gid);
+      emNormalizeShape(shape, font.metrics.unitsPerEm);
+      normalizeShape(shape);
+      edgeColoringSimple(shape, 3.0, 0n);
+      const tx = -g.planeLeft;
+      const ty = -g.planeBottom;
+      const ref = new Float32Array(g.w * g.h * 3);
+      generateMSDF(shape, g.w, g.h, 32, tx, ty, 4, ref);
+      distanceSignCorrection(ref, shape, g.w, g.h, 32, tx, ty);
+      msdfErrorCorrection(ref, shape, g.w, g.h, 32, tx, ty, 4);
+
+      for (let sy = 0; sy < g.h; sy++) {
+        const yUpRow = g.h - 1 - sy;
+        for (let sx = 0; sx < g.w; sx++) {
+          const atlasIdx = ((g.y + sy) * atlas.width + (g.x + sx)) * 4;
+          const refIdx = (yUpRow * g.w + sx) * 3;
+          for (let ch = 0; ch < 3; ch++) {
+            const expected = pixelFloatToByte(ref[refIdx + ch]!);
+            const actual = atlas.texture[atlasIdx + ch]!;
+            if (actual !== expected) {
+              expect.fail(
+                `[Lucide gid${gid}] byte mismatch at (${sx},${sy}) ch${ch}: ` +
+                  `got ${actual}, expected ${expected}`,
+              );
+            }
+          }
+          expect(atlas.texture[atlasIdx + 3]).toBe(255);
+        }
+      }
+    }
+  });
+
   // Round-trip byte match: for a corpus of glyphs across fonts and sizes,
   // the atlas texture bytes at each glyph's rect must equal
   //   y-flip(pixelFloatToByte(TS-pipeline MSDF at the atlas's projection)).
@@ -117,17 +212,33 @@ describe("Atlas", () => {
   // own projection (which is what the "golden" would look like if we
   // regenerated one at those exact params).
   it("atlas.texture bytes match a direct-pipeline reference at the atlas's projection", () => {
-    interface Case { font: string; pxPerEm: number; pxrange: number; codepoints: number[] }
+    interface Case {
+      font: string;
+      pxPerEm: number;
+      pxrange: number;
+      codepoints: number[];
+    }
     const cases: Case[] = [
       { font: "Roboto.ttf", pxPerEm: 32, pxrange: 4, codepoints: [0x41, 0x4d, 0x67, 0x2e, 0x40] },
-      { font: "NotoSans.ttf", pxPerEm: 48, pxrange: 4, codepoints: [0x42, 0x69, 0x51, 0x25, 0x0416 /* Ж */] },
-      { font: "PTSerif-Regular.ttf", pxPerEm: 40, pxrange: 2, codepoints: [0x67, 0x51, 0x26, 0x2e] },
+      {
+        font: "NotoSans.ttf",
+        pxPerEm: 48,
+        pxrange: 4,
+        codepoints: [0x42, 0x69, 0x51, 0x25, 0x0416 /* Ж */],
+      },
+      {
+        font: "PTSerif-Regular.ttf",
+        pxPerEm: 40,
+        pxrange: 2,
+        codepoints: [0x67, 0x51, 0x26, 0x2e],
+      },
     ];
 
     for (const c of cases) {
       const font = loadFont(c.font);
       const atlas = new Atlas(font, {
-        pixelsPerEm: c.pxPerEm, pxrange: c.pxrange,
+        pixelsPerEm: c.pxPerEm,
+        pxrange: c.pxrange,
       });
 
       for (const cp of c.codepoints) {
@@ -161,7 +272,7 @@ describe("Atlas", () => {
               if (actual !== expected) {
                 expect.fail(
                   `[${c.font} U+${cp.toString(16).toUpperCase().padStart(4, "0")}] ` +
-                  `byte mismatch at (${sx},${sy}) ch${ch}: got ${actual}, expected ${expected}`,
+                    `byte mismatch at (${sx},${sy}) ch${ch}: got ${actual}, expected ${expected}`,
                 );
               }
             }

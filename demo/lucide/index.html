@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>msdfgen-ts — Lucide icon set</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 24px;
+        background: #f2f2f2;
+        font-family: system-ui, sans-serif;
+        color: #111;
+      }
+      h1 {
+        font-size: 18px;
+        margin-bottom: 4px;
+      }
+      p {
+        color: #555;
+        font-size: 13px;
+        line-height: 1.5;
+        max-width: 780px;
+      }
+      .status {
+        font-family: ui-monospace, monospace;
+        font-size: 12px;
+        color: #888;
+        margin: 8px 0;
+      }
+      canvas {
+        display: block;
+        border: 1px solid #ddd;
+        background: white;
+        image-rendering: pixelated;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>msdfgen-ts — every glyph in Lucide.ttf</h1>
+    <p>
+      <a href="https://lucide.dev">Lucide</a> is an icon font: ~1745 pictogram glyphs, almost none
+      of them reachable through a normal Unicode codepoint (its <code>cmap</code> only maps a
+      handful of ASCII characters — this font is deliberately in the test corpus for exactly that
+      reason). Rendered here via <code>Atlas.glyphsByIndex()</code> — raw glyph-index addressing,
+      the codepoint-free twin of <code>Atlas.glyphs()</code> — one glyph per grid cell,
+      scale-to-fit, using the same bilinear MSDF reconstruction as
+      <a href="../canvas/index.html">the canvas demo</a>. Generated in chunks (not all at once) so
+      the tab stays responsive; fills in progressively.
+    </p>
+    <div id="status" class="status"></div>
+    <div id="root"></div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

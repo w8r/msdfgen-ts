@@ -18,6 +18,7 @@
  */
 
 import { type Shape } from "../shape/shape";
+import { type Contour } from "../shape/contour";
 import { type SignedDistanceResult, signedDistanceLess } from "../shape/segments";
 import { Scanline, computeShapeScanline, type FillRule, FILL_NONZERO } from "../shape/scanline";
 
@@ -59,7 +60,7 @@ const _pt: number[] = [0, 0];
  *
  * Returns +1 for CCW (outer, filled area), -1 for CW (inner/hole), 0 for empty.
  */
-function _contourWinding(contour: import("../shape/contour").Contour): number {
+function _contourWinding(contour: Contour): number {
   const n = contour.length;
   if (n === 0) return 0;
   let total = 0;

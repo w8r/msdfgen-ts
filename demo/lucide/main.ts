@@ -32,18 +32,38 @@ function median3(a: number, b: number, c: number): number {
   return Math.max(Math.min(a, b), Math.min(Math.max(a, b), c));
 }
 
-/** Bilinear-samples one RGB texel (as [0,1] floats) from the atlas texture. */
-function sampleAtlas(atlas: Atlas, sx: number, sy: number): [number, number, number] {
+/**
+ * Bilinear-samples one RGB texel (as [0,1] floats) from the atlas texture,
+ * clamped to `[minX, maxX] x [minY, maxY]` — the SAMPLED GLYPH's own packed
+ * rect, not the whole atlas. Potpack places cells with no gap between them,
+ * so clamping to the atlas instead of the glyph would let the bilinear
+ * neighbor ("+1") reach into whichever glyph happens to be packed next
+ * door, bleeding a 1px seam of the WRONG glyph's edge into this one right
+ * at the boundary — this is the fix for exactly that (found via a user
+ * report: "vertical/horizontal 1px glitches at the edges of the glyph
+ * box" — every glyph in this demo is at a shared atlas boundary, which is
+ * why it showed up here and not as obviously in demo/canvas's spaced-out
+ * text, though the bug is the same there — see its own copy of this
+ * function, fixed identically).
+ */
+function sampleAtlas(
+  atlas: Atlas,
+  sx: number,
+  sy: number,
+  minX: number,
+  minY: number,
+  maxX: number,
+  maxY: number,
+): [number, number, number] {
   const w = atlas.width;
-  const h = atlas.height;
   const x0 = Math.floor(sx),
     y0 = Math.floor(sy);
   const fx = sx - x0,
     fy = sy - y0;
-  const x1 = Math.min(x0 + 1, w - 1),
-    y1 = Math.min(y0 + 1, h - 1);
-  const cx0 = Math.max(0, Math.min(x0, w - 1)),
-    cy0 = Math.max(0, Math.min(y0, h - 1));
+  const cx0 = Math.max(minX, Math.min(x0, maxX)),
+    cy0 = Math.max(minY, Math.min(y0, maxY));
+  const x1 = Math.max(minX, Math.min(x0 + 1, maxX)),
+    y1 = Math.max(minY, Math.min(y0 + 1, maxY));
   const tex = atlas.texture;
   const px = (x: number, y: number, ch: number): number => tex[(y * w + x) * 4 + ch]! / 255;
   let r = 0,
@@ -125,6 +145,13 @@ async function main(): Promise<void> {
     const dstX1 = Math.min(canvas.width, Math.ceil(cellLeft + dispW));
     const dstY1 = Math.min(canvas.height, Math.ceil(cellTop + dispH));
 
+    // This glyph's own packed rect — sampling stays inside it, never
+    // bleeding into whichever glyph potpack packed next door.
+    const minX = glyph.x,
+      minY = glyph.y,
+      maxX = glyph.x + glyph.w - 1,
+      maxY = glyph.y + glyph.h - 1;
+
     for (let dy = dstY0; dy < dstY1; dy++) {
       const cellFracY = (dy - cellTop) / dispH;
       const srcY = glyph.y + cellFracY * glyph.h;
@@ -132,7 +159,7 @@ async function main(): Promise<void> {
         const cellFracX = (dx - cellLeft) / dispW;
         const srcX = glyph.x + cellFracX * glyph.w;
 
-        const [r, g, b] = sampleAtlas(atlas, srcX, srcY);
+        const [r, g, b] = sampleAtlas(atlas, srcX, srcY, minX, minY, maxX, maxY);
         const sd = median3(r, g, b) - 0.5;
         const screenPxDistance = screenPxRange * sd;
         const opacity = Math.max(0, Math.min(1, screenPxDistance + 0.5));

@@ -46,18 +46,35 @@ function pickTierForSize(targetSize: number): (typeof ATLAS_SIZES)[number] {
   return ATLAS_SIZES[ATLAS_SIZES.length - 1]!;
 }
 
-/** Bilinear-samples one RGB texel (as [0,1] floats) from the atlas texture. */
-function sampleAtlas(atlas: Atlas, sx: number, sy: number): [number, number, number] {
+/**
+ * Bilinear-samples one RGB texel (as [0,1] floats) from the atlas texture,
+ * clamped to `[minX, maxX] x [minY, maxY]` — the SAMPLED GLYPH's own packed
+ * rect, not the whole atlas. Potpack places cells with no gap between them,
+ * so clamping to the atlas instead of the glyph would let the bilinear
+ * neighbor ("+1") reach into whichever glyph happens to be packed next
+ * door, bleeding a 1px seam of the WRONG glyph's edge into this one right
+ * at the boundary (found via demo/lucide, where every glyph sits at a
+ * shared atlas boundary so it was obvious — same bug here, just less
+ * visible with this file's spaced-out text glyphs).
+ */
+function sampleAtlas(
+  atlas: Atlas,
+  sx: number,
+  sy: number,
+  minX: number,
+  minY: number,
+  maxX: number,
+  maxY: number,
+): [number, number, number] {
   const w = atlas.width;
-  const h = atlas.height;
   const x0 = Math.floor(sx),
     y0 = Math.floor(sy);
   const fx = sx - x0,
     fy = sy - y0;
-  const x1 = Math.min(x0 + 1, w - 1),
-    y1 = Math.min(y0 + 1, h - 1);
-  const cx0 = Math.max(0, Math.min(x0, w - 1)),
-    cy0 = Math.max(0, Math.min(y0, h - 1));
+  const cx0 = Math.max(minX, Math.min(x0, maxX)),
+    cy0 = Math.max(minY, Math.min(y0, maxY));
+  const x1 = Math.max(minX, Math.min(x0 + 1, maxX)),
+    y1 = Math.max(minY, Math.min(y0 + 1, maxY));
   const tex = atlas.texture;
   const px = (x: number, y: number, ch: number) => tex[(y * w + x) * 4 + ch]! / 255;
   let r = 0,
@@ -131,6 +148,13 @@ function renderAtSize(
     const dstX1 = Math.min(cssWidth, Math.ceil(cellLeft + cellWidthPx));
     const dstY1 = Math.min(cssHeight, Math.ceil(cellTop + cellHeightPx));
 
+    // This glyph's own packed rect — sampling stays inside it, never
+    // bleeding into whichever glyph potpack packed next door.
+    const minX = glyph.x,
+      minY = glyph.y,
+      maxX = glyph.x + glyph.w - 1,
+      maxY = glyph.y + glyph.h - 1;
+
     for (let dy = dstY0; dy < dstY1; dy++) {
       const cellFracY = (dy - cellTop) / cellHeightPx; // [0, 1)
       const srcY = glyph.y + cellFracY * glyph.h;
@@ -138,7 +162,7 @@ function renderAtSize(
         const cellFracX = (dx - cellLeft) / cellWidthPx;
         const srcX = glyph.x + cellFracX * glyph.w;
 
-        const [r, g, b] = sampleAtlas(atlas, srcX, srcY);
+        const [r, g, b] = sampleAtlas(atlas, srcX, srcY, minX, minY, maxX, maxY);
         const sd = median3(r, g, b) - 0.5;
         const screenPxDistance = screenPxRange * sd;
         const opacity = Math.max(0, Math.min(1, screenPxDistance + 0.5));

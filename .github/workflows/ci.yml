@@ -52,7 +52,13 @@ jobs:
           key: msdfgen-ref-e06c7eaaaa071445ec77a1d73f942889f796b70b
 
       - name: Install build dependencies
-        run: sudo apt-get install -y build-essential cmake libfreetype-dev libpng-dev
+        # `apt-get update` first: the runner's package index can lag behind
+        # the mirror (seen as 404s on already-listed package versions,
+        # e.g. bzip2-doc/libbz2-dev) — refreshing it before install avoids
+        # that class of transient CI flake.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libfreetype-dev libpng-dev
 
       - name: Build msdfgen reference binary
         if: steps.cache-msdfgen.outputs.cache-hit != 'true'

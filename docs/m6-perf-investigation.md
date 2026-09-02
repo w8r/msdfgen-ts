@@ -488,6 +488,71 @@ tier (it didn't have one — was `[24, 32, 48, 64]`, now
 confirmation as above just at the actual target resolution. `gate:all`
 (2979/2979) and `build:demo` clean.
 
+## Update: profiled `signedDistance()` post-hoist — sqrt deferral, a small confirmed win, and where the time actually is
+
+Followed up on "What's next" above: profiled `@` in isolation
+(2000 uncached `generateMSDF` calls, `node --cpu-prof`), post-hoist.
+Self-time breakdown:
+
+```
+42.0%  signedDistance (segments.ts)
+39.4%  generateMSDF's own loop body (generate.ts — the per-edge/per-contour
+       bookkeeping: addEdgeTrueDistance, perpendicular-distance blend,
+       OverlappingContourCombiner merge)
+12.1%  refine (cubic.ts — Newton iteration inside cubicRoots)
+ 1.7%  _distToPerp (generate.ts)
+ 1.2%  GC
+ ~3%   everything else
+```
+
+Confirms the "What's next" guess: `signedDistance` and the surrounding
+loop body are now roughly co-equal, each in the same ballpark as before
+the hoist moved a third block out entirely.
+
+Inside `signedDistance`'s QUADRATIC branch, counted up to 5 `Math.sqrt`
+calls per pixel-edge test (`qaLen`, `distB`, one per curve-interior root
+from `cubicRoots`, up to 3) where only the eventual winner's magnitude is
+ever used — every losing candidate's sqrt was pure waste. `sqrt` is
+monotonic on `[0, ∞)`, so every `<`/`<=` comparison against it produces
+the *identical* ordering when done on the squared values instead — this
+isn't an approximation, it's the same comparison with the rounding step
+removed, not added. Restructured to track `minDistanceSq` (and a
+separate sign) through both endpoint checks and the root loop, taking
+the single `Math.sqrt` only once, on the winner, at the end. `dl`/`bl`
+for the final `dot` computation are unaffected (only ever computed once,
+after the winner is known, not inside the hot comparisons).
+
+**Result: negligible.** `@`, `gate:m6`'s own measurement: 9.984ms →
+9.876ms median — ~1%, inside run-to-run noise territory (the allocation
+check's numbers moved by a comparable amount between runs with no code
+change at all). Verification was still done properly despite the small
+expected win — bit-exact is bit-exact regardless of magnitude:
+
+- `gate:m2` (1737), `gate:m3` (1158 golden), full `gate:all` (2983/2983)
+  all green, no output change.
+- **Adopted anyway** — it's strictly fewer FLOPs for identical output, at
+  zero risk (comparison semantics preserved exactly, not approximated),
+  so there's no reason not to keep it even though it didn't move the
+  needle. Bit-exact, same standard as the pixel-loop hoist above.
+
+**What this actually tells us:** `sqrt` was never where `signedDistance`'s
+cost was — that 42% self-time is dominated by something else: per-call
+overhead (the megamorphic-looking-but-monomorphic `switch`, 6-8 field
+reads off `this` per call, the `out` object write) and/or the sheer
+volume of calls (`width × height × edges` = 211,735 for `@` alone, times
+however many roots/branches each one walks). Micro-optimizing arithmetic
+inside a function that's mostly call/dispatch overhead doesn't pay off —
+closing the remaining ~3.3x gap (`9.876ms` vs. `3ms`) likely needs
+something structural: fewer calls (spatial pruning — previously explored
+above and found not to help *this* glyph specifically, since `@`'s edges
+are all close together by construction as the pathological case; may
+still help less-dense glyphs) or a fundamentally different data layout
+for the pixel loop (flattening edge iteration the way the perpendicular-
+distance hoist flattened its own state, rather than calling a method per
+edge). Both are bigger, riskier changes to code CLAUDE.md marks as
+HOTTEST — not attempted here without sign-off; reported instead of
+guessed at further.
+
 ## Reproducing
 
 ```bash

@@ -553,15 +553,63 @@ edge). Both are bigger, riskier changes to code CLAUDE.md marks as
 HOTTEST — not attempted here without sign-off; reported instead of
 guessed at further.
 
+## Update: re-profiled, confirmed the picture unchanged, cleaned up a hot-loop rule violation found along the way
+
+Re-profiled `@` (2000 uncached calls, `node --cpu-prof`) to check the split
+above still held. It does, near-identically:
+
+```
+38.5%  signedDistance (segments.ts)
+35.3%  generateMSDF's own loop body (generate.ts)
+10.8%  refine (cubic.ts — Newton iteration inside cubicRoots)
+ 5.9%  _hasDiagonalArtifact (error-correction.ts)   ← new since last profile
+ 1.4%  _distToPerp (generate.ts)
+ ~7%   everything else
+```
+
+`_hasDiagonalArtifact` (part of `msdfErrorCorrection`, runs once per glyph
+after `generateMSDF`) showed up at a real 5.9% this time and turned out to
+violate CLAUDE.md's hot-loop rule 1 outright: a `channelPairs` array
+literal, a `solutions: number[]` built with `.push()`, and a
+`for (const tEx of [tex0, tex1])` array literal — all allocated fresh
+per pixel-corner-pair check (up to 4 diagonal checks × 3 channel pairs per
+texel). Rewrote to the same structure `generate.ts` already uses
+elsewhere: 3 explicit unrolled calls instead of iterating a `channelPairs`
+array (`_checkDiagonalChannelPair` × 3), each candidate root tested
+immediately in place instead of pushed to `solutions`
+(`_checkDiagonalRoot`), and the `[tex0, tex1]` extreme check unrolled to
+two explicit calls (`_diagonalExtremeFlags` × 2) instead of iterating a
+2-element array literal. Pure mechanical restructuring — same arithmetic,
+same branch order, module-scope `_aArr`/`_lArr`/`_qArr` scratch reused as
+before, nothing about the algorithm changed.
+
+**Verified bit-exact**: `gate:m3` (1158 golden cases) and full `gate:all`
+(2983/2983) green, no output change. **Result on the actual gate**:
+9.9ms → 9.57ms median — a small, real win (fewer GC pauses from the
+removed per-pixel allocations) but nowhere near closing the ~3.2x gap to
+the 3ms budget; this was a code-quality fix that happened to be sitting in
+the profile, not an attempt at the structural fix below.
+
+**Where this leaves gate:m6**: asked the human whether to attempt the
+"bigger, riskier" restructure flagged above (data-oriented pixel loop
+and/or spatial pruning) given the size of the remaining gap and the risk
+to code marked HOTTEST. Answer: not now — safe cleanup only, gate stays
+red. `test/bench/generate.bench.ts` (`npm run bench:vitest`) was added
+alongside this as a non-gating, developer-facing comparative benchmark
+(same corpus/params as `tools/bench.mjs`) for whoever picks the
+restructure up next — `tools/bench.mjs` stays the actual gate check.
+
 ## Reproducing
 
 ```bash
 npx tsx --expose-gc tools/bench.mjs        # gate:m6's actual check (single worst-case glyph)
 npx tsx tools/bench-atlas-text.mjs         # non-gating: both demos' real TEXT, real font, real params
+npm run bench:vitest                       # non-gating: vitest bench, dev-facing comparative numbers
 ```
 
 `bench.mjs` prints median/min/max timing and the allocation heap delta,
 exits non-zero on either budget miss. `test/size.test.ts` (the other M6
 gate half, size budget) passes independently and is unaffected by any of
-this. `bench-atlas-text.mjs` is diagnostic only — not part of `gate:m6`,
-no pass/fail, just a number to compare against next time.
+this. `bench-atlas-text.mjs` and `bench:vitest` are diagnostic only — not
+part of `gate:m6`, no pass/fail, just numbers to compare against next
+time.

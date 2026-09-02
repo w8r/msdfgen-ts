@@ -461,6 +461,122 @@ function _hasLinearArtifact(
 }
 
 /**
+ * One local-extreme check inside the diagonal-artifact root loop (was the
+ * body of `for (const tEx of [tex0, tex1])` — unrolled to two call sites
+ * below to drop the per-call array literal; CLAUDE.md hot-loop rule 1).
+ */
+function _diagonalExtremeFlags(
+  msdf: Float32Array,
+  aBase: number,
+  am: number,
+  dm: number,
+  span: number,
+  protectedFlag: boolean,
+  t: number,
+  xm: number,
+  tEx: number,
+): number {
+  if (!(tEx > 0 && tEx < 1)) return 0;
+  const tEnd0 = tEx > t ? 0 : tEx;
+  const tEnd1 = tEx > t ? tEx : 1;
+  _aArr[0] = msdf[aBase]!;
+  _aArr[1] = msdf[aBase + 1]!;
+  _aArr[2] = msdf[aBase + 2]!;
+  const em0 = tEx > t ? am : _bilinearMedian(_aArr, _lArr, _qArr, tEx);
+  _aArr[0] = msdf[aBase]!;
+  _aArr[1] = msdf[aBase + 1]!;
+  _aArr[2] = msdf[aBase + 2]!;
+  const em1 = tEx > t ? _bilinearMedian(_aArr, _lArr, _qArr, tEx) : dm;
+  return _rangeTest(tEnd0, tEnd1, t, em0, em1, xm, span, protectedFlag);
+}
+
+/**
+ * Tests one candidate root `t` of a channel-pair intersection (was the body
+ * of `for (const t of solutions)` — solutions are now passed one at a time
+ * from the caller instead of collected into an array; CLAUDE.md hot-loop
+ * rule 1).
+ */
+function _checkDiagonalRoot(
+  msdf: Float32Array,
+  aBase: number,
+  am: number,
+  dm: number,
+  span: number,
+  protectedFlag: boolean,
+  t: number,
+  tex0: number,
+  tex1: number,
+): boolean {
+  if (!(t > ARTIFACT_T_EPSILON && t < 1 - ARTIFACT_T_EPSILON)) return false;
+  _aArr[0] = msdf[aBase]!;
+  _aArr[1] = msdf[aBase + 1]!;
+  _aArr[2] = msdf[aBase + 2]!;
+  const xm = _bilinearMedian(_aArr, _lArr, _qArr, t);
+  let flags = _rangeTest(0, 1, t, am, dm, xm, span, protectedFlag);
+  flags |= _diagonalExtremeFlags(msdf, aBase, am, dm, span, protectedFlag, t, xm, tex0);
+  flags |= _diagonalExtremeFlags(msdf, aBase, am, dm, span, protectedFlag, t, xm, tex1);
+  return _evaluateBase(flags);
+}
+
+/**
+ * One channel-pair intersection check (was one iteration of `for (const
+ * [ch0, ch1, tex0, tex1] of channelPairs)` — the caller now unrolls the 3
+ * pairs into 3 explicit calls instead of a `channelPairs` array literal;
+ * CLAUDE.md hot-loop rule 1). Solves
+ * `(d-bc+a)*t^2 + (bc-a-a)*t + a == 0` where `a=dA, bc=dBC, d=dD` and tests
+ * each real root in place of collecting into a `solutions` array.
+ */
+function _checkDiagonalChannelPair(
+  msdf: Float32Array,
+  aBase: number,
+  bBase: number,
+  cBase: number,
+  dBase: number,
+  am: number,
+  dm: number,
+  span: number,
+  protectedFlag: boolean,
+  ch0: number,
+  ch1: number,
+  tex0: number,
+  tex1: number,
+): boolean {
+  // Compute dA, dBC, dD in float32 (matching C++ float arithmetic).
+  const dA = Math.fround(msdf[aBase + ch0]! - msdf[aBase + ch1]!);
+  const dBC = Math.fround(
+    Math.fround(msdf[bBase + ch0]! - msdf[bBase + ch1]!) +
+      Math.fround(msdf[cBase + ch0]! - msdf[cBase + ch1]!),
+  );
+  const dD = Math.fround(msdf[dBase + ch0]! - msdf[dBase + ch1]!);
+  // Compute quadratic coefficients in float32, then as float64 (matching C++ solveQuadratic call).
+  const qCoeff = Math.fround(Math.fround(dD - dBC) + dA);
+  const lCoeff = Math.fround(Math.fround(dBC - dA) - dA);
+  const aCoeff = dA;
+
+  // Solve quadratic: qCoeff*t^2 + lCoeff*t + aCoeff = 0
+  // Threshold matches C++ solveQuadratic: a==0 || fabs(b)>1e12*fabs(a)
+  if (qCoeff === 0 || Math.abs(lCoeff) > 1e12 * Math.abs(qCoeff)) {
+    if (lCoeff !== 0) {
+      const t = -aCoeff / lCoeff;
+      if (_checkDiagonalRoot(msdf, aBase, am, dm, span, protectedFlag, t, tex0, tex1)) return true;
+    }
+    return false;
+  }
+  const disc = lCoeff * lCoeff - 4 * qCoeff * aCoeff;
+  if (disc > 0) {
+    const sq = Math.sqrt(disc);
+    const t0 = (-lCoeff + sq) / (2 * qCoeff);
+    if (_checkDiagonalRoot(msdf, aBase, am, dm, span, protectedFlag, t0, tex0, tex1)) return true;
+    const t1 = (-lCoeff - sq) / (2 * qCoeff);
+    if (_checkDiagonalRoot(msdf, aBase, am, dm, span, protectedFlag, t1, tex0, tex1)) return true;
+  } else if (disc === 0) {
+    const t = -lCoeff / (2 * qCoeff);
+    if (_checkDiagonalRoot(msdf, aBase, am, dm, span, protectedFlag, t, tex0, tex1)) return true;
+  }
+  return false;
+}
+
+/**
  * Returns true if a diagonal artifact exists between texels a, d (with b, c as the other two corners).
  * port of MSDFErrorCorrection.cpp: hasDiagonalArtifact
  */
@@ -491,70 +607,61 @@ function _hasDiagonalArtifact(
   const tEx1 = _qArr[1]! !== 0 ? (-0.5 * _lArr[1]!) / _qArr[1]! : -1;
   const tEx2 = _qArr[2]! !== 0 ? (-0.5 * _lArr[2]!) / _qArr[2]! : -1;
 
-  // Check 3 channel-pair intersections.
-  // Pair (ch0, ch1): solve (d-bc+a)*t^2 + (bc-a-a)*t + a == 0 where a=dA, bc=dBC, d=dD
-  const channelPairs = [
-    [0, 1, tEx0, tEx1],
-    [1, 2, tEx1, tEx2],
-    [2, 0, tEx2, tEx0],
-  ] as const;
-  for (const [ch0, ch1, tex0, tex1] of channelPairs) {
-    // Compute dA, dBC, dD in float32 (matching C++ float arithmetic).
-    const dA = Math.fround(msdf[aBase + ch0]! - msdf[aBase + ch1]!);
-    const dBC = Math.fround(
-      Math.fround(msdf[bBase + ch0]! - msdf[bBase + ch1]!) +
-        Math.fround(msdf[cBase + ch0]! - msdf[cBase + ch1]!),
-    );
-    const dD = Math.fround(msdf[dBase + ch0]! - msdf[dBase + ch1]!);
-    // Compute quadratic coefficients in float32, then as float64 (matching C++ solveQuadratic call).
-    const qCoeff = Math.fround(Math.fround(dD - dBC) + dA);
-    const lCoeff = Math.fround(Math.fround(dBC - dA) - dA);
-    const aCoeff = dA;
-
-    // Solve quadratic: qCoeff*t^2 + lCoeff*t + aCoeff = 0
-    // Threshold matches C++ solveQuadratic: a==0 || fabs(b)>1e12*fabs(a)
-    const solutions: number[] = [];
-    if (qCoeff === 0 || Math.abs(lCoeff) > 1e12 * Math.abs(qCoeff)) {
-      if (lCoeff !== 0) solutions.push(-aCoeff / lCoeff);
-    } else {
-      const disc = lCoeff * lCoeff - 4 * qCoeff * aCoeff;
-      if (disc > 0) {
-        const sq = Math.sqrt(disc);
-        solutions.push((-lCoeff + sq) / (2 * qCoeff));
-        solutions.push((-lCoeff - sq) / (2 * qCoeff));
-      } else if (disc === 0) {
-        solutions.push(-lCoeff / (2 * qCoeff));
-      }
-    }
-
-    for (const t of solutions) {
-      if (!(t > ARTIFACT_T_EPSILON && t < 1 - ARTIFACT_T_EPSILON)) continue;
-      _aArr[0] = msdf[aBase]!;
-      _aArr[1] = msdf[aBase + 1]!;
-      _aArr[2] = msdf[aBase + 2]!;
-      const xm = _bilinearMedian(_aArr, _lArr, _qArr, t);
-      let flags = _rangeTest(0, 1, t, am, dm, xm, span, protectedFlag);
-
-      // Check against local extremes.
-      for (const tEx of [tex0, tex1]) {
-        if (tEx > 0 && tEx < 1) {
-          const tEnd0 = tEx > t ? 0 : tEx;
-          const tEnd1 = tEx > t ? tEx : 1;
-          _aArr[0] = msdf[aBase]!;
-          _aArr[1] = msdf[aBase + 1]!;
-          _aArr[2] = msdf[aBase + 2]!;
-          const em0 = tEx > t ? am : _bilinearMedian(_aArr, _lArr, _qArr, tEx);
-          _aArr[0] = msdf[aBase]!;
-          _aArr[1] = msdf[aBase + 1]!;
-          _aArr[2] = msdf[aBase + 2]!;
-          const em1 = tEx > t ? _bilinearMedian(_aArr, _lArr, _qArr, tEx) : dm;
-          flags |= _rangeTest(tEnd0, tEnd1, t, em0, em1, xm, span, protectedFlag);
-        }
-      }
-
-      if (_evaluateBase(flags)) return true;
-    }
-  }
+  // Check 3 channel-pair intersections: (r,g), (g,b), (b,r).
+  if (
+    _checkDiagonalChannelPair(
+      msdf,
+      aBase,
+      bBase,
+      cBase,
+      dBase,
+      am,
+      dm,
+      span,
+      protectedFlag,
+      0,
+      1,
+      tEx0,
+      tEx1,
+    )
+  )
+    return true;
+  if (
+    _checkDiagonalChannelPair(
+      msdf,
+      aBase,
+      bBase,
+      cBase,
+      dBase,
+      am,
+      dm,
+      span,
+      protectedFlag,
+      1,
+      2,
+      tEx1,
+      tEx2,
+    )
+  )
+    return true;
+  if (
+    _checkDiagonalChannelPair(
+      msdf,
+      aBase,
+      bBase,
+      cBase,
+      dBase,
+      am,
+      dm,
+      span,
+      protectedFlag,
+      2,
+      0,
+      tEx2,
+      tEx0,
+    )
+  )
+    return true;
   return false;
 }
 

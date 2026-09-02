@@ -32,6 +32,7 @@
     "gate:m5": "vitest run test/e2e.test.ts",
     "gate:m6": "vitest run test/size.test.ts && tsx --expose-gc tools/bench.mjs",
     "gate:all": "vitest run test/diff.test.ts test/parser/ test/shape/normalize.test.ts test/msdf/ test/atlas/ test/e2e.test.ts",
+    "bench:vitest": "vitest bench test/bench/",
     "gen-golden": "node tools/gen-golden.mjs",
     "setup-reference": "bash tools/setup-reference.sh",
     "atlas-preview": "tsx tools/atlas-preview.mjs",

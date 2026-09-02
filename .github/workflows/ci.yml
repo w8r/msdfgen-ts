@@ -19,7 +19,7 @@ jobs:
   gate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v4
         with:
@@ -42,11 +42,11 @@ jobs:
     needs: gate
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Cache msdfgen binary
         id: cache-msdfgen
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: tools/msdfgen-ref
           key: msdfgen-ref-e06c7eaaaa071445ec77a1d73f942889f796b70b

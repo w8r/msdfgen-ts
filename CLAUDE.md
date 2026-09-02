@@ -126,6 +126,7 @@ until the gate for N is green. Do not refactor previous milestones unless a test
 When a gate passes, stop and report; the human reviews before continuing.
 
 ### M0 — Test infrastructure first
+
 Reference binary builds in CI; `gen-golden.mjs` produces fixtures for an initial corpus:
 3 fonts (e.g. Roboto, Noto Sans, PT Serif — one with heavy diacritics), ~100 glyphs each
 (Latin + Cyrillic + punctuation), sizes 32/48, pxrange 4.
@@ -133,28 +134,33 @@ Reference binary builds in CI; `gen-golden.mjs` produces fixtures for an initial
 (compares a fixture against itself = pass, against a shifted copy = fail).
 
 ### M1 — Font parser
+
 Parse the 3 corpus fonts. Composite glyphs (accented chars) must resolve correctly.
 **Gate:** `npm run gate:m1` — for every corpus glyph: advance width, bbox, contour count,
 and point data match opentype.js (dev-only dependency) exactly; parser never throws on
 any font in `test/fonts/` (add a handful of weird-but-valid fonts).
 
 ### M2 — Shape + signed distance
+
 Port segments, `signedDistance`, `pseudoDistance`, bounds, winding, scanline.
 **Gate:** `npm run gate:m2` — distance values at sampled points match values dumped from
 the C++ side (add a tiny dump harness to the reference build, or validate via
 single-channel SDF golden bitmaps: `msdfgen sdf ...` output must match ours to 1e-4).
 
 ### M3 — Edge coloring + MSDF generation + error correction
+
 **Gate:** `npm run gate:m3` — full golden diff over the corpus: every MSDF fixture matches
 `maxAbsDiff <= 1e-4`. Error correction must be ported before this gate can pass;
 if corners look wrong, the bug is here or in coloring order — do not "fix" by blurring.
 
 ### M4 — Atlas
+
 Shelf packing, growth, cache, MTSDF option, `Uint8Array` RGBA output for texture upload.
 **Gate:** `npm run gate:m4` — property tests: no rect overlap, all rects in bounds,
 occupancy > 70% on a 500-glyph fill; per-glyph bitmap in the atlas still matches golden.
 
 ### M5 — Interactive WebGPU demo: pan + infinite zoom
+
 Instanced-quad text renderer (WGSL median shader, `screenPxRange` from zoom uniform),
 mixed Latin/Cyrillic paragraph, kerning applied. Camera: pointer/wheel pan + exponential
 zoom (double-precision camera state on CPU, translate-then-scale in shader to avoid f32
@@ -194,6 +200,7 @@ no visible pop except tier swap fade) — see docs/m5-qa-checklist.md; human-run
 automatable, no CI check for it.
 
 ### M6 — Size + perf budget
+
 **Gate:** `npm run gate:m6` — minified+gzip size < 50 KB asserted in CI;
 `tools/bench.mjs`: median glyph gen (48px, pxrange 4) < 3 ms on the CI machine,
 zero allocations in the per-pixel loop verified by a heap-delta assertion around a
@@ -218,6 +225,19 @@ zero allocations in the per-pixel loop verified by a heap-delta assertion around
    arrays, no per-pixel objects.
 6. Doubles everywhere in math (JS numbers); only convert to `Uint8Array` at the atlas
    boundary (`clamp(v * 256, 0, 255) | 0` — match msdfgen's `pixelFloatToByte` exactly).
+7. **Hoist pixel-independent work out of the pixel loop.** `generate.ts`'s per-edge
+   perpendicular-distance setup (`point()`/`direction()` calls + normalization feeding the
+   `add`/`bdd` blend) was being recomputed identically on every pixel — pure per-edge
+   geometry, none of it reads `px`/`py` — before a precompute pass moved it to run once per
+   edge per `generateMSDF` call instead (module-scope `_e*` `Float64Array`s, same
+   grow-once-reuse-forever pattern as `_cTD`/`_cNeg`/etc., indexed by a flat global edge
+   index). ~1270x reduction on that block in isolation, real ~1.4-3.2x on full glyph
+   generation depending on edge count (see `docs/m6-perf-investigation.md`). Verified
+   bit-exact against the pre-hoist output (not just within `1e-4` — a pure hoist changes
+   nothing about the arithmetic, so it shouldn't change the result at all, and didn't).
+   When adding to or reviewing `generate.ts`'s pixel loop: before adding anything to the
+   per-edge inner loop, ask whether it depends on `px`/`py` — if it doesn't, it belongs in
+   a precompute pass, not the pixel loop, however small it looks per-call.
 
 ## Code style
 
@@ -293,9 +313,32 @@ Closure-friendly constraints (cheap now, painful to retrofit):
   confirm a lone flipped texel at a degenerate corner is genuinely imperceptible after AA/media
   reconstruction before considering any other approach.
   Note: `crossFMA` in `src/math/scalar.ts` (used by `shape/normalize.ts`'s deconverge logic) is
-  a *different*, pre-existing FMA-contraction emulation that predates this decision and was
+  a _different_, pre-existing FMA-contraction emulation that predates this decision and was
   deliberately left alone — gate:m2/m3 are green with it in place against the FMA-off reference,
   so it isn't causing the problem this note describes. Don't treat its existence as license to
   add more; if it ever needs touching, apply the same "suspect FMA, verify by toggling the
   reference build flag" diagnostic before changing it.
+- **Numerical method substitution is allowed where porting the reference's exact method
+  isn't the right tool for this runtime — match the _output_, not necessarily the
+  _method_.** `src/shape/segments.ts`'s QUADRATIC `signedDistance` finds real roots of a
+  cubic via `cubicRoots` (`src/math/cubic.ts`: bracketed Newton with bisection fallback,
+  no transcendentals) instead of msdfgen's own `solveCubicNormed` (trig-based, Viète's
+  substitution: `Math.acos` + 3×`Math.cos` per call — see `src/math/scalar.ts`). Both
+  solve the same well-defined problem (real roots of a cubic on a bounded domain);
+  msdfgen's C++ build pays little for the trig calls, V8 pays roughly 10-15x more per
+  call for the identical math — a straight port would have been correct but wrong for
+  this runtime. `cubicRoots` is ~8.8x faster in isolation, ~1.4-1.8x end-to-end on
+  curve-heavy glyphs (see `docs/m6-perf-investigation.md` for the M6 budget investigation
+  that motivated this). This is _not_ the "cleverness diverges from the reference" trap
+  the Working agreement warns about — that rule is about porting msdfgen's own algorithm
+  faithfully; this is a deliberate substitution of a different, independently-verified
+  algorithm for the same math, not an unverified shortcut. The bar for this kind of
+  substitution: verify against the _entire_ golden corpus (not a spot check — `gate:m3`,
+  1158 cases) plus targeted synthetic stress tests (random, degenerate/collinear control
+  points, near-curve query points — the numerically hardest region), comparing final
+  output values (not intermediate parameters) against the existing port, with margin well
+  inside the `1e-4` golden tolerance. `cubicRoots` cleared all of that
+  (`docs/m6-perf-investigation.md` has the exact numbers) before being adopted. Applying
+  this precedent elsewhere in the hot path needs the same verification depth, not just
+  "the math should be equivalent."
 - create files per-milestone as needed; never pre-scaffold future milestones

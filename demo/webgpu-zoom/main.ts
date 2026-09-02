@@ -40,8 +40,8 @@ import type { BuildRequest, BuiltResponse, ErrorResponse } from "../../src/atlas
 
 // See demo/canvas/main.ts for why this isn't a hardcoded leading-slash path.
 const FONT_URL = `${import.meta.env.BASE_URL}test/fonts/PTSerif-Regular.ttf`;
-const ATLAS_SIZES = [24, 32, 48, 64] as const; // pixelsPerEm tiers
-const DEFAULT_ATLAS_SIZE = 64;
+const ATLAS_SIZES = [24, 32, 40, 48, 64] as const; // pixelsPerEm tiers
+const DEFAULT_ATLAS_SIZE = 40; // target resolution — matches demo/webgl-zoom's default
 const PXRANGE_RATIO = 8; // pxrange = pixelsPerEm / PXRANGE_RATIO, matches the fixed corpus convention (32px -> pxrange4)
 const BASE_PX_PER_EM = 48; // pixel-per-em at zoom = 1
 const MIN_ZOOM = 0.05;

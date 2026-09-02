@@ -10,6 +10,7 @@
  */
 
 import { solveQuadratic, solveCubic, sign, nonZeroSign, mix } from "../math/scalar";
+import { cubicRoots } from "../math/cubic";
 
 /** Segment type tags — match C++ msdfgen's EdgeType enum. */
 export const LINEAR = 0 as const;
@@ -498,23 +499,48 @@ export class EdgeSegment {
         const b = 3 * (abx * brx + aby * bry);
         const c = 2 * (abx * abx + aby * aby) + (qax * brx + qay * bry);
         const d = qax * abx + qay * aby;
-        const solutions = solveCubic(_roots, a, b, c, d);
+        // NOT a port of msdfgen's solveCubicNormed — deliberate algorithm
+        // substitution, not a structural divergence. msdfgen's method
+        // (trig-based, Viète's substitution) and cubicRoots's (bracketed
+        // Newton + bisection fallback, src/math/cubic.ts) solve the same
+        // well-defined problem (real roots of a cubic on a bounded domain);
+        // only the numerical method differs, and only t ∈ (0,1) is ever
+        // consulted below either way. ~1.4-1.8x faster on curve-heavy
+        // glyphs (no Math.acos/Math.cos in the hot path) — see
+        // docs/m6-perf-investigation.md for the full writeup. Verified
+        // against the entire golden corpus (gate:m3, 1158 cases) plus
+        // 700k+ synthetic cases (random, degenerate, near-curve) comparing
+        // final signedDistance() output: max diff 4.1e-8, far inside the
+        // 1e-4 golden tolerance. Domain restricted to [0,1] — msdfgen's
+        // solveCubic returns all real roots unbounded and the caller
+        // filters to (0,1); cubicRoots does the restriction internally
+        // (where most of its speed comes from — see its own doc comment).
+        const solutions = cubicRoots(a, b, c, d, 0, 1, _roots);
+
+        // Candidates are compared by squared distance (sqrt is monotonic on
+        // [0, inf), so ordering — and every `<`/`<=` tie-break — is bit-
+        // identical to comparing the sqrt'd distances directly) and only the
+        // eventual winner's magnitude is sqrt'd, once, at the end. Up to 5
+        // sqrt calls (qaLen, distB, up to 3 curve-interior roots) collapse
+        // to 1 — see docs/m6-perf-investigation.md.
 
         // epDir = direction(0) = ab (nonzero for a real quadratic)
         let epDirx = abx,
           epDiry = aby;
-        const qaLen = Math.sqrt(qax * qax + qay * qay);
-        let minDistance = nonZeroSign(epDirx * qay - epDiry * qax) * qaLen;
+        const qaLenSq = qax * qax + qay * qay;
+        let minSign = nonZeroSign(epDirx * qay - epDiry * qax);
+        let minDistanceSq = qaLenSq;
         let param = -(qax * epDirx + qay * epDiry) / (epDirx * epDirx + epDiry * epDiry);
         {
           const bqx = p2x - ox,
             bqy = p2y - oy;
-          const distB = Math.sqrt(bqx * bqx + bqy * bqy);
-          if (distB < Math.abs(minDistance)) {
+          const distBSq = bqx * bqx + bqy * bqy;
+          if (distBSq < minDistanceSq) {
             // epDir = direction(1) = p2 - p1
             epDirx = p2x - p1x;
             epDiry = p2y - p1y;
-            minDistance = nonZeroSign(epDirx * bqy - epDiry * bqx) * distB;
+            minSign = nonZeroSign(epDirx * bqy - epDiry * bqx);
+            minDistanceSq = distBSq;
             // param = dot(origin - p1, epDir)/dot(epDir,epDir)
             param =
               ((ox - p1x) * epDirx + (oy - p1y) * epDiry) / (epDirx * epDirx + epDiry * epDiry);
@@ -526,16 +552,18 @@ export class EdgeSegment {
             // qe = qa + 2t*ab + t²*br
             const qex = qax + 2 * t * abx + t * t * brx;
             const qey = qay + 2 * t * aby + t * t * bry;
-            const distance = Math.sqrt(qex * qex + qey * qey);
-            if (distance <= Math.abs(minDistance)) {
+            const distanceSq = qex * qex + qey * qey;
+            if (distanceSq <= minDistanceSq) {
               // dir = ab + t*br
               const dirx = abx + t * brx;
               const diry = aby + t * bry;
-              minDistance = nonZeroSign(dirx * qey - diry * qex) * distance;
+              minSign = nonZeroSign(dirx * qey - diry * qex);
+              minDistanceSq = distanceSq;
               param = t;
             }
           }
         }
+        const minDistance = minSign * Math.sqrt(minDistanceSq);
 
         if (param >= 0 && param <= 1) {
           out.distance = minDistance;
@@ -548,6 +576,7 @@ export class EdgeSegment {
         if (param < 0.5) {
           // |dot(direction(0).normalize(), qa.normalize())|
           const dl = Math.sqrt(abx * abx + aby * aby);
+          const qaLen = Math.sqrt(qaLenSq);
           out.dot = qaLen === 0 || dl === 0 ? 0 : Math.abs((abx * qax + aby * qay) / (dl * qaLen));
         } else {
           const d1x = p2x - p1x,

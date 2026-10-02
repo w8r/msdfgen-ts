@@ -28,7 +28,8 @@ import { RED, GREEN, BLUE } from "./edge-coloring";
 const PROTECTED = 2;
 const ERROR = 1;
 const PROTECTION_RADIUS_TOLERANCE = 1.001;
-const DEFAULT_MIN_DEVIATION_RATIO = 1.11111111111111111;
+// C++ writes 1.11111111111111111; this is the double that literal rounds to.
+const DEFAULT_MIN_DEVIATION_RATIO = 1.1111111111111112;
 const ARTIFACT_T_EPSILON = 0.01;
 
 // ── Scanline sign correction ──────────────────────────────────────────────────

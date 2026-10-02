@@ -25,7 +25,7 @@ export function parseHmtx(
   numberOfHMetrics: number,
 ): HMetric[] {
   const r = new BinaryReader(buffer, offset);
-  const metrics: HMetric[] = new Array<HMetric>(numGlyphs);
+  const metrics: HMetric[] = [];
   let lastAdvanceWidth = 0;
 
   for (let i = 0; i < numberOfHMetrics; i++) {

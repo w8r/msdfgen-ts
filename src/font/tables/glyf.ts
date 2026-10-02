@@ -15,9 +15,11 @@
  * Composite transforms supported:
  *  ARG_1_AND_2_ARE_WORDS, ARGS_ARE_XY_VALUES,
  *  WE_HAVE_A_SCALE, WE_HAVE_AN_X_AND_Y_SCALE, WE_HAVE_A_TWO_BY_TWO,
- *  USE_MY_METRICS, MORE_COMPONENTS.
+ *  MORE_COMPONENTS.
  *
  * Not supported (silently ignored / treated as identity):
+ *  USE_MY_METRICS — advance widths come from `hmtx`, which already holds the
+ *  composite's own metrics.
  *  ARGS_ARE_XY_VALUES not set (anchor point alignment) — returns origin offset
  *  of 0 for that component.
  */
@@ -66,7 +68,7 @@ const MORE_COMPONENTS = 0x0020;
 const WE_HAVE_AN_X_AND_Y_SCALE = 0x0040;
 const WE_HAVE_A_TWO_BY_TWO = 0x0080;
 // 0x0100 = WE_HAVE_INSTRUCTIONS (ignored)
-const USE_MY_METRICS = 0x0200;
+// 0x0200 = USE_MY_METRICS (ignored, see header)
 // 0x0400 = OVERLAP_COMPOUND (ignored)
 // 0x0800 = SCALED_COMPONENT_OFFSET (ignored)
 
@@ -144,7 +146,7 @@ function _parseSimpleGlyphRaw(r: BinaryReader, numberOfContours: number): RawGly
   if (numberOfContours === 0) return [];
 
   // endPtsOfContours: last point index (inclusive) for each contour
-  const endPts = new Array<number>(numberOfContours);
+  const endPts: number[] = [];
   for (let i = 0; i < numberOfContours; i++) endPts[i] = r.u16();
 
   const numPoints = (endPts[numberOfContours - 1] ?? 0) + 1;

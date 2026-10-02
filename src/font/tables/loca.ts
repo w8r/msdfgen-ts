@@ -26,7 +26,7 @@ export function parseLoca(
 ): number[] {
   const r = new BinaryReader(buffer, offset);
   const count = numGlyphs + 1;
-  const offsets = new Array<number>(count);
+  const offsets: number[] = [];
 
   if (indexToLocFormat === 0) {
     for (let i = 0; i < count; i++) offsets[i] = r.u16() * 2;

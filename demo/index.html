@@ -151,8 +151,23 @@
         flex: 1;
         accent-color: var(--accent);
       }
-      .readout {
+      .row2 {
         grid-column: 1 / -1;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px 20px;
+        align-items: center;
+      }
+      .row2 button {
+        padding: 2px 10px;
+        font: 12px var(--mono);
+      }
+      .label {
+        align-self: center;
+        font: 12px var(--mono);
+        color: var(--muted);
+      }
+      .readout {
         font: 12px var(--mono);
         color: var(--muted);
       }
@@ -382,7 +397,16 @@
           />
           <button id="hero-auto" aria-pressed="true">auto</button>
         </div>
-        <div class="readout" id="hero-readout">&nbsp;</div>
+        <div class="row2">
+          <div class="chips" role="group" aria-label="Atlas size">
+            <span class="label">atlas</span>
+            <button data-ppem="32" aria-pressed="false">32</button>
+            <button data-ppem="48" aria-pressed="true">48</button>
+            <button data-ppem="64" aria-pressed="false">64</button>
+            <span class="label">px/em</span>
+          </div>
+          <div class="readout" id="hero-readout">&nbsp;</div>
+        </div>
       </div>
     </header>
 

@@ -34,46 +34,6 @@ export function cross(ax: number, ay: number, bx: number, by: number): number {
   return ax * by - ay * bx;
 }
 
-/** Dekker splitting constant 2^27 + 1, used by the two-product primitive. */
-const _TWO_PROD_SPLIT = 134217729;
-
-/**
- * 2-D cross product evaluated the way msdfgen's C++ reference build evaluates
- * `crossProduct` — with a single fused multiply-add (floating-point
- * contraction, as emitted by GCC/Clang at `-O2`).  The reference computes
- * `a.x*b.y - a.y*b.x`; the compiler rounds `a.y*b.x` first and then fuses the
- * remaining `a.x*b.y - t` into one `fma`, leaving the multiply unrounded.
- *
- * For perfectly collinear integer control points scaled by a non-power-of-two
- * `unitsPerEm`, the naive double expression rounds to exactly 0 while the
- * contracted form leaves a sub-ULP residual (~1e-21).  That residual decides
- * whether msdfgen keeps a quadratic edge or collapses it to a line, so we must
- * reproduce it here to match the exportshape goldens.
- *
- * The fused `a.x*b.y` term is evaluated exactly via a Dekker two-product.
- *
- * @param ax First vector x.
- * @param ay First vector y.
- * @param bx Second vector x.
- * @param by Second vector y.
- * @returns Cross product a×b with the reference's FMA contraction.
- */
-export function crossFMA(ax: number, ay: number, bx: number, by: number): number {
-  // t = round(a.y * b.x) — rounded product, matching the compiler.
-  const t = ay * bx;
-  // Exact product a.x * b.y = p + e via Dekker two-product.
-  const p = ax * by;
-  const ca = _TWO_PROD_SPLIT * ax;
-  const cb = _TWO_PROD_SPLIT * by;
-  const ax1 = ca - (ca - ax);
-  const ax2 = ax - ax1;
-  const by1 = cb - (cb - by);
-  const by2 = by - by1;
-  const e = ax2 * by2 - (p - ax1 * by1 - ax2 * by1 - ax1 * by2);
-  // fma(ax, by, -t) = (p - t) + e, with the low-order term added last.
-  return p - t + e;
-}
-
 /**
  * Linear interpolation.
  * port of core/arithmetics.hpp: mix

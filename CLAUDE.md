@@ -312,12 +312,12 @@ Closure-friendly constraints (cheap now, painful to retrofit):
   is the first thing to suspect. Revisit this decision once M5's actual rendering is visible:
   confirm a lone flipped texel at a degenerate corner is genuinely imperceptible after AA/media
   reconstruction before considering any other approach.
-  Note: `crossFMA` in `src/math/scalar.ts` (used by `shape/normalize.ts`'s deconverge logic) is
-  a _different_, pre-existing FMA-contraction emulation that predates this decision and was
-  deliberately left alone — gate:m2/m3 are green with it in place against the FMA-off reference,
-  so it isn't causing the problem this note describes. Don't treat its existence as license to
-  add more; if it ever needs touching, apply the same "suspect FMA, verify by toggling the
-  reference build flag" diagnostic before changing it.
+  Note: a second emulation, `crossFMA` (Dekker two-product, used by `emNormalizeShape`'s
+  degenerate-quadratic check), was removed too. It had looked green against the FMA-off reference
+  only because the committed fixtures were still from the FMA-on build. Once they were regenerated,
+  `gate:m2a` failed on exactly the 6 glyphs with collinear quadratic control points, and plain
+  `cross` fixed them. Lesson: after changing the reference build, regenerate the fixtures before
+  trusting any "green against the new reference" claim.
 - **Numerical method substitution is allowed where porting the reference's exact method
   isn't the right tool for this runtime — match the _output_, not necessarily the
   _method_.** `src/shape/segments.ts`'s QUADRATIC `signedDistance` finds real roots of a

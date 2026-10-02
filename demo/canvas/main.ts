@@ -257,7 +257,7 @@ async function main(): Promise<void> {
   for (const px of builtSizes) {
     appendAtlasPreview(root, `auto-tier ${px}px/em`, tierAtlases.get(px)!);
   }
-  root.dataset.ready = "true"; // signal for tools/screenshot.mjs
+  root.dataset.ready = "true"; // signal for tools/screenshot.ts
 }
 
 /** Appends a label + small canvas showing `atlas.texture` as-is (raw RGBA). */

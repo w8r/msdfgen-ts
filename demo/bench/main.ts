@@ -1,16 +1,16 @@
 /**
- * Live, in-browser perf report — companion to tools/bench.mjs and
- * tools/bench-atlas-text.mjs (Node scripts), same methodology, run in
+ * Live, in-browser perf report — companion to tools/bench.ts and
+ * tools/bench-atlas-text.ts (Node scripts), same methodology, run in
  * whatever browser/JS engine actually loads this page. Not a gate:
- * gate:m6 (Node, tools/bench.mjs) is the pass/fail authority — see
+ * gate:m6 (Node, tools/bench.ts) is the pass/fail authority — see
  * docs/m6-perf-investigation.md for the full writeup this page's numbers
  * get checked against. This page exists so a real number is one click
  * away instead of trusted secondhand from CI or a different machine.
  *
- * Iteration counts are lower than the Node tools' (tools/bench.mjs runs
+ * Iteration counts are lower than the Node tools' (tools/bench.ts runs
  * 200 iterations/glyph; this runs 15) — enough for a stable median without
  * freezing the tab for tens of seconds, even over the wider glyph range
- * this page covers (~150 glyphs vs. bench.mjs's single worst-case one).
+ * this page covers (~150 glyphs vs. bench.ts's single worst-case one).
  * Not directly comparable sample-size-for-sample-size, but the methodology
  * (fresh Atlas per iteration, so every generation is genuinely uncached)
  * is identical.
@@ -21,7 +21,7 @@ import { Font, Atlas } from "../../src/index";
 const ROBOTO_URL = `${import.meta.env.BASE_URL}test/fonts/Roboto.ttf`;
 const PTSERIF_URL = `${import.meta.env.BASE_URL}test/fonts/PTSerif-Regular.ttf`;
 
-// Matches tools/bench.mjs's budget (CLAUDE.md M6 gate).
+// Matches tools/bench.ts's budget (CLAUDE.md M6 gate).
 const GLYPH_BUDGET_MS = 3;
 const GLYPH_PIXELS_PER_EM = 48;
 const GLYPH_PXRANGE = 4;
@@ -38,7 +38,7 @@ const GLYPH_CHARS = [
 const GLYPH_WARMUP = 3;
 const GLYPH_ITERATIONS = 15;
 
-// Matches tools/bench-atlas-text.mjs — the two zoom demos' real TEXT/params.
+// Matches tools/bench-atlas-text.ts — the two zoom demos' real TEXT/params.
 interface TextBenchCase {
   name: string;
   pixelsPerEm: number;
@@ -166,7 +166,7 @@ async function main(): Promise<void> {
 
     status.textContent = `Done — ${navigator.userAgent}`;
     runButton.disabled = false;
-    root.dataset.ready = "true"; // signal for tools/screenshot.mjs
+    root.dataset.ready = "true"; // signal for tools/screenshot.ts
   }
 
   runButton.addEventListener("click", () => void run());

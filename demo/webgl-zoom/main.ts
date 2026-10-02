@@ -243,7 +243,7 @@ async function main(): Promise<void> {
   const glOrNull = canvas.getContext("webgl2");
   if (!glOrNull) {
     root.textContent = "WebGL2 is not available in this browser.";
-    root.dataset.ready = "true"; // signal for tools/screenshot.mjs
+    root.dataset.ready = "true"; // signal for tools/screenshot.ts
     return;
   }
   const gl: WebGL2RenderingContext = glOrNull; // narrowed once, used inside closures below
@@ -591,7 +591,7 @@ async function main(): Promise<void> {
   // contents via refreshAtlasPreview() and will keep it in sync on every
   // tier switch (auto-tier zoom and manual size-select alike).
 
-  root.dataset.ready = "true"; // signal for tools/screenshot.mjs
+  root.dataset.ready = "true"; // signal for tools/screenshot.ts
 }
 
 main().catch((err: unknown) => {

@@ -32,7 +32,7 @@ Never adjust tolerances or fixtures to make a test pass.**
 
 - `tools/setup-reference.sh` clones and builds msdfgen (core only, no ext needed for
   shapedesc input; build with FreeType if using `-font` input) at a **pinned commit**.
-- `tools/gen-golden.mjs` produces fixtures: for each (font, glyph, size, pxrange) case it
+- `tools/gen-golden.ts` produces fixtures: for each (font, glyph, size, pxrange) case it
   invokes the CLI with explicit `-scale`/`-translate` (never `-autoframe`) and stores:
   - the float bitmap (`-format fl32` or `bin`)
   - the exact CLI invocation + shape description (`-exportshape`) alongside it
@@ -122,7 +122,7 @@ test/
   diff.test.ts         # golden bitmap comparison
   e2e.test.ts          # SSIM vs OffscreenCanvas rasterization
 tools/
-  setup-reference.sh  gen-golden.mjs  bench.mjs
+  setup-reference.sh  gen-golden.ts  bench.ts
 ```
 
 ## Milestones — work on exactly ONE at a time
@@ -133,7 +133,7 @@ When a gate passes, stop and report; the human reviews before continuing.
 
 ### M0 — Test infrastructure first
 
-Reference binary builds in CI; `gen-golden.mjs` produces fixtures for an initial corpus:
+Reference binary builds in CI; `gen-golden.ts` produces fixtures for an initial corpus:
 3 fonts (e.g. Roboto, Noto Sans, PT Serif — one with heavy diacritics), ~100 glyphs each
 (Latin + Cyrillic + punctuation), sizes 32/48, pxrange 4.
 **Gate:** `npm run gate:m0` — fixtures exist, comparator utility has its own unit tests
@@ -208,7 +208,7 @@ automatable, no CI check for it.
 ### M6 — Size + perf budget
 
 **Gate:** `npm run gate:m6` — minified+gzip size < 50 KB asserted in CI;
-`tools/bench.mjs`: median glyph gen (48px, pxrange 4) < 3 ms on the CI machine,
+`tools/bench.ts`: median glyph gen (48px, pxrange 4) < 3 ms on the CI machine,
 zero allocations in the per-pixel loop verified by a heap-delta assertion around a
 1000-glyph run (allowed delta: the output buffers only).
 

@@ -1,6 +1,5 @@
-#!/usr/bin/env node
 /**
- * tools/gen-golden.mjs
+ * tools/gen-golden.ts
  *
  * Downloads corpus fonts and generates msdfgen golden fixtures.
  * Output: test/golden/<fontId>/<key>/bitmap.fl32 + meta.json + shape.txt
@@ -28,31 +27,41 @@ const BINARY = resolve(__dirname, "msdfgen-ref/build/msdfgen");
 
 // ── corpus configuration ─────────────────────────────────────────────────────
 
+type FontType = "text" | "icon";
+
+interface CorpusFont {
+  id: string;
+  file: string;
+  type: FontType;
+  url: string;
+  /** Zip release: the TTF inside it to extract. */
+  zipEntry?: string;
+}
+
 /** Text + icon fonts to generate fixtures for. */
-const FONTS = [
+const FONTS: CorpusFont[] = [
   {
     id: "roboto",
     file: "Roboto.ttf",
-    type: /** @type {'text'} */ ("text"),
+    type: "text",
     url: "https://raw.githubusercontent.com/google/fonts/main/ofl/roboto/Roboto%5Bwdth%2Cwght%5D.ttf",
   },
   {
     id: "notosans",
     file: "NotoSans.ttf",
-    type: /** @type {'text'} */ ("text"),
+    type: "text",
     url: "https://raw.githubusercontent.com/google/fonts/main/ofl/notosans/NotoSans%5Bwdth%2Cwght%5D.ttf",
   },
   {
     id: "ptserif",
     file: "PTSerif-Regular.ttf",
-    type: /** @type {'text'} */ ("text"),
+    type: "text",
     url: "https://raw.githubusercontent.com/google/fonts/main/ofl/ptserif/PT_Serif-Web-Regular.ttf",
   },
   {
     id: "lucide",
     file: "Lucide.ttf",
-    type: /** @type {'icon'} */ ("icon"),
-    /** Zip release; we extract the TTF inside it. */
+    type: "icon",
     url: "https://github.com/lucide-icons/lucide/releases/download/1.24.0/lucide-font-1.24.0.zip",
     zipEntry: "lucide.ttf",
   },
@@ -110,11 +119,10 @@ const ICON_GLYPH_COUNT = 30;
  *
  * For icon fonts the entire em-box is the glyph, so equal padding on all sides.
  *
- * @param {number} size - Bitmap size in pixels.
- * @param {'text'|'icon'} type - Font type.
- * @returns {{ scale: number, tx: number, ty: number }}
+ * @param size - Bitmap size in pixels.
+ * @param type - Font type.
  */
-function getParams(size, type) {
+function getParams(size: number, type: FontType): { scale: number; tx: number; ty: number } {
   // scale such that 1 em = (size - 2*pxrange) pixels
   const scale = size - 2 * PXRANGE;
   if (type === "icon") {
@@ -131,7 +139,7 @@ function getParams(size, type) {
 // ── download helpers ──────────────────────────────────────────────────────────
 
 /** Fetches a URL to a local path using the built-in fetch API (Node 18+). */
-async function download(url, dest) {
+async function download(url: string, dest: string): Promise<void> {
   console.log(`  Downloading ${url} → ${dest}`);
   const res = await fetch(url);
   if (!res.ok) throw new Error(`HTTP ${res.status} fetching ${url}`);
@@ -143,11 +151,11 @@ async function download(url, dest) {
  * Downloads and extracts a single TTF file from a zip archive.
  * Uses the system `unzip` command (available on macOS and Ubuntu by default).
  *
- * @param {string} zipUrl  - URL of the zip file.
- * @param {string} entry   - Path inside the zip to extract (e.g. "lucide.ttf").
- * @param {string} destTtf - Where to write the extracted TTF.
+ * @param zipUrl  - URL of the zip file.
+ * @param entry   - Path inside the zip to extract (e.g. "lucide.ttf").
+ * @param destTtf - Where to write the extracted TTF.
  */
-async function downloadFromZip(zipUrl, entry, destTtf) {
+async function downloadFromZip(zipUrl: string, entry: string, destTtf: string): Promise<void> {
   const zipPath = `${destTtf}.download.zip`;
   await download(zipUrl, zipPath);
 
@@ -179,20 +187,36 @@ async function downloadFromZip(zipUrl, entry, destTtf) {
 
 // ── msdfgen invocation ────────────────────────────────────────────────────────
 
-/**
- * Runs msdfgen to produce a single fixture.
- *
- * @param {object} opts
- * @param {string} opts.fontPath  - Absolute path to the TTF.
- * @param {string|number} opts.charSpec - Codepoint (number) or `g<index>` string for glyph-index mode.
- * @param {number} opts.size      - Bitmap dimension (square).
- * @param {number} opts.pxrange   - Pixel range.
- * @param {number} opts.scale     - Shape-units-to-pixels scale (em-normalised).
- * @param {number} opts.tx        - X translate in em units.
- * @param {number} opts.ty        - Y translate in em units.
- * @param {string} opts.outDir    - Directory to write bitmap.fl32, meta.json, shape.txt.
- */
-function runMsdfgen({ fontPath, charSpec, size, pxrange, scale, tx, ty, outDir }) {
+interface FixtureJob {
+  /** Absolute path to the TTF. */
+  fontPath: string;
+  /** Codepoint (number) or `g<index>` string for glyph-index mode. */
+  charSpec: string | number;
+  /** Bitmap dimension (square). */
+  size: number;
+  /** Pixel range. */
+  pxrange: number;
+  /** Shape-units-to-pixels scale (em-normalised). */
+  scale: number;
+  /** X translate in em units. */
+  tx: number;
+  /** Y translate in em units. */
+  ty: number;
+  /** Directory to write bitmap.fl32, meta.json, shape.txt. */
+  outDir: string;
+}
+
+/** Runs msdfgen to produce a single fixture. Returns false if the glyph doesn't exist. */
+function runMsdfgen({
+  fontPath,
+  charSpec,
+  size,
+  pxrange,
+  scale,
+  tx,
+  ty,
+  outDir,
+}: FixtureJob): boolean {
   mkdirSync(outDir, { recursive: true });
   const bitmapPath = resolve(outDir, "bitmap.fl32");
   const shapePath = resolve(outDir, "shape.txt");
@@ -203,7 +227,7 @@ function runMsdfgen({ fontPath, charSpec, size, pxrange, scale, tx, ty, outDir }
   // Paths are passed (and recorded in meta.json) relative to the repo root,
   // with the binary run from there — committed fixtures must not embed the
   // generating machine's absolute paths, and `cli` stays runnable from ROOT.
-  const rel = (/** @type {string} */ p) => relative(ROOT, p);
+  const rel = (p: string): string => relative(ROOT, p);
 
   const args = [
     "msdf",
@@ -232,9 +256,9 @@ function runMsdfgen({ fontPath, charSpec, size, pxrange, scale, tx, ty, outDir }
 
   try {
     execFileSync(BINARY, args, { cwd: ROOT, stdio: ["ignore", "ignore", "pipe"] });
-  } catch (/** @type {any} */ err) {
+  } catch (err) {
     // msdfgen exits non-zero for glyphs not in the font — skip silently.
-    const stderr = err.stderr ? err.stderr.toString() : "";
+    const stderr = (err as { stderr?: Buffer }).stderr?.toString() ?? "";
     if (stderr.includes("no glyph") || stderr.includes("not found") || stderr.includes("missing")) {
       return false;
     }
@@ -261,7 +285,7 @@ function runMsdfgen({ fontPath, charSpec, size, pxrange, scale, tx, ty, outDir }
 
 // ── main ──────────────────────────────────────────────────────────────────────
 
-async function main() {
+async function main(): Promise<void> {
   if (!existsSync(BINARY)) {
     console.error(`msdfgen binary not found at:\n  ${BINARY}\nRun: bash tools/setup-reference.sh`);
     process.exit(1);

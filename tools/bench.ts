@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * M6 perf budget (CLAUDE.md M6 gate): median glyph gen (48px, pxrange 4)
  * < 3ms; zero allocations in the per-pixel loop, verified by a heap-delta
@@ -24,28 +23,28 @@
  *     1000 iterations, heap measured (forced GC) before/after. This is an
  *     internal dev tool, not a public-API consumer, so it reaches past
  *     `src/index.ts` into the hot-path modules directly — same convention
- *     as tools/atlas-preview.mjs.
+ *     as tools/atlas-preview.ts.
  *
  * Needs --expose-gc for a reliable heap-delta reading (see package.json's
  * `gate:m6` script for the invocation). Without it, this exits loudly
  * rather than silently skipping or reporting a meaningless number — matches
  * CLAUDE.md's "never silently" convention for environment-dependent checks.
  *
- * Usage: npx tsx --expose-gc tools/bench.mjs
+ * Usage: npx tsx --expose-gc tools/bench.ts
  */
 import { readFileSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
-import { Font } from "../src/font/font.ts";
-import { Atlas } from "../src/atlas-gen.ts";
-import { emNormalizeShape, normalizeShape } from "../src/shape/normalize.ts";
-import { edgeColoringSimple } from "../src/msdf/edge-coloring.ts";
-import { generateMSDF } from "../src/msdf/generate.ts";
-import { distanceSignCorrection, msdfErrorCorrection } from "../src/msdf/error-correction.ts";
+import { Font } from "../src/font/font";
+import { Atlas } from "../src/atlas-gen";
+import { emNormalizeShape, normalizeShape } from "../src/shape/normalize";
+import { edgeColoringSimple } from "../src/msdf/edge-coloring";
+import { generateMSDF } from "../src/msdf/generate";
+import { distanceSignCorrection, msdfErrorCorrection } from "../src/msdf/error-correction";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FONT_PATH = resolve(__dirname, "../test/fonts/Roboto.ttf");
-const CODEPOINT = "@".codePointAt(0);
+const CODEPOINT = "@".codePointAt(0)!;
 const PIXELS_PER_EM = 48;
 const PXRANGE = 4;
 // msdfgen CLI defaults — see src/atlas-gen.ts's ANGLE_THRESHOLD/COLOR_SEED.
@@ -65,19 +64,19 @@ const ALLOC_BUDGET_BYTES = 2 * 1024 * 1024;
 
 let failed = false;
 
-function fail(message) {
+function fail(message: string): void {
   console.error(`FAIL: ${message}`);
   failed = true;
 }
 
-function median(values) {
+function median(values: number[]): number {
   const sorted = [...values].sort((a, b) => a - b);
-  return sorted[Math.floor(sorted.length / 2)];
+  return sorted[Math.floor(sorted.length / 2)]!;
 }
 
 // ── (1) Timing: median uncached single-glyph generation via Atlas ──────────
-function benchTiming(font) {
-  const times = [];
+function benchTiming(font: Font): void {
+  const times: number[] = [];
   for (let i = 0; i < TIMING_WARMUP + TIMING_ITERATIONS; i++) {
     const atlas = new Atlas(font, { pixelsPerEm: PIXELS_PER_EM, pxrange: PXRANGE });
     const t0 = performance.now();
@@ -100,9 +99,9 @@ function benchTiming(font) {
 // ── (2) Allocation: heap delta around the per-pixel hot loop, output buffer
 // preallocated once and reused — isolates the loop from per-glyph setup and
 // from Atlas's (allowed) per-glyph output-buffer allocation. ──────────────
-function benchAllocation(font) {
+function benchAllocation(font: Font): void {
   if (typeof global.gc !== "function") {
-    fail("global.gc() unavailable — run with --expose-gc (see tools/bench.mjs's usage doc)");
+    fail("global.gc() unavailable — run with --expose-gc (see tools/bench.ts's usage doc)");
     return;
   }
 
@@ -153,7 +152,7 @@ function benchAllocation(font) {
 }
 
 // Buffer.buffer may be a larger pooled ArrayBuffer — slice to the exact
-// file range (same pattern as tools/atlas-preview.mjs).
+// file range (same pattern as tools/atlas-preview.ts).
 const fileBuf = readFileSync(FONT_PATH);
 const font = new Font(
   fileBuf.buffer.slice(fileBuf.byteOffset, fileBuf.byteOffset + fileBuf.byteLength),
@@ -162,8 +161,8 @@ benchTiming(font);
 benchAllocation(font);
 
 if (failed) {
-  console.error("\ntools/bench.mjs: FAILED — see above.");
+  console.error("\ntools/bench.ts: FAILED — see above.");
   process.exitCode = 1;
 } else {
-  console.log("\ntools/bench.mjs: all checks passed.");
+  console.log("\ntools/bench.ts: all checks passed.");
 }

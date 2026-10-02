@@ -111,7 +111,7 @@ DevTools' Rendering tab -> "Frame Rendering Stats").
   identical chunk hash in `build:demo` output). User also flagged atlas
   generation times as "alarming" while testing longer text per the checklist
   row above — noted as expected and explicitly M6's scope (median glyph gen
-  < 3ms budget, `tools/bench.mjs`, not built yet); the readout's `genMs` is
+  < 3ms budget, `tools/bench.ts`, not built yet); the readout's `genMs` is
   a whole-string layout total (scales with glyph count), not a per-glyph
   number, so a longer test string reads slower by design — worth remembering
   when M6's bench harness lands, so it measures per-glyph, not per-string.

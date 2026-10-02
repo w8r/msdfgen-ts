@@ -186,7 +186,7 @@ async function main(): Promise<void> {
 
   if (!navigator.gpu) {
     root.textContent = "WebGPU is not available in this browser (navigator.gpu is undefined).";
-    root.dataset.ready = "true"; // signal for tools/screenshot.mjs
+    root.dataset.ready = "true"; // signal for tools/screenshot.ts
     return;
   }
   const adapter = await navigator.gpu.requestAdapter();
@@ -637,7 +637,7 @@ async function main(): Promise<void> {
 
   render();
   await device.queue.onSubmittedWorkDone(); // wait for the first GPU frame to actually finish before signaling ready
-  root.dataset.ready = "true"; // signal for tools/screenshot.mjs
+  root.dataset.ready = "true"; // signal for tools/screenshot.ts
 }
 
 main().catch((err: unknown) => {

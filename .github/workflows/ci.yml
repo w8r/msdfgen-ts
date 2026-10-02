@@ -107,7 +107,7 @@ jobs:
         run: |
           cp -R test/golden "$RUNNER_TEMP/golden-committed"
           find test/golden -name bitmap.fl32 -delete
-          node tools/gen-golden.mjs
+          npx tsx tools/gen-golden.ts
           npx tsx tools/check-golden-regen.ts "$RUNNER_TEMP/golden-committed" test/golden
 
       - name: gate:m0 (post-regen)

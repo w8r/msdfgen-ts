@@ -514,7 +514,7 @@ calls per pixel-edge test (`qaLen`, `distB`, one per curve-interior root
 from `cubicRoots`, up to 3) where only the eventual winner's magnitude is
 ever used — every losing candidate's sqrt was pure waste. `sqrt` is
 monotonic on `[0, ∞)`, so every `<`/`<=` comparison against it produces
-the *identical* ordering when done on the squared values instead — this
+the _identical_ ordering when done on the squared values instead — this
 isn't an approximation, it's the same comparison with the rounding step
 removed, not added. Restructured to track `minDistanceSq` (and a
 separate sign) through both endpoint checks and the root loop, taking
@@ -544,7 +544,7 @@ however many roots/branches each one walks). Micro-optimizing arithmetic
 inside a function that's mostly call/dispatch overhead doesn't pay off —
 closing the remaining ~3.3x gap (`9.876ms` vs. `3ms`) likely needs
 something structural: fewer calls (spatial pruning — previously explored
-above and found not to help *this* glyph specifically, since `@`'s edges
+above and found not to help _this_ glyph specifically, since `@`'s edges
 are all close together by construction as the pathological case; may
 still help less-dense glyphs) or a fundamentally different data layout
 for the pixel loop (flattening edge iteration the way the perpendicular-

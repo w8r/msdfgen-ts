@@ -56,13 +56,24 @@ function encodePNG(rgba, width, height) {
     raw.set(rgba.subarray(y * stride, y * stride + stride), y * (stride + 1) + 1);
   }
   const idat = deflateSync(raw);
-  return Buffer.concat([sig, chunk("IHDR", ihdr), chunk("IDAT", idat), chunk("IEND", Buffer.alloc(0))]);
+  return Buffer.concat([
+    sig,
+    chunk("IHDR", ihdr),
+    chunk("IDAT", idat),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
 }
 
 // ── Build atlases ────────────────────────────────────────────────────────────
 
 const jobs = [
-  { name: "roboto-ascii", font: "Roboto.ttf", pixelsPerEm: 48, pxrange: 4, codepoints: range(0x20, 0x7e) },
+  {
+    name: "roboto-ascii",
+    font: "Roboto.ttf",
+    pixelsPerEm: 48,
+    pxrange: 4,
+    codepoints: range(0x20, 0x7e),
+  },
   {
     name: "notosans-mixed",
     font: "NotoSans.ttf",
@@ -70,7 +81,13 @@ const jobs = [
     pxrange: 4,
     codepoints: [...range(0x41, 0x5a), ...range(0x0410, 0x042f)], // Latin + Cyrillic uppercase
   },
-  { name: "lucide-icons", font: "Lucide.ttf", pixelsPerEm: 48, pxrange: 4, codepoints: range(0xe000, 0xe000 + 63) },
+  {
+    name: "lucide-icons",
+    font: "Lucide.ttf",
+    pixelsPerEm: 48,
+    pxrange: 4,
+    codepoints: range(0xe000, 0xe000 + 63),
+  },
 ];
 
 function range(a, b) {

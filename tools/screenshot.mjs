@@ -49,7 +49,8 @@ if (!urlPath || urlPath.startsWith("--")) {
   process.exit(1);
 }
 const outIdx = args.indexOf("--out");
-const outFile = outIdx >= 0 ? args[outIdx + 1] : resolve(OUT_DIR, `${basename(urlPath, ".html")}.png`);
+const outFile =
+  outIdx >= 0 ? args[outIdx + 1] : resolve(OUT_DIR, `${basename(urlPath, ".html")}.png`);
 const widthIdx = args.indexOf("--width");
 const width = widthIdx >= 0 ? Number(args[widthIdx + 1]) : 1000;
 const heightIdx = args.indexOf("--height");

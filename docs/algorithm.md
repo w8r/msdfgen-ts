@@ -12,15 +12,15 @@ Each stage operates on a well-typed data boundary; the hot path runs through
 
 ![Font-to-bitmap pipeline](01-pipeline.svg)
 
-| Node | Role | Output type |
-|---|---|---|
-| Font File | External input | `ArrayBuffer` |
-| TT Parser | `sfnt` + table readers | glyph tables |
-| Glyph Shape | Resolved composite contours | `Shape` |
-| Edge Coloring | `edgeColoringSimple` | colored `Shape` |
-| **MSDF Generate** | Per-pixel signed-distance loop | `Float32Array` |
-| Error Correct | `protectCorners` → `findErrors` → `apply` | corrected bitmap |
-| Atlas | Shelf packer + texture upload | `rgba8unorm` |
+| Node              | Role                                      | Output type      |
+| ----------------- | ----------------------------------------- | ---------------- |
+| Font File         | External input                            | `ArrayBuffer`    |
+| TT Parser         | `sfnt` + table readers                    | glyph tables     |
+| Glyph Shape       | Resolved composite contours               | `Shape`          |
+| Edge Coloring     | `edgeColoringSimple`                      | colored `Shape`  |
+| **MSDF Generate** | Per-pixel signed-distance loop            | `Float32Array`   |
+| Error Correct     | `protectCorners` → `findErrors` → `apply` | corrected bitmap |
+| Atlas             | Shelf packer + texture upload             | `rgba8unorm`     |
 
 ---
 
@@ -55,15 +55,15 @@ distance math becomes pixel colour.
 
 ![Data abstraction layer stack](03-data-layers.svg)
 
-| Layer | Boundary contract |
-|---|---|
-| L1 GPU Sampler | `rgba8unorm` texture bound to WGSL `texture_2d<f32>`; median of three channels in shader |
-| L2 Atlas Texture | Shelf-packed `Float32Array` → `Uint8Array` (`clamp(v*256, 0, 255) \| 0`); grows as power-of-two |
-| L3 **MSDF Bitmap** | `Float32Array` of shape `width × height × 3`; numerically matches C++ msdfgen ≤ 1×10⁻⁴ |
-| L4 Colored Shape | `Shape` with `EdgeSegment.color` bitmask set per edge by `edgeColoringSimple` |
-| L5 Normalized Shape | Contours with consistent winding; scanline sign-correction applied |
-| L6 Font Outline | Quadratic splines from `glyf`; composite components resolved and transformed |
-| L7 Binary Font | Raw TTF/OTF `ArrayBuffer` read via zero-copy `DataView` cursor |
+| Layer               | Boundary contract                                                                               |
+| ------------------- | ----------------------------------------------------------------------------------------------- |
+| L1 GPU Sampler      | `rgba8unorm` texture bound to WGSL `texture_2d<f32>`; median of three channels in shader        |
+| L2 Atlas Texture    | Shelf-packed `Float32Array` → `Uint8Array` (`clamp(v*256, 0, 255) \| 0`); grows as power-of-two |
+| L3 **MSDF Bitmap**  | `Float32Array` of shape `width × height × 3`; numerically matches C++ msdfgen ≤ 1×10⁻⁴          |
+| L4 Colored Shape    | `Shape` with `EdgeSegment.color` bitmask set per edge by `edgeColoringSimple`                   |
+| L5 Normalized Shape | Contours with consistent winding; scanline sign-correction applied                              |
+| L6 Font Outline     | Quadratic splines from `glyf`; composite components resolved and transformed                    |
+| L7 Binary Font      | Raw TTF/OTF `ArrayBuffer` read via zero-copy `DataView` cursor                                  |
 
 ---
 
@@ -75,13 +75,13 @@ in the [0, 1] em-square — no other step may divide by `unitsPerEm`.
 
 ![Shape creation flowchart](04-shape-creation.svg)
 
-| Step | What happens |
-|---|---|
-| Parse Raw Outline | Reads on/off-curve flag bytes; recurses into composite components applying each component's transform matrix |
-| Insert Implied Midpoints | TrueType-specific: consecutive off-curve points imply an on-curve midpoint between them; these are inserted explicitly |
-| Assemble EdgeSegments | Each on→off→on run becomes `QUADRATIC`; on→on runs become `LINEAR`; a collinear quadratic (cross = 0 after FMA) is collapsed to `LINEAR` |
-| **emNormalizeShape** | Divides all control-point coordinates by `unitsPerEm`; single named boundary — no other code may do this division |
-| normalizeShape | Orients all contours to consistent winding; deconverges convergent corner curves (splits/nudges); applies scanline sign correction for fill rule |
+| Step                     | What happens                                                                                                                                     |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Parse Raw Outline        | Reads on/off-curve flag bytes; recurses into composite components applying each component's transform matrix                                     |
+| Insert Implied Midpoints | TrueType-specific: consecutive off-curve points imply an on-curve midpoint between them; these are inserted explicitly                           |
+| Assemble EdgeSegments    | Each on→off→on run becomes `QUADRATIC`; on→on runs become `LINEAR`; a collinear quadratic (cross = 0 after FMA) is collapsed to `LINEAR`         |
+| **emNormalizeShape**     | Divides all control-point coordinates by `unitsPerEm`; single named boundary — no other code may do this division                                |
+| normalizeShape           | Orients all contours to consistent winding; deconverges convergent corner curves (splits/nudges); applies scanline sign correction for fill rule |
 
 ---
 
@@ -94,11 +94,11 @@ output would be an ordinary SDF.
 
 ![Edge coloring algorithm](05-edge-coloring.svg)
 
-| Contour type | Strategy |
-|---|---|
-| 0 corners (smooth, e.g. a circle) | Distribute CYAN / MAGENTA / YELLOW in proportion to arc length |
-| 1 corner | `switchColor` at the corner; balance the two halves with a second switch (trichrome split) |
-| ≥ 2 corners *(most contours)* | Start with seed color; call `switchColor` at each corner, keeping current color between corners |
+| Contour type                      | Strategy                                                                                        |
+| --------------------------------- | ----------------------------------------------------------------------------------------------- |
+| 0 corners (smooth, e.g. a circle) | Distribute CYAN / MAGENTA / YELLOW in proportion to arc length                                  |
+| 1 corner                          | `switchColor` at the corner; balance the two halves with a second switch (trichrome split)      |
+| ≥ 2 corners _(most contours)_     | Start with seed color; call `switchColor` at each corner, keeping current color between corners |
 
 Valid per-edge colors are **CYAN** (G+B channels), **MAGENTA** (R+B), and **YELLOW** (R+G).
 **WHITE** (all three channels) appears only for single-edge degenerate contours.

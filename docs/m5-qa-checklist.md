@@ -145,11 +145,11 @@ DevTools' Rendering tab -> "Frame Rendering Stats").
   lines joined by real `\n` characters — discovered `\n` wasn't a line break
   at all, `Atlas.layout()` has no concept of one (it lays out one baseline).
   Asked whether demos could support `\n`. Added it at the library level
-  rather than duplicating line-splitting per demo: new `Atlas.layoutMultiline
-  (text)` in `src/atlas-gen.ts`, splitting on `\n`, each line run through the
+  rather than duplicating line-splitting per demo: new
+  `Atlas.layoutMultiline(text)` in `src/atlas-gen.ts`, splitting on `\n`, each line run through the
   existing `.layout()` independently (kerning never crosses a break), stacked
-  by the font's own line-height metric (`(ascender − descender + lineGap) /
-  unitsPerEm`). `LaidOutGlyph` gained a `penY` field (0 for `.layout()`,
+  by the font's own line-height metric
+  (`(ascender − descender + lineGap) / unitsPerEm`). `LaidOutGlyph` gained a `penY` field (0 for `.layout()`,
   additive/non-breaking — existing consumers destructuring `{glyph, penX}`
   are unaffected). `src/atlas-worker.ts`'s protocol updated to match
   (`BuiltGlyph.penY`, `BuiltResponse.heightEm`) so the worker path stays in

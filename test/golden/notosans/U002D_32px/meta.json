@@ -1,5 +1,5 @@
 {
-  "font": "/Users/amilevski/Projects/msdfgen-ts/test/fonts/NotoSans.ttf",
+  "font": "test/fonts/NotoSans.ttf",
   "charSpec": "45",
   "size": 32,
   "width": 32,
@@ -9,5 +9,5 @@
   "scale": 24,
   "tx": 0.16666666666666666,
   "ty": 0.41666666666666663,
-  "cli": "/Users/amilevski/Projects/msdfgen-ts/tools/msdfgen-ref/build/msdfgen msdf -font /Users/amilevski/Projects/msdfgen-ts/test/fonts/NotoSans.ttf 45 -o /Users/amilevski/Projects/msdfgen-ts/test/golden/notosans/U002D_32px/bitmap.fl32 -format fl32 -dimensions 32 32 -pxrange 4 -scale 24 -translate 0.166667 0.416667 -emnormalize -exportshape /Users/amilevski/Projects/msdfgen-ts/test/golden/notosans/U002D_32px/shape.txt -scanline"
+  "cli": "tools/msdfgen-ref/build/msdfgen msdf -font test/fonts/NotoSans.ttf 45 -o test/golden/notosans/U002D_32px/bitmap.fl32 -format fl32 -dimensions 32 32 -pxrange 4 -scale 24 -translate 0.166667 0.416667 -emnormalize -exportshape test/golden/notosans/U002D_32px/shape.txt -scanline"
 }

@@ -186,7 +186,7 @@ async function main(): Promise<void> {
   status.textContent =
     `Done — ${gids.length} icons (of ${font.numGlyphs} total glyphs, including .notdef), ` +
     `packed into a ${atlas.width}×${atlas.height} atlas.`;
-  root.dataset.ready = "true"; // signal for tools/screenshot.mjs
+  root.dataset.ready = "true"; // signal for tools/screenshot.ts
 }
 
 main().catch((err: unknown) => {

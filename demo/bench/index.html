@@ -97,11 +97,11 @@
   <body>
     <h1>msdfgen-ts — perf report</h1>
     <p>
-      Live, in-browser companion to <code>tools/bench.mjs</code> and
-      <code>tools/bench-atlas-text.mjs</code> — same methodology, run in this browser's JS engine
+      Live, in-browser companion to <code>tools/bench.ts</code> and
+      <code>tools/bench-atlas-text.ts</code> — same methodology, run in this browser's JS engine
       instead of Node, so a viewer can see the real number for their own machine/browser rather than
       trusting a number from CI or a different machine. Not a gate: <code>gate:m6</code> (Node,
-      <code>tools/bench.mjs</code>) is the actual pass/fail authority — see
+      <code>tools/bench.ts</code>) is the actual pass/fail authority — see
       <a href="https://github.com/w8r/msdfgen-ts/blob/main/docs/m6-perf-investigation.md"
         >docs/m6-perf-investigation.md</a
       >
@@ -113,7 +113,7 @@
 
       <h2>Per-glyph generation (Roboto.ttf, 48px/em, pxrange 4)</h2>
       <p>
-        Matches <code>tools/bench.mjs</code>'s methodology exactly (fresh <code>Atlas</code> per
+        Matches <code>tools/bench.ts</code>'s methodology exactly (fresh <code>Atlas</code> per
         iteration, so every generation is genuinely uncached), over a wide representative range —
         full Latin upper/lowercase, digits, common punctuation, and a Cyrillic sample, matching
         CLAUDE.md M0's corpus scope — rather than a handful of curated cases. Median of 15 runs
@@ -138,7 +138,7 @@
 
       <h2>Whole-string atlas generation (PTSerif-Regular.ttf)</h2>
       <p>
-        Matches <code>tools/bench-atlas-text.mjs</code>: the exact <code>TEXT</code>,
+        Matches <code>tools/bench-atlas-text.ts</code>: the exact <code>TEXT</code>,
         <code>pixelsPerEm</code>/<code>pxrange</code>, and font each zoom demo actually uses — the
         real number behind their "last atlas gen" readout on first load.
       </p>

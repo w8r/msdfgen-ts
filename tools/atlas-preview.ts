@@ -1,10 +1,9 @@
-#!/usr/bin/env node
 /**
  * Dumps a few font atlases to PNG for visual inspection.
  * Dev tooling only — not part of the library, not size/dependency-budgeted.
  * Uses only Node built-ins (zlib for DEFLATE) so it needs no new dependency.
  *
- * Usage: npx tsx tools/atlas-preview.mjs
+ * Usage: npx tsx tools/atlas-preview.ts
  */
 import { readFileSync, writeFileSync, mkdirSync } from "fs";
 import { deflateSync } from "zlib";
@@ -26,12 +25,12 @@ for (let n = 0; n < 256; n++) {
   for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
   CRC_TABLE[n] = c >>> 0;
 }
-function crc32(buf) {
+function crc32(buf: Uint8Array): number {
   let c = 0xffffffff;
-  for (let i = 0; i < buf.length; i++) c = CRC_TABLE[(c ^ buf[i]) & 0xff] ^ (c >>> 8);
+  for (let i = 0; i < buf.length; i++) c = CRC_TABLE[(c ^ buf[i]!) & 0xff]! ^ (c >>> 8);
   return (c ^ 0xffffffff) >>> 0;
 }
-function chunk(type, data) {
+function chunk(type: string, data: Buffer): Buffer {
   const typeBuf = Buffer.from(type, "ascii");
   const len = Buffer.alloc(4);
   len.writeUInt32BE(data.length, 0);
@@ -39,7 +38,7 @@ function chunk(type, data) {
   crcBuf.writeUInt32BE(crc32(Buffer.concat([typeBuf, data])), 0);
   return Buffer.concat([len, typeBuf, data, crcBuf]);
 }
-function encodePNG(rgba, width, height) {
+function encodePNG(rgba: Uint8Array, width: number, height: number): Buffer {
   const sig = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
   const ihdr = Buffer.alloc(13);
   ihdr.writeUInt32BE(width, 0);
@@ -90,8 +89,8 @@ const jobs = [
   },
 ];
 
-function range(a, b) {
-  const out = [];
+function range(a: number, b: number): number[] {
+  const out: number[] = [];
   for (let i = a; i <= b; i++) out.push(i);
   return out;
 }
@@ -103,7 +102,7 @@ for (const job of jobs) {
   const atlas = new Atlas(font, { pixelsPerEm: job.pixelsPerEm, pxrange: job.pxrange });
 
   let packed = 0;
-  const cps = [];
+  const cps: number[] = [];
   for (const cp of job.codepoints) {
     if (font.glyphId(cp) === 0) continue; // skip .notdef (not in this font)
     cps.push(cp);
@@ -119,9 +118,9 @@ for (const job of jobs) {
   // this is what the WGSL median shader reconstructs at render time.
   const recon = Buffer.alloc(atlas.texture.length);
   for (let i = 0; i < atlas.texture.length; i += 4) {
-    const r = atlas.texture[i],
-      g = atlas.texture[i + 1],
-      b = atlas.texture[i + 2];
+    const r = atlas.texture[i]!,
+      g = atlas.texture[i + 1]!,
+      b = atlas.texture[i + 2]!;
     const median = Math.max(Math.min(r, g), Math.min(Math.max(r, g), b));
     const v = median >= 128 ? 255 : 0;
     recon[i] = recon[i + 1] = recon[i + 2] = v;

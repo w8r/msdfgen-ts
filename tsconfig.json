@@ -12,6 +12,6 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["src/**/*", "test/**/*"],
-  "exclude": ["node_modules", "dist"]
+  "include": ["src/**/*", "test/**/*", "tools/**/*"],
+  "exclude": ["node_modules", "dist", "tools/msdfgen-ref", "tools/*-out"]
 }

@@ -1,12 +1,12 @@
 /**
  * Vitest benchmarks for the MSDF hot path.
  *
- * Non-gating — `npm run gate:m6` (tools/bench.mjs) is the actual pass/fail
+ * Non-gating — `npm run gate:m6` (tools/bench.ts) is the actual pass/fail
  * budget check (median < 3ms, heap-delta bounded). This file is for
  * developer-facing comparative numbers (`npm run bench:vitest`, or
  * `vitest bench --compare` against a saved baseline) while iterating on
  * `generate.ts` / `segments.ts` / `error-correction.ts` — same corpus and
- * params as tools/bench.mjs so the two stay comparable.
+ * params as tools/bench.ts so the two stay comparable.
  *
  * See docs/m6-perf-investigation.md for the profiling history behind these
  * cases.
@@ -55,7 +55,7 @@ describe("generateMSDF (uncached, full per-glyph pipeline via Atlas)", () => {
 });
 
 describe("generateMSDF hot-path only (pixel/edge loop, no shape parse/normalize)", () => {
-  // Same recipe as tools/bench.mjs's benchAllocation: probe an Atlas glyph
+  // Same recipe as tools/bench.ts's benchAllocation: probe an Atlas glyph
   // for its w/h/tx/ty (planeLeft = -tx, planeBottom = -ty — see
   // src/atlas-gen.ts's Atlas._generateForGlyphId), then drive
   // generateMSDF/distanceSignCorrection/msdfErrorCorrection directly with a

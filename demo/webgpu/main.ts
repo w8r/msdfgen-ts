@@ -183,7 +183,7 @@ async function main(): Promise<void> {
 
   if (!navigator.gpu) {
     root.textContent = "WebGPU is not available in this browser (navigator.gpu is undefined).";
-    root.dataset.ready = "true"; // signal for tools/screenshot.mjs
+    root.dataset.ready = "true"; // signal for tools/screenshot.ts
     return;
   }
 
@@ -381,7 +381,7 @@ async function main(): Promise<void> {
     appendAtlasPreview(root, `auto-tier ${px}px/em`, tierAtlases.get(px)!.atlas);
   }
 
-  root.dataset.ready = "true"; // signal for tools/screenshot.mjs
+  root.dataset.ready = "true"; // signal for tools/screenshot.ts
 }
 
 /** Creates an rgba8unorm GPU texture, uploads `atlas.texture`, returns it. */

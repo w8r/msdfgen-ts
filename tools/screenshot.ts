@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Reusable dev-server + headless-Chromium screenshot tool.
  *
@@ -11,16 +10,16 @@
  * writes a full-page screenshot.
  *
  * Usage:
- *   node tools/screenshot.mjs <path> [--out <file>] [--width N] [--height N]
+ *   npx tsx tools/screenshot.ts <path> [--out <file>] [--width N] [--height N]
  *
  * Examples:
- *   node tools/screenshot.mjs /demo/canvas/index.html
- *   node tools/screenshot.mjs /demo/webgpu/index.html --out /tmp/gpu.png
+ *   npx tsx tools/screenshot.ts /demo/canvas/index.html
+ *   npx tsx tools/screenshot.ts /demo/webgpu/index.html --out /tmp/gpu.png
  *
  * Extra Chromium launch args (e.g. WebGPU CI flags) can be passed via the
  * SCREENSHOT_CHROMIUM_ARGS env var, space-separated:
  *   SCREENSHOT_CHROMIUM_ARGS="--enable-unsafe-webgpu --enable-features=Vulkan" \
- *     node tools/screenshot.mjs /demo/webgpu/index.html
+ *     npx tsx tools/screenshot.ts /demo/webgpu/index.html
  *
  * First-time setup: `npm run screenshot:setup` (downloads Chromium for
  * Playwright — not automatic on `npm install`, same philosophy as
@@ -45,19 +44,22 @@ const PORT = 5199; // dedicated port, isolated from any `npm run dev` already ru
 const args = process.argv.slice(2);
 const urlPath = args[0];
 if (!urlPath || urlPath.startsWith("--")) {
-  console.error("Usage: node tools/screenshot.mjs <path> [--out <file>] [--width N] [--height N]");
+  console.error(
+    "Usage: npx tsx tools/screenshot.ts <path> [--out <file>] [--width N] [--height N]",
+  );
   process.exit(1);
 }
 const outIdx = args.indexOf("--out");
 const outFile =
-  outIdx >= 0 ? args[outIdx + 1] : resolve(OUT_DIR, `${basename(urlPath, ".html")}.png`);
+  (outIdx >= 0 ? args[outIdx + 1] : undefined) ??
+  resolve(OUT_DIR, `${basename(urlPath, ".html")}.png`);
 const widthIdx = args.indexOf("--width");
 const width = widthIdx >= 0 ? Number(args[widthIdx + 1]) : 1000;
 const heightIdx = args.indexOf("--height");
 const height = heightIdx >= 0 ? Number(args[heightIdx + 1]) : 600;
 
 /** Polls `http://localhost:{port}` until it responds or `timeoutMs` elapses. */
-async function waitForPort(port, timeoutMs = 30000) {
+async function waitForPort(port: number, timeoutMs = 30000): Promise<void> {
   const start = Date.now();
   for (;;) {
     try {
@@ -70,7 +72,23 @@ async function waitForPort(port, timeoutMs = 30000) {
   }
 }
 
-async function main() {
+/** True if something already answers HTTP on `port`. */
+async function isListening(port: number): Promise<boolean> {
+  try {
+    await fetch(`http://localhost:${port}`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function main(): Promise<void> {
+  // --strictPort makes our Vite exit if the port is taken, but waitForPort
+  // would then happily screenshot whatever other server owns it.
+  if (await isListening(PORT)) {
+    console.error(`Port ${PORT} is already in use by another server. Stop it, or change PORT.`);
+    process.exit(1);
+  }
   const vite = spawn("npx", ["vite", "--port", String(PORT), "--strictPort"], {
     cwd: ROOT,
     stdio: ["ignore", "pipe", "pipe"],

@@ -4,7 +4,7 @@
  * NOT part of the M5 deliverable (CLAUDE.md's mission names WebGPU as the
  * shipped interactive demo) — this page exists purely so the same
  * instanced-quad MSDF rendering can be verified pixel-for-pixel via
- * tools/screenshot.mjs in environments without a WebGPU adapter. Headless
+ * tools/screenshot.ts in environments without a WebGPU adapter. Headless
  * Chromium's SwiftShader gives WebGL2 a real (software) GPU adapter even
  * where navigator.gpu.requestAdapter() fails, so this is the practical way
  * to catch layout/UV/reconstruction bugs before real WebGPU hardware is
@@ -229,7 +229,7 @@ async function main(): Promise<void> {
   const probe = document.createElement("canvas").getContext("webgl2");
   if (!probe) {
     root.textContent = "WebGL2 is not available in this browser.";
-    root.dataset.ready = "true"; // signal for tools/screenshot.mjs
+    root.dataset.ready = "true"; // signal for tools/screenshot.ts
     return;
   }
 
@@ -313,7 +313,7 @@ async function main(): Promise<void> {
     appendAtlasPreview(root, `auto-tier ${px}px/em`, tierAtlases.get(px)!.atlas);
   }
 
-  root.dataset.ready = "true"; // signal for tools/screenshot.mjs
+  root.dataset.ready = "true"; // signal for tools/screenshot.ts
 }
 
 main().catch((err: unknown) => {

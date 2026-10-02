@@ -184,7 +184,7 @@ describe("golden fixtures", () => {
     // PT Serif period is a round dot sitting on the baseline (~0.08 em tall):
     //   expected ink rows (y-up): ≈ 8–14.
     //
-    // Measured row maxima (see tools/gen-golden.mjs run output):
+    // Measured row maxima (see tools/gen-golden.ts run output):
     //   rows  0– 7 → 0.000  (below the dot, outside pxrange=4)
     //   rows  8–14 → 0.172…0.859  (period dot — inside / edge)
     //   rows 15–31 → 0.000  (above the dot, outside)

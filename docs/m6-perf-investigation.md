@@ -10,7 +10,7 @@ and `src/math/scalar.ts` are unmodified.
 
 CLAUDE.md, M6:
 
-> `tools/bench.mjs`: median glyph gen (48px, pxrange 4) < 3 ms on the CI
+> `tools/bench.ts`: median glyph gen (48px, pxrange 4) < 3 ms on the CI
 > machine, zero allocations in the per-pixel loop verified by a heap-delta
 > assertion around a 1000-glyph run (allowed delta: the output buffers only).
 
@@ -281,7 +281,7 @@ independent of the perf question.
 
 ### But it doesn't close the gap alone
 
-End-to-end, with the fixed solver wired in (`tools/bench.mjs` +
+End-to-end, with the fixed solver wired in (`tools/bench.ts` +
 per-glyph timing, Roboto.ttf, 48px/em, pxrange 4):
 
 ```
@@ -290,7 +290,7 @@ per-glyph timing, Roboto.ttf, 48px/em, pxrange 4):
 'o':    6.578ms   4.329ms  1.52x
 'e':    5.775ms   4.090ms  1.41x
 'g':   10.561ms   7.461ms  1.42x
-'@':   32.398ms  21.146ms  1.53x (bench.mjs's own careful run: 1.78x)
+'@':   32.398ms  21.146ms  1.53x (bench.ts's own careful run: 1.78x)
 'M':    3.498ms   3.643ms  ~1.0x (within noise)
 'W':    5.237ms   5.164ms  ~1.0x (within noise)
 '%':   15.312ms  10.814ms  1.42x
@@ -388,7 +388,7 @@ With both the cubic solver swap and this hoist in place:
 'W':    5.237ms    5.164ms      3.490ms      1.50x
 '&':   12.352ms    8.404ms      4.988ms      2.48x
 '%':   15.312ms   10.814ms      6.227ms      2.46x
-'@':   32.398ms   21.146ms     10.140ms      3.20x  (bench.mjs's own careful run)
+'@':   32.398ms   21.146ms     10.140ms      3.20x  (bench.ts's own careful run)
 ```
 
 **Four of nine test glyphs are now under the 3ms budget** (`A`, `o`, `e`,
@@ -421,8 +421,8 @@ adjacent to) before guessing at the next target.
 User noticed the `webgpu-zoom`/`webgl-zoom` demos' "last atlas gen" readout
 didn't look "monumentally" faster after both optimizations, despite the
 per-glyph numbers above. Worth checking with a real number instead of
-eyeballing a live readout — `tools/bench-atlas-text.mjs` (new, non-gating
-diagnostic companion to `bench.mjs`) measures the exact thing the readout
+eyeballing a live readout — `tools/bench-atlas-text.ts` (new, non-gating
+diagnostic companion to `bench.ts`) measures the exact thing the readout
 shows: `Atlas.layoutMultiline()` over each demo's actual `TEXT` constant,
 at its actual `pixelsPerEm`/`pxrange`, with its actual font
 (`PTSerif-Regular.ttf` — the bench glyphs above used Roboto, a different
@@ -446,7 +446,7 @@ before and after are far above a 16ms interactive frame budget either way
 (362ms and 147ms both read as "a stall" to the eye), so the relative win
 is easy to underestimate without a controlled measurement. This is
 exactly the kind of check worth having on hand rather than re-deriving:
-`tools/bench-atlas-text.mjs` is reusable — re-run it after any future
+`tools/bench-atlas-text.ts` is reusable — re-run it after any future
 change to the hot path to catch a regression (or confirm a further win)
 against this exact real-world workload, not just the synthetic
 single-glyph one `gate:m6` checks.
@@ -468,7 +468,7 @@ different tiers.
 Per request, unified them: `webgl-zoom`'s `DEFAULT_ATLAS_SIZE` changed
 40 → 64 (already a valid tier in its own `ATLAS_SIZES`, so a one-line
 change; `PXRANGE_RATIO` was already 8 in both, so `pxrange` follows
-automatically). `tools/bench-atlas-text.mjs` and `demo/bench/main.ts`'s
+automatically). `tools/bench-atlas-text.ts` and `demo/bench/main.ts`'s
 `webgl-zoom` case updated to match (pixelsPerEm/pxrange 40/5 → 64/8).
 Re-measured: `webgpu-zoom` 148.78ms vs. `webgl-zoom` 133.13ms — 1.12x,
 matching the remaining unique-glyph-count difference (25/21 = 1.19x)
@@ -481,7 +481,7 @@ the other direction instead. `webgpu-zoom`'s `ATLAS_SIZES` gained a `40`
 tier (it didn't have one — was `[24, 32, 48, 64]`, now
 `[24, 32, 40, 48, 64]`, matching `webgl-zoom`'s list exactly) and its
 `DEFAULT_ATLAS_SIZE` changed 64 → 40; `webgl-zoom`'s reverted 64 → 40
-(back to its original value). `tools/bench-atlas-text.mjs` and
+(back to its original value). `tools/bench-atlas-text.ts` and
 `demo/bench/main.ts`'s `webgpu-zoom`/`webgl-zoom` cases both updated to
 40px/em, pxrange 5. Re-measured: `webgpu-zoom` 60.48ms vs. `webgl-zoom`
 50.76ms — 1.19x, exactly the unique-glyph-count ratio (25/21), same
@@ -596,20 +596,20 @@ and/or spatial pruning) given the size of the remaining gap and the risk
 to code marked HOTTEST. Answer: not now — safe cleanup only, gate stays
 red. `test/bench/generate.bench.ts` (`npm run bench:vitest`) was added
 alongside this as a non-gating, developer-facing comparative benchmark
-(same corpus/params as `tools/bench.mjs`) for whoever picks the
-restructure up next — `tools/bench.mjs` stays the actual gate check.
+(same corpus/params as `tools/bench.ts`) for whoever picks the
+restructure up next — `tools/bench.ts` stays the actual gate check.
 
 ## Reproducing
 
 ```bash
-npx tsx --expose-gc tools/bench.mjs        # gate:m6's actual check (single worst-case glyph)
-npx tsx tools/bench-atlas-text.mjs         # non-gating: both demos' real TEXT, real font, real params
+npx tsx --expose-gc tools/bench.ts        # gate:m6's actual check (single worst-case glyph)
+npx tsx tools/bench-atlas-text.ts         # non-gating: both demos' real TEXT, real font, real params
 npm run bench:vitest                       # non-gating: vitest bench, dev-facing comparative numbers
 ```
 
-`bench.mjs` prints median/min/max timing and the allocation heap delta,
+`bench.ts` prints median/min/max timing and the allocation heap delta,
 exits non-zero on either budget miss. `test/size.test.ts` (the other M6
 gate half, size budget) passes independently and is unaffected by any of
-this. `bench-atlas-text.mjs` and `bench:vitest` are diagnostic only — not
+this. `bench-atlas-text.ts` and `bench:vitest` are diagnostic only — not
 part of `gate:m6`, no pass/fail, just numbers to compare against next
 time.

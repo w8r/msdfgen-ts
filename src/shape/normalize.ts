@@ -13,7 +13,7 @@
 import { type Contour } from "./contour";
 import { EdgeSegment, QUADRATIC, CUBIC, LINEAR } from "./segments";
 import { type Shape } from "./shape";
-import { cross, crossFMA, dot, sign } from "../math/scalar";
+import { cross, dot, sign } from "../math/scalar";
 
 // ── em-normalization ────────────────────────────────────────────────────────
 
@@ -43,19 +43,17 @@ export function emNormalizeShape(shape: Shape, unitsPerEm: number): void {
       // Degenerate QUADRATIC: if the control point is collinear with the
       // endpoints, collapse to LINEAR.  Matches C++ EdgeSegment::create:
       //   if (!crossProduct(p1-p0, p2-p1)) return new LinearSegment(p0, p2)
-      // The check is performed AFTER em-normalization, and — critically — with
-      // the SAME floating-point contraction (single fused multiply-add) that
-      // the reference C++ build uses.  With a plain double `a*b - c*d`, a
-      // perfectly collinear integer control point scaled by a non-power-of-two
-      // unitsPerEm rounds the cross product to exactly 0 and we would wrongly
-      // collapse the edge; the reference's FMA leaves a ~1e-21 residual and
-      // keeps it quadratic.  See crossFMA for the full explanation.
+      // The check is performed AFTER em-normalization.  Plain `a*b - c*d`
+      // matches the reference since it is built with -ffp-contract=off
+      // (tools/setup-reference.sh): a perfectly collinear control point scaled
+      // by a non-power-of-two unitsPerEm rounds the cross product to exactly 0
+      // on both sides, and the edge collapses.
       if (seg.type === QUADRATIC) {
         const d01x = seg.p1x - seg.p0x;
         const d01y = seg.p1y - seg.p0y;
         const d12x = seg.p2x - seg.p1x;
         const d12y = seg.p2y - seg.p1y;
-        if (crossFMA(d01x, d01y, d12x, d12y) === 0) {
+        if (cross(d01x, d01y, d12x, d12y) === 0) {
           contour[i] = new EdgeSegment(LINEAR, seg.p0x, seg.p0y, seg.p2x, seg.p2y, 0, 0, 0, 0);
         }
       }

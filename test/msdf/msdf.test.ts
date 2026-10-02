@@ -150,6 +150,14 @@ describe("generateMSDF — golden comparison", () => {
   });
 
   if (!existsSync(BINARY)) {
+    // CI builds the binary (see .github/workflows/ci.yml's gate job) — a
+    // missing binary there is a broken pipeline, not a reason to skip.
+    if (process.env.CI) {
+      it("msdfgen binary present in CI", () => {
+        expect.fail(`msdfgen binary not found at ${BINARY} — CI must run tools/setup-reference.sh`);
+      });
+      return;
+    }
     it.skip("msdfgen binary not found — run: npm run setup-reference", () => {});
     return;
   }

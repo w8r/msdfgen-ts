@@ -1,5 +1,5 @@
 {
-  "font": "/Users/alexander.milevski/Projects/msdfgen-ts/test/fonts/Roboto.ttf",
+  "font": "test/fonts/Roboto.ttf",
   "charSpec": "1045",
   "size": 48,
   "width": 48,
@@ -9,5 +9,5 @@
   "scale": 40,
   "tx": 0.1,
   "ty": 0.35,
-  "cli": "/Users/alexander.milevski/Projects/msdfgen-ts/tools/msdfgen-ref/build/msdfgen msdf -font /Users/alexander.milevski/Projects/msdfgen-ts/test/fonts/Roboto.ttf 1045 -o /Users/alexander.milevski/Projects/msdfgen-ts/test/golden/roboto/U0415_48px/bitmap.fl32 -format fl32 -dimensions 48 48 -pxrange 4 -scale 40 -translate 0.100000 0.350000 -emnormalize -exportshape /Users/alexander.milevski/Projects/msdfgen-ts/test/golden/roboto/U0415_48px/shape.txt -scanline"
+  "cli": "tools/msdfgen-ref/build/msdfgen msdf -font test/fonts/Roboto.ttf 1045 -o test/golden/roboto/U0415_48px/bitmap.fl32 -format fl32 -dimensions 48 48 -pxrange 4 -scale 40 -translate 0.100000 0.350000 -emnormalize -exportshape test/golden/roboto/U0415_48px/shape.txt -scanline"
 }

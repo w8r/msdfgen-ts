@@ -75,10 +75,16 @@ distance normalization to range, fill rule).
   `gate:m2`. Formatting is oxfmt's defaults — never hand-tune style, never disable rules
   inline without a comment explaining why.
 - **CI:** GitHub Actions from M0. Every PR runs `npm run gate:all` (chains every green
-  milestone gate, m0 … up to the highest green milestone). Reference msdfgen binary is
-  only rebuilt in the separate `verify-golden-regen` job (push-to-main only, checks
-  fixtures still regenerate byte-identical from source). A gate that was green may
-  never go red on main.
+  milestone gate, m0 … up to the highest green milestone). The PR job builds (and caches)
+  the reference msdfgen binary, because gate:m2b/m3 diff against it live; with `CI` set, a
+  missing binary fails those suites instead of skipping them. The separate
+  `verify-golden-regen` job (push to main + manual dispatch) regenerates every bitmap from
+  the committed fonts and runs `tools/check-golden-regen.ts`: `shape.txt` must match
+  exactly, bitmaps within the 1e-4 golden tolerance, **not** byte-identical. Fixtures are
+  generated on macOS (clang + Apple libm) and CI regenerates them on Linux (gcc + glibc);
+  msdfgen's cubic solver calls `acos`/`cos`, whose last-ulp results differ between the two
+  libms. 1e-4 still catches genuinely stale fixtures (the FMA-on leftovers were off by up
+  to 5.18). A gate that was green may never go red on main.
 
 ## Repository layout
 
@@ -312,12 +318,12 @@ Closure-friendly constraints (cheap now, painful to retrofit):
   is the first thing to suspect. Revisit this decision once M5's actual rendering is visible:
   confirm a lone flipped texel at a degenerate corner is genuinely imperceptible after AA/media
   reconstruction before considering any other approach.
-  Note: `crossFMA` in `src/math/scalar.ts` (used by `shape/normalize.ts`'s deconverge logic) is
-  a _different_, pre-existing FMA-contraction emulation that predates this decision and was
-  deliberately left alone — gate:m2/m3 are green with it in place against the FMA-off reference,
-  so it isn't causing the problem this note describes. Don't treat its existence as license to
-  add more; if it ever needs touching, apply the same "suspect FMA, verify by toggling the
-  reference build flag" diagnostic before changing it.
+  Note: a second emulation, `crossFMA` (Dekker two-product, used by `emNormalizeShape`'s
+  degenerate-quadratic check), was removed too. It had looked green against the FMA-off reference
+  only because the committed fixtures were still from the FMA-on build. Once they were regenerated,
+  `gate:m2a` failed on exactly the 6 glyphs with collinear quadratic control points, and plain
+  `cross` fixed them. Lesson: after changing the reference build, regenerate the fixtures before
+  trusting any "green against the new reference" claim.
 - **Numerical method substitution is allowed where porting the reference's exact method
   isn't the right tool for this runtime — match the _output_, not necessarily the
   _method_.** `src/shape/segments.ts`'s QUADRATIC `signedDistance` finds real roots of a

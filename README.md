@@ -2,6 +2,8 @@
 
 Crisp text at any size for WebGL and WebGPU. Load a TrueType font, get a multi-channel signed distance field (MSDF) atlas, all at runtime in the browser.
 
+**[Live demos](https://w8r.github.io/msdfgen-ts/)** · minimal examples: [WebGPU](demo/hello-webgpu/main.ts), [WebGL2](demo/hello-webgl/main.ts)
+
 - TypeScript port of [msdfgen](https://github.com/Chlumsky/msdfgen) that matches the C++ output to 1e-4 per texel
 - Built-in TrueType parser with kerning
 - 14 KB gzipped, no WASM, one tiny dependency ([potpack](https://github.com/mapbox/potpack))
@@ -45,7 +47,7 @@ void main() {
 }
 ```
 
-WebGL2 and WebGPU versions: [`demo/webgl/msdf.frag.glsl`](demo/webgl/msdf.frag.glsl), [`demo/webgpu/msdf.wgsl`](demo/webgpu/msdf.wgsl).
+Enable alpha blending (glyph quads overlap), use linear texture filtering, and measure `fontSizePx` in device pixels (CSS size × `devicePixelRatio`). The complete setup is in the minimal examples: [WebGPU](demo/hello-webgpu/main.ts) and [WebGL2](demo/hello-webgl/main.ts).
 
 ### More
 
@@ -65,7 +67,7 @@ WebGL2 and WebGPU versions: [`demo/webgl/msdf.frag.glsl`](demo/webgl/msdf.frag.g
 
 ```sh
 npm install
-npm run dev:webgpu-zoom   # also: dev, dev:webgpu, dev:webgl-zoom, dev:lucide, dev:bench
+npm run dev:hello-webgpu  # also: dev:hello-webgl, dev:webgpu-zoom, dev:webgl-zoom, dev:lucide, dev:bench
 ```
 
 ## Development

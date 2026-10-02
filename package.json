@@ -73,10 +73,12 @@
     "build": "vite build && vite build --config vite.worker.config.ts && tsc -p tsconfig.build.json && tsx tools/fix-dts-extensions.ts",
     "build:demo": "vite build --config vite.demo.config.ts",
     "predeploy": "npm run build:demo",
-    "deploy": "gh-pages -d demo-dist",
+    "deploy": "gh-pages -d demo-dist --nojekyll",
     "size": "vite build && gzip -c dist/msdfgen-ts.iife.js | wc -c | awk '{printf \"%.1f KB (iife, gzip)\\n\", $1/1024}'",
     "lint": "oxlint src/ test/",
     "typecheck": "tsc --noEmit",
+    "dev:hello-webgl": "vite --open /demo/hello-webgl/index.html",
+    "dev:hello-webgpu": "vite --open /demo/hello-webgpu/index.html",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {

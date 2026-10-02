@@ -24,11 +24,15 @@ export default defineConfig({
   base: "/msdfgen-ts/",
   publicDir: resolve(__dirname, "demo/public"),
   build: {
+    // es2022 for top-level await, which the hello-* examples use to stay short.
+    target: "es2022",
     outDir: resolve(__dirname, "demo-dist"),
     emptyOutDir: true,
     rollupOptions: {
       input: {
         index: resolve(__dirname, "demo/index.html"),
+        helloWebgl: resolve(__dirname, "demo/hello-webgl/index.html"),
+        helloWebgpu: resolve(__dirname, "demo/hello-webgpu/index.html"),
         canvas: resolve(__dirname, "demo/canvas/index.html"),
         webgpu: resolve(__dirname, "demo/webgpu/index.html"),
         webgpuZoom: resolve(__dirname, "demo/webgpu-zoom/index.html"),

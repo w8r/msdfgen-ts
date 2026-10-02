@@ -2,133 +2,530 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>msdfgen-ts — demos</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>msdfgen-ts: crisp GPU text at any size</title>
+    <meta
+      name="description"
+      content="Runtime MSDF font atlases for WebGL and WebGPU. A TypeScript port of msdfgen with a built-in TrueType parser. 14 KB gzipped, no WASM."
+    />
     <style>
+      :root {
+        --bg: #0f1117;
+        --panel: #161922;
+        --line: #252a36;
+        --text: #f4ecdb;
+        --muted: #8b8f99;
+        --accent: #e9b872;
+        --serif: "PT Serif Local", "PT Serif", Georgia, serif;
+        --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+        --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        background: var(--bg);
+        color: var(--text);
+        font: 15px/1.6 var(--sans);
+      }
       body {
         margin: 0;
-        padding: 24px;
-        background: #f2f2f2;
-        font-family: system-ui, sans-serif;
-        color: #111;
-        max-width: 720px;
       }
-      h1 {
-        font-size: 20px;
-        margin-bottom: 4px;
+      a {
+        color: inherit;
       }
-      p.lede {
-        color: #555;
-        font-size: 14px;
-        margin-top: 0;
+      .wrap {
+        max-width: 1120px;
+        margin: 0 auto;
+        padding: 0 24px;
       }
-      ul {
-        list-style: none;
-        padding: 0;
+
+      /* ── Hero ─────────────────────────────────────────────── */
+      .hero {
+        position: relative;
+        height: min(86vh, 820px);
+        min-height: 520px;
+        overflow: hidden;
+        border-bottom: 1px solid var(--line);
       }
-      li {
-        margin: 12px 0;
-        padding: 14px 16px;
-        background: white;
-        border: 1px solid #ddd;
-        border-radius: 6px;
+      .hero canvas {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        opacity: 0;
+        transition: opacity 0.8s ease;
       }
-      li a {
-        font-size: 16px;
-        font-weight: 600;
-        color: #111;
+      .hero.ready canvas {
+        opacity: 1;
+      }
+      .hero-top {
+        position: relative;
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        padding-top: 28px;
+      }
+      .brand {
+        font: 600 17px var(--mono);
+        letter-spacing: -0.01em;
+      }
+      .hero-top nav a {
+        margin-left: 22px;
+        color: var(--muted);
         text-decoration: none;
       }
-      li a:hover {
-        text-decoration: underline;
+      .hero-top nav a:hover {
+        color: var(--text);
       }
-      li p {
-        margin: 4px 0 0 0;
-        font-size: 13px;
-        color: #666;
+      .hero-copy {
+        position: relative;
+        max-width: 520px;
+        margin-top: 44px;
+      }
+      .hero-copy h1 {
+        margin: 0 0 10px;
+        font: 400 clamp(28px, 4vw, 40px) / 1.15 var(--serif);
+      }
+      .hero-copy p {
+        margin: 0;
+        color: var(--muted);
+      }
+      .controls {
+        position: absolute;
+        left: 50%;
+        bottom: 28px;
+        transform: translateX(-50%);
+        width: min(1072px, calc(100% - 48px));
+        display: grid;
+        grid-template-columns: minmax(180px, 1.3fr) auto minmax(160px, 1fr);
+        gap: 14px 18px;
+        align-items: center;
+        padding: 14px 16px;
+        background: rgba(22, 25, 34, 0.78);
+        backdrop-filter: blur(12px);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+      }
+      .controls input[type="text"] {
+        width: 100%;
+        padding: 9px 12px;
+        font: 16px var(--sans);
+        color: var(--text);
+        background: var(--bg);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        outline: none;
+      }
+      .controls input[type="text"]:focus {
+        border-color: var(--accent);
+      }
+      .chips {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+      button {
+        font: inherit;
+        color: var(--muted);
+        background: none;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 5px 12px;
+        cursor: pointer;
+      }
+      button:hover {
+        color: var(--text);
+      }
+      button[aria-pressed="true"] {
+        color: var(--bg);
+        background: var(--text);
+        border-color: var(--text);
+      }
+      .zoom {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+      }
+      .zoom input {
+        flex: 1;
+        accent-color: var(--accent);
+      }
+      .row2 {
+        grid-column: 1 / -1;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px 20px;
+        align-items: center;
+      }
+      .row2 button {
+        padding: 2px 10px;
+        font: 12px var(--mono);
+      }
+      .label {
+        align-self: center;
+        font: 12px var(--mono);
+        color: var(--muted);
+      }
+      .readout {
+        font: 12px var(--mono);
+        color: var(--muted);
+      }
+      .no-gpu .controls,
+      .no-gpu canvas {
+        display: none;
+      }
+      .no-gpu-note {
+        display: none;
+      }
+      .no-gpu .no-gpu-note {
+        display: block;
+        position: relative;
+        margin-top: 40px;
+        color: var(--muted);
+      }
+
+      /* ── Sections ─────────────────────────────────────────── */
+      section {
+        padding: 72px 0 0;
+      }
+      h2 {
+        margin: 0 0 22px;
+        font: 400 28px/1.2 var(--serif);
+      }
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 1px;
+        background: var(--line);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        overflow: hidden;
+      }
+      .stat {
+        background: var(--bg);
+        padding: 22px 20px;
+      }
+      .stat b {
+        display: block;
+        font: 400 34px/1.1 var(--serif);
+        color: var(--accent);
+      }
+      .stat span {
+        color: var(--muted);
+        font-size: 14px;
+      }
+      .code {
+        display: grid;
+        grid-template-columns: 1fr 1.6fr;
+        gap: 28px;
+        align-items: start;
+      }
+      .code p {
+        color: var(--muted);
+        margin: 0 0 18px;
+      }
+      .install {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 10px 10px 10px 16px;
+        font: 14px var(--mono);
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+      }
+      .copied {
+        color: var(--accent);
+        border-color: var(--accent);
+      }
+      pre {
+        margin: 0;
+        padding: 20px 22px;
+        overflow-x: auto;
+        font: 13.5px/1.7 var(--mono);
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+      }
+      .k {
+        color: #c49be0;
+      }
+      .s {
+        color: #a9cf8f;
+      }
+      .c {
+        color: #6b7080;
+      }
+      .cards {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+        gap: 18px;
+      }
+      .card {
+        display: block;
+        text-decoration: none;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        overflow: hidden;
+        transition:
+          transform 0.2s ease,
+          border-color 0.2s ease;
+      }
+      .card:hover {
+        transform: translateY(-3px);
+        border-color: #3a4152;
+      }
+      .card img {
+        display: block;
+        width: 100%;
+        aspect-ratio: 16 / 10;
+        object-fit: cover;
+        border-bottom: 1px solid var(--line);
+      }
+      .card div {
+        padding: 14px 16px 16px;
+      }
+      .card h3 {
+        margin: 0 0 4px;
+        font: 600 15px var(--sans);
+      }
+      .card p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 14px;
       }
       .tag {
-        display: inline-block;
-        font-size: 11px;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        color: #888;
-        background: #eee;
-        border-radius: 3px;
-        padding: 1px 6px;
         margin-left: 8px;
-        vertical-align: middle;
+        font: 11px var(--mono);
+        color: var(--accent);
+      }
+      .internals {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+        gap: 10px 24px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+      .internals a {
+        text-decoration: none;
+        border-bottom: 1px solid var(--line);
+      }
+      .internals a:hover {
+        border-color: var(--text);
+      }
+      .internals span {
+        display: block;
+        color: var(--muted);
+        font-size: 14px;
+      }
+      footer {
+        margin-top: 88px;
+        padding: 28px 0 40px;
+        border-top: 1px solid var(--line);
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      @media (max-width: 760px) {
+        .controls {
+          grid-template-columns: 1fr;
+        }
+        .stats {
+          grid-template-columns: repeat(2, 1fr);
+        }
+        .code {
+          grid-template-columns: 1fr;
+        }
+        .hero-top nav a:not(:last-child) {
+          display: none;
+        }
       }
     </style>
   </head>
   <body>
-    <h1>msdfgen-ts — demos</h1>
-    <p class="lede">
-      TypeScript port of Chlumsky/msdfgen — runtime MSDF atlas generation, no WASM.
-      <a href="https://github.com/w8r/msdfgen-ts">Source</a>.
-    </p>
-    <ul>
-      <li>
-        <a href="./hello-webgpu/index.html">Hello, WebGPU</a><span class="tag">start here</span>
-        <p>
-          The smallest complete example: font, atlas, one draw call. About 150 lines, made to be
-          copied.
-        </p>
-      </li>
-      <li>
-        <a href="./hello-webgl/index.html">Hello, WebGL2</a><span class="tag">start here</span>
-        <p>The same minimal example over WebGL2, for browsers without WebGPU.</p>
-      </li>
-      <li>
-        <a href="./canvas/index.html">CPU canvas fallback</a><span class="tag">reference</span>
-        <p>
-          One atlas, several output sizes, reconstructed on the CPU with 2D canvas — no GPU needed.
-        </p>
-      </li>
-      <li>
-        <a href="./webgpu/index.html">WebGPU renderer</a><span class="tag">M5</span>
-        <p>The real deliverable: instanced-quad WGSL median shader. Static render for now.</p>
-      </li>
-      <li>
-        <a href="./webgpu-zoom/index.html">WebGPU pan/zoom</a><span class="tag">interactive</span>
-        <p>
-          Drag to pan, wheel/pinch to zoom toward the cursor, with a resolution selector
-          (24/32/48/64px) to compare atlas tiers at the same view.
-        </p>
-      </li>
-      <li>
-        <a href="./webgl-zoom/index.html">WebGL2 pan/zoom</a><span class="tag">interactive</span>
-        <p>
-          Same pan/zoom + resolution selector as above, over WebGL2 — for browsers/CI without a
-          WebGPU adapter.
-        </p>
-      </li>
-      <li>
-        <a href="./webgl/index.html">WebGL2 test renderer</a><span class="tag">test-only</span>
-        <p>
-          Same instanced-quad renderer as the WebGPU demo, for browsers/CI without a WebGPU adapter.
-        </p>
-      </li>
-      <li>
-        <a href="./debug/index.html">MSDF debug view</a><span class="tag">dev tool</span>
-        <p>
-          Per-glyph vector/RGB/channel/median panels — for inspecting coloring and error-correction.
-        </p>
-      </li>
-      <li>
-        <a href="./bench/index.html">Perf report</a><span class="tag">M6</span>
-        <p>
-          Live, in-browser companion to tools/bench.mjs / tools/bench-atlas-text.mjs — per-glyph and
-          whole-string atlas generation timing, run in this browser's own JS engine.
-        </p>
-      </li>
-      <li>
-        <a href="./lucide/index.html">Lucide icon set</a><span class="tag">icon font</span>
-        <p>
-          Every glyph in Lucide.ttf (~1745 icons), addressed by raw glyph index via
-          Atlas.glyphsByIndex() — most of them have no reachable Unicode codepoint at all.
-        </p>
-      </li>
-    </ul>
+    <header class="hero" id="hero">
+      <canvas id="hero-canvas"></canvas>
+      <div class="wrap">
+        <div class="hero-top">
+          <span class="brand">msdfgen-ts</span>
+          <nav>
+            <a href="#demos">Demos</a>
+            <a href="https://github.com/w8r/msdfgen-ts#readme">Docs</a>
+            <a href="https://github.com/w8r/msdfgen-ts">GitHub</a>
+          </nav>
+        </div>
+        <div class="hero-copy">
+          <h1>Crisp GPU text at any size.</h1>
+          <p>
+            Multi-channel signed distance field atlases, generated in the browser from TrueType
+            fonts. Try it: type, switch fonts, zoom.
+          </p>
+          <p class="no-gpu-note">
+            This browser has neither WebGPU nor WebGL2, so the live demo is off. The library still
+            works; you need a GPU API to draw the result.
+          </p>
+        </div>
+      </div>
+      <div class="controls">
+        <input
+          id="hero-text"
+          type="text"
+          value="Crisp at any size"
+          maxlength="48"
+          spellcheck="false"
+          aria-label="Text to render"
+        />
+        <div class="chips" role="group" aria-label="Font">
+          <button data-font="PT Serif" aria-pressed="true">PT Serif</button>
+          <button data-font="Roboto" aria-pressed="false">Roboto</button>
+          <button data-font="Noto Sans" aria-pressed="false">Noto Sans</button>
+          <button data-font="Arvo" aria-pressed="false">Arvo</button>
+        </div>
+        <div class="zoom">
+          <input
+            id="hero-size"
+            type="range"
+            min="0"
+            max="1"
+            step="0.001"
+            value="0.5"
+            aria-label="Size"
+          />
+          <button id="hero-auto" aria-pressed="true">auto</button>
+        </div>
+        <div class="row2">
+          <div class="chips" role="group" aria-label="Atlas size">
+            <span class="label">atlas</span>
+            <button data-ppem="32" aria-pressed="false">32</button>
+            <button data-ppem="48" aria-pressed="true">48</button>
+            <button data-ppem="64" aria-pressed="false">64</button>
+            <span class="label">px/em</span>
+          </div>
+          <div class="readout" id="hero-readout">&nbsp;</div>
+        </div>
+      </div>
+    </header>
+
+    <main class="wrap">
+      <section>
+        <div class="stats">
+          <div class="stat"><b>14 KB</b><span>gzipped, one tiny dependency</span></div>
+          <div class="stat"><b>0 WASM</b><span>plain TypeScript, runs anywhere JS does</span></div>
+          <div class="stat">
+            <b>≤ 1e-4</b><span>max difference from C++ msdfgen per texel</span>
+          </div>
+          <div class="stat">
+            <b>1158</b><span>golden comparisons against the reference, in CI</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="code">
+        <div>
+          <h2>Three calls to an atlas</h2>
+          <p>
+            Parse the font, build the atlas, lay out your text. Upload one texture, draw one quad
+            per glyph with the standard median shader.
+          </p>
+          <div class="install">
+            <span>npm install msdfgen-ts</span>
+            <button data-copy="npm install msdfgen-ts">copy</button>
+          </div>
+        </div>
+        <pre><span class="k">import</span> { Font, Atlas } <span class="k">from</span> <span class="s">"msdfgen-ts"</span>;
+
+<span class="k">const</span> font = <span class="k">new</span> Font(<span class="k">await</span> (<span class="k">await</span> fetch(<span class="s">"Roboto.ttf"</span>)).arrayBuffer());
+<span class="k">const</span> atlas = <span class="k">new</span> Atlas(font, { pixelsPerEm: 48, pxrange: 4 });
+<span class="k">const</span> { glyphs } = atlas.layout(<span class="s">"Hello, world!"</span>);
+
+<span class="c">// atlas.texture: RGBA8, ready for writeTexture / texImage2D</span>
+<span class="c">// glyphs: position + atlas rect for every quad, kerning applied</span></pre>
+      </section>
+
+      <section id="demos">
+        <h2>Demos</h2>
+        <div class="cards">
+          <a class="card" href="./hello-webgpu/index.html">
+            <img src="./thumbs/hello-webgpu.jpg" alt="" loading="lazy" />
+            <div>
+              <h3>Hello, WebGPU<span class="tag">start here</span></h3>
+              <p>The smallest complete example: font, atlas, one draw call. Made to be copied.</p>
+            </div>
+          </a>
+          <a class="card" href="./hello-webgl/index.html">
+            <img src="./thumbs/hello-webgl.jpg" alt="" loading="lazy" />
+            <div>
+              <h3>Hello, WebGL2<span class="tag">start here</span></h3>
+              <p>The same minimal example over WebGL2, for browsers without WebGPU.</p>
+            </div>
+          </a>
+          <a class="card" href="./webgpu-zoom/index.html">
+            <img src="./thumbs/webgpu-zoom.jpg" alt="" loading="lazy" />
+            <div>
+              <h3>Pan and zoom<span class="tag">WebGPU</span></h3>
+              <p>
+                Drag and wheel through a paragraph, with selectable atlas resolutions and optional
+                automatic tier switching.
+              </p>
+            </div>
+          </a>
+          <a class="card" href="./webgl-zoom/index.html">
+            <img src="./thumbs/webgl-zoom.jpg" alt="" loading="lazy" />
+            <div>
+              <h3>Pan and zoom<span class="tag">WebGL2</span></h3>
+              <p>The same pan and zoom over WebGL2.</p>
+            </div>
+          </a>
+          <a class="card" href="./lucide/index.html">
+            <img src="./thumbs/lucide.jpg" alt="" loading="lazy" />
+            <div>
+              <h3>Every Lucide icon<span class="tag">icon font</span></h3>
+              <p>About 1,700 icons from one font, addressed by glyph index.</p>
+            </div>
+          </a>
+          <a class="card" href="./debug/index.html">
+            <img src="./thumbs/debug.jpg" alt="" loading="lazy" />
+            <div>
+              <h3>Inside one glyph<span class="tag">debug view</span></h3>
+              <p>Outline, edge colors, each channel and the reconstructed result, side by side.</p>
+            </div>
+          </a>
+        </div>
+      </section>
+
+      <section>
+        <h2>Under the hood</h2>
+        <ul class="internals">
+          <li>
+            <a href="./bench/index.html">Performance report</a>
+            <span>Per-glyph generation time, measured in your browser.</span>
+          </li>
+          <li>
+            <a href="./canvas/index.html">CPU reconstruction</a>
+            <span>The same atlas decoded on the CPU, no GPU involved.</span>
+          </li>
+          <li>
+            <a href="./webgpu/index.html">WebGPU test renderer</a>
+            <span>Instanced quads at several sizes, used for visual checks.</span>
+          </li>
+          <li>
+            <a href="./webgl/index.html">WebGL2 test renderer</a>
+            <span>The WebGL2 twin, used for screenshot checks.</span>
+          </li>
+        </ul>
+      </section>
+
+      <footer>
+        MIT licensed. A TypeScript port of
+        <a href="https://github.com/Chlumsky/msdfgen">msdfgen</a> by Viktor Chlumský ·
+        <a href="https://github.com/w8r/msdfgen-ts">GitHub</a>
+      </footer>
+    </main>
+
+    <script type="module" src="./landing/main.ts"></script>
   </body>
 </html>

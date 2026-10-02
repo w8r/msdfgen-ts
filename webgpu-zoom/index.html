@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>msdfgen-ts — WebGL2 pan/zoom demo</title>
+    <title>msdfgen-ts — WebGPU pan/zoom demo</title>
     <style>
       body {
         margin: 0;
@@ -18,14 +18,14 @@
         color: #555;
         font-size: 14px;
       }
-      .zoom-canvas {
+      .gpu-canvas {
         display: block;
         border: 1px solid #ddd;
         background: white;
         touch-action: none;
         cursor: grab;
       }
-      .zoom-canvas:active {
+      .gpu-canvas:active {
         cursor: grabbing;
       }
       .readout {
@@ -47,18 +47,18 @@
         border-radius: 3px;
       }
     </style>
-    <script type="module" crossorigin src="/msdfgen-ts/assets/webglZoom-B-QaCqw3.js"></script>
+    <script type="module" crossorigin src="/msdfgen-ts/assets/webgpuZoom-DWij2TEH.js"></script>
     <link rel="modulepreload" crossorigin href="/msdfgen-ts/assets/atlas-gen-DqDNe1YC.js">
-    <link rel="modulepreload" crossorigin href="/msdfgen-ts/assets/msdf.frag-DMcxhb1o.js">
+    <link rel="modulepreload" crossorigin href="/msdfgen-ts/assets/msdf-BpUzOAb5.js">
   </head>
   <body>
-    <h1>msdfgen-ts — WebGL2 pan/zoom demo</h1>
+    <h1>msdfgen-ts — WebGPU pan/zoom demo</h1>
     <p>
       Drag to pan, wheel/pinch to zoom (toward the cursor). With "Auto tier" checked, the
       atlas regenerates at the nearest resolution as you zoom, so it stays crisp well past
       any single tier's native resolution. Uncheck it to pin one fixed tier and use the
       resolution selector to compare tiers at the same zoom/pan.
     </p>
-    <div id="root">Requesting WebGL2 context…</div>
+    <div id="root">Requesting WebGPU adapter…</div>
   </body>
 </html>

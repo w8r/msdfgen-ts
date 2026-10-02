@@ -69,24 +69,65 @@
     </p>
     <ul>
       <li>
+        <a href="./hello-webgpu/index.html">Hello, WebGPU</a><span class="tag">start here</span>
+        <p>
+          The smallest complete example: font, atlas, one draw call. About 150 lines, made to be
+          copied.
+        </p>
+      </li>
+      <li>
+        <a href="./hello-webgl/index.html">Hello, WebGL2</a><span class="tag">start here</span>
+        <p>The same minimal example over WebGL2, for browsers without WebGPU.</p>
+      </li>
+      <li>
         <a href="./canvas/index.html">CPU canvas fallback</a><span class="tag">reference</span>
-        <p>One atlas, several output sizes, reconstructed on the CPU with 2D canvas — no GPU needed.</p>
+        <p>
+          One atlas, several output sizes, reconstructed on the CPU with 2D canvas — no GPU needed.
+        </p>
       </li>
       <li>
         <a href="./webgpu/index.html">WebGPU renderer</a><span class="tag">M5</span>
         <p>The real deliverable: instanced-quad WGSL median shader. Static render for now.</p>
       </li>
       <li>
+        <a href="./webgpu-zoom/index.html">WebGPU pan/zoom</a><span class="tag">interactive</span>
+        <p>
+          Drag to pan, wheel/pinch to zoom toward the cursor, with a resolution selector
+          (24/32/48/64px) to compare atlas tiers at the same view.
+        </p>
+      </li>
+      <li>
         <a href="./webgl-zoom/index.html">WebGL2 pan/zoom</a><span class="tag">interactive</span>
-        <p>Drag to pan, wheel/pinch to zoom toward the cursor, over a single fixed atlas tier.</p>
+        <p>
+          Same pan/zoom + resolution selector as above, over WebGL2 — for browsers/CI without a
+          WebGPU adapter.
+        </p>
       </li>
       <li>
         <a href="./webgl/index.html">WebGL2 test renderer</a><span class="tag">test-only</span>
-        <p>Same instanced-quad renderer as the WebGPU demo, for browsers/CI without a WebGPU adapter.</p>
+        <p>
+          Same instanced-quad renderer as the WebGPU demo, for browsers/CI without a WebGPU adapter.
+        </p>
       </li>
       <li>
         <a href="./debug/index.html">MSDF debug view</a><span class="tag">dev tool</span>
-        <p>Per-glyph vector/RGB/channel/median panels — for inspecting coloring and error-correction.</p>
+        <p>
+          Per-glyph vector/RGB/channel/median panels — for inspecting coloring and error-correction.
+        </p>
+      </li>
+      <li>
+        <a href="./bench/index.html">Perf report</a><span class="tag">M6</span>
+        <p>
+          Live, in-browser companion to tools/bench.mjs / tools/bench-atlas-text.mjs — per-glyph and
+          whole-string atlas generation timing, run in this browser's own JS engine.
+        </p>
+      </li>
+      <li>
+        <a href="./lucide/index.html">Lucide icon set</a><span class="tag">icon font</span>
+        <p>
+          Every glyph in Lucide.ttf (~1745 icons), addressed by raw glyph index via
+          Atlas.glyphsByIndex() — most of them have no reachable Unicode codepoint at all.
+        </p>
       </li>
     </ul>
   </body>

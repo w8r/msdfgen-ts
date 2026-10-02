@@ -17,7 +17,7 @@
 
 import { execFileSync } from 'child_process';
 import { createWriteStream, existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
-import { dirname, resolve } from 'path';
+import { dirname, relative, resolve } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -189,22 +189,27 @@ function runMsdfgen({ fontPath, charSpec, size, pxrange, scale, tx, ty, outDir }
   // charSpec is either a decimal codepoint or a "g<index>" string.
   const charArg = String(charSpec);
 
+  // Paths are passed (and recorded in meta.json) relative to the repo root,
+  // with the binary run from there — committed fixtures must not embed the
+  // generating machine's absolute paths, and `cli` stays runnable from ROOT.
+  const rel = (/** @type {string} */ p) => relative(ROOT, p);
+
   const args = [
     'msdf',
-    '-font', fontPath, charArg,
-    '-o', bitmapPath,
+    '-font', rel(fontPath), charArg,
+    '-o', rel(bitmapPath),
     '-format', 'fl32',
     '-dimensions', String(size), String(size),
     '-pxrange', String(pxrange),
     '-scale', String(scale),
     '-translate', String(tx.toFixed(6)), String(ty.toFixed(6)),
     '-emnormalize',
-    '-exportshape', shapePath,
+    '-exportshape', rel(shapePath),
     '-scanline',   // non-Skia scanline sign correction (matches our future port)
   ];
 
   try {
-    execFileSync(BINARY, args, { stdio: ['ignore', 'ignore', 'pipe'] });
+    execFileSync(BINARY, args, { cwd: ROOT, stdio: ['ignore', 'ignore', 'pipe'] });
   } catch (/** @type {any} */ err) {
     // msdfgen exits non-zero for glyphs not in the font — skip silently.
     const stderr = err.stderr ? err.stderr.toString() : '';
@@ -216,7 +221,7 @@ function runMsdfgen({ fontPath, charSpec, size, pxrange, scale, tx, ty, outDir }
 
   // Write metadata alongside the bitmap so diff.test.ts can read dimensions.
   const meta = {
-    font: fontPath,
+    font: rel(fontPath),
     charSpec: charArg,
     size,
     width: size,
@@ -226,7 +231,7 @@ function runMsdfgen({ fontPath, charSpec, size, pxrange, scale, tx, ty, outDir }
     scale,
     tx,
     ty,
-    cli: [BINARY, ...args].join(' '),
+    cli: [rel(BINARY), ...args].join(' '),
   };
   writeFileSync(resolve(outDir, 'meta.json'), JSON.stringify(meta, null, 2));
   return true;

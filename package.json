@@ -1,14 +1,36 @@
 {
   "name": "msdfgen-ts",
-  "version": "0.0.1-dev",
+  "version": "0.1.0",
+  "description": "Runtime MSDF font atlases for WebGL/WebGPU: a TypeScript port of msdfgen with a built-in TrueType parser. No WASM.",
+  "keywords": [
+    "msdf",
+    "msdfgen",
+    "sdf",
+    "signed-distance-field",
+    "font",
+    "text",
+    "truetype",
+    "atlas",
+    "webgl",
+    "webgpu"
+  ],
+  "homepage": "https://github.com/w8r/msdfgen-ts#readme",
+  "bugs": "https://github.com/w8r/msdfgen-ts/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/w8r/msdfgen-ts.git"
+  },
   "license": "MIT",
+  "author": "Alexander Milevski",
+  "type": "module",
   "files": [
     "dist"
   ],
-  "type": "module",
   "main": "./dist/msdfgen-ts.js",
   "module": "./dist/msdfgen-ts.js",
   "types": "./dist/types/index.d.ts",
+  "unpkg": "./dist/msdfgen-ts.iife.js",
+  "jsdelivr": "./dist/msdfgen-ts.iife.js",
   "exports": {
     ".": {
       "types": "./dist/types/index.d.ts",
@@ -21,6 +43,9 @@
       "default": "./dist/atlas-worker.js"
     }
   },
+  "sideEffects": [
+    "./dist/atlas-worker.js"
+  ],
   "scripts": {
     "gate:m0": "vitest run test/diff.test.ts",
     "gate:m1": "vitest run test/parser/",
@@ -45,7 +70,7 @@
     "dev:webgpu-zoom": "vite --open /demo/webgpu-zoom/index.html",
     "dev:lucide": "vite --open /demo/lucide/index.html",
     "dev:bench": "vite --open /demo/bench/index.html",
-    "build": "vite build && vite build --config vite.worker.config.ts && tsc -p tsconfig.build.json",
+    "build": "vite build && vite build --config vite.worker.config.ts && tsc -p tsconfig.build.json && tsx tools/fix-dts-extensions.ts",
     "build:demo": "vite build --config vite.demo.config.ts",
     "predeploy": "npm run build:demo",
     "deploy": "gh-pages -d demo-dist --nojekyll",
@@ -53,7 +78,8 @@
     "lint": "oxlint src/ test/",
     "typecheck": "tsc --noEmit",
     "dev:hello-webgl": "vite --open /demo/hello-webgl/index.html",
-    "dev:hello-webgpu": "vite --open /demo/hello-webgpu/index.html"
+    "dev:hello-webgpu": "vite --open /demo/hello-webgpu/index.html",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "potpack": "2.1.0"

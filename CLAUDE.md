@@ -75,10 +75,16 @@ distance normalization to range, fill rule).
   `gate:m2`. Formatting is oxfmt's defaults — never hand-tune style, never disable rules
   inline without a comment explaining why.
 - **CI:** GitHub Actions from M0. Every PR runs `npm run gate:all` (chains every green
-  milestone gate, m0 … up to the highest green milestone). Reference msdfgen binary is
-  only rebuilt in the separate `verify-golden-regen` job (push-to-main only, checks
-  fixtures still regenerate byte-identical from source). A gate that was green may
-  never go red on main.
+  milestone gate, m0 … up to the highest green milestone). The PR job builds (and caches)
+  the reference msdfgen binary, because gate:m2b/m3 diff against it live; with `CI` set, a
+  missing binary fails those suites instead of skipping them. The separate
+  `verify-golden-regen` job (push to main + manual dispatch) regenerates every bitmap from
+  the committed fonts and runs `tools/check-golden-regen.ts`: `shape.txt` must match
+  exactly, bitmaps within the 1e-4 golden tolerance, **not** byte-identical. Fixtures are
+  generated on macOS (clang + Apple libm) and CI regenerates them on Linux (gcc + glibc);
+  msdfgen's cubic solver calls `acos`/`cos`, whose last-ulp results differ between the two
+  libms. 1e-4 still catches genuinely stale fixtures (the FMA-on leftovers were off by up
+  to 5.18). A gate that was green may never go red on main.
 
 ## Repository layout
 

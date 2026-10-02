@@ -12,7 +12,8 @@ concurrency:
 
 jobs:
   # ── M0-M5 gates: test infra, parser, distance, MSDF golden, atlas, e2e ──────
-  # Fixtures/fonts are committed, so this runs without rebuilding msdfgen.
+  # Fixtures/fonts are committed, but gate:m2b/gate:m3 compare against the
+  # live msdfgen binary (built once, then cached).
   # gate:m5 (test/e2e.test.ts) needs headless Chromium; if the install step
   # is ever skipped/fails, the test itself loud-skips rather than failing
   # (see test/e2e.test.ts's launchOrSkip) — never silently green either way.
@@ -28,6 +29,25 @@ jobs:
 
       - name: Install npm dependencies
         run: npm ci
+
+      # gate:m2b/gate:m3 diff against the live reference binary — without it
+      # those suites can't run (they fail loudly when CI is set). Same cache
+      # key as verify-golden-regen, so the two jobs share one build.
+      - name: Cache msdfgen binary
+        id: cache-msdfgen
+        uses: actions/cache@v6
+        with:
+          path: tools/msdfgen-ref
+          key: msdfgen-ref-e06c7eaaaa071445ec77a1d73f942889f796b70b
+
+      - name: Install msdfgen build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libfreetype-dev libpng-dev
+
+      - name: Build msdfgen reference binary
+        if: steps.cache-msdfgen.outputs.cache-hit != 'true'
+        run: bash tools/setup-reference.sh
 
       - name: Install headless Chromium (for gate:m5's e2e check)
         run: npx playwright install --with-deps chromium

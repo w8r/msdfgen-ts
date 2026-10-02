@@ -69,7 +69,8 @@ const CORNER_DOT_EPSILON = 0.000001;
 
 /** Moves control points slightly more than necessary to account for fp errors.
  *  port of core/Shape.cpp: DECONVERGE_OVERSHOOT */
-const DECONVERGE_OVERSHOOT = 1.11111111111111111;
+// C++ writes 1.11111111111111111; this is the double that literal rounds to.
+const DECONVERGE_OVERSHOOT = 1.1111111111111112;
 
 // ── convergentCurveOrdering ───────────────────────────────────────────────
 
@@ -292,9 +293,9 @@ function convergentCurveOrdering(prevEdge: EdgeSegment, curEdge: EdgeSegment): n
   // At least one first derivative is zero (degenerate curve at corner).
   // If prevEdge is non-degenerate but curEdge is, swap and negate result.
   let s = 1;
-  let la1x = a1x,
-    la1y = a1y,
-    la2x = a2x,
+  // a1 isn't copied: after the swap below, `a` is the degenerate edge, whose
+  // first derivative is zero and never read (same as the C++).
+  let la2x = a2x,
     la2y = a2y,
     la3x = a3x,
     la3y = a3y;
@@ -307,8 +308,6 @@ function convergentCurveOrdering(prevEdge: EdgeSegment, curEdge: EdgeSegment): n
 
   if (a1nz) {
     // prevEdge non-degenerate, curEdge degenerate — swap
-    la1x = b1x;
-    la1y = b1y;
     la2x = b2x;
     la2y = b2y;
     la3x = b3x;

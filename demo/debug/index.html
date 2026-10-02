@@ -101,14 +101,15 @@
   <body>
     <h1>MSDF debug view</h1>
     <p class="lede">
-      Every row is one glyph, generated into a small MSDF cell (default 16×16 texels, pxrange 4)
-      and shown at 200×200. All six views share the same cell-space transform, so features line up
+      Every row is one glyph, generated into a small MSDF cell (default 16×16 texels, pxrange 4) and
+      shown at 200×200. All six views share the same cell-space transform, so features line up
       pixel-for-pixel — useful for spotting coloring bugs, error-correction glitches, and channel
       misalignment. The <b>median</b> column reconstructs opacity the way a real MSDF text shader
       does (median(r,g,b) − 0.5, clamped after scaling).
     </p>
     <div class="controls">
-      <label>Font
+      <label
+        >Font
         <select id="font">
           <option value="/test/fonts/PTSerif-Regular.ttf" selected>PT Serif</option>
           <option value="/test/fonts/Roboto.ttf">Roboto</option>
@@ -116,16 +117,25 @@
           <option value="/test/fonts/Arvo-Regular.ttf">Arvo</option>
         </select>
       </label>
-      <label>Cell size
-          <input id="size" type="number" min="8" max="128" step="1" value="40" />
-        </label>
-      <label>pxrange
+      <label
+        >Cell size
+        <input id="size" type="number" min="8" max="128" step="1" value="40" />
+      </label>
+      <label
+        >pxrange
         <input id="pxrange" type="number" min="1" max="8" step="1" value="2" />
       </label>
-      <label>Glyphs
-        <input id="glyphs" type="text" size="30" value="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789" />
+      <label
+        >Glyphs
+        <input
+          id="glyphs"
+          type="text"
+          size="30"
+          value="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+        />
       </label>
-      <label>Sampling
+      <label
+        >Sampling
         <select id="sampling">
           <option value="naive">naive (dy/scale)</option>
           <option value="gpu" selected>gpu (texel-centre)</option>

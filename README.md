@@ -30,8 +30,12 @@ const { glyphs } = atlas.layout("Hello, world!");
 ```ts
 for (const { glyph: g, penX, penY } of glyphs) {
   const quad = [penX + g.planeLeft, penY + g.planeBottom, penX + g.planeRight, penY + g.planeTop]; // y-up
-  const uv = [(g.x + 0.5) / atlas.width, (g.y + 0.5) / atlas.height,
-              (g.w - 1) / atlas.width, (g.h - 1) / atlas.height]; // x, y, w, h
+  const uv = [
+    (g.x + 0.5) / atlas.width,
+    (g.y + 0.5) / atlas.height,
+    (g.w - 1) / atlas.width,
+    (g.h - 1) / atlas.height,
+  ]; // x, y, w, h
 }
 ```
 

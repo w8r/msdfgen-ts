@@ -276,7 +276,12 @@ async function main(): Promise<void> {
       const a = new Atlas(font, { pixelsPerEm, pxrange: pixelsPerEm / TIER_PXRANGE_RATIO });
       const t0 = performance.now();
       const laid = a.layout(TEXT);
-      entry = { atlas: a, glyphs: laid.glyphs, widthEm: laid.widthEm, genMs: performance.now() - t0 };
+      entry = {
+        atlas: a,
+        glyphs: laid.glyphs,
+        widthEm: laid.widthEm,
+        genMs: performance.now() - t0,
+      };
       tierAtlases.set(pixelsPerEm, entry);
     }
     return entry;

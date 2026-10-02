@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import opentype from "opentype.js";
 import { loadCorpusFonts } from "./corpus";
 import { type Shape } from "../../src/shape/shape";
-import { LINEAR, QUADRATIC } from "../../src/shape/segments";
+import { QUADRATIC } from "../../src/shape/segments";
 
 /**
  * M1 outline gate.

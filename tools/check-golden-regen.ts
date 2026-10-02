@@ -28,13 +28,17 @@ import { compareBitmaps, fl32FromBuffer, TOLERANCE } from "../test/utils/compare
 
 const [committedDir, regenDir] = process.argv.slice(2);
 if (!committedDir || !regenDir) {
-  console.error("Usage: tsx tools/check-golden-regen.ts <committed-golden-dir> <regenerated-golden-dir>");
+  console.error(
+    "Usage: tsx tools/check-golden-regen.ts <committed-golden-dir> <regenerated-golden-dir>",
+  );
   process.exit(2);
 }
 
 function loadFl32(path: string) {
   const raw = readFileSync(path);
-  return fl32FromBuffer(raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer);
+  return fl32FromBuffer(
+    raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer,
+  );
 }
 
 const failures: string[] = [];
@@ -51,12 +55,19 @@ for (const fontId of readdirSync(committedDir)) {
       failures.push(`${id}: not regenerated`);
       continue;
     }
-    if (readFileSync(resolve(a, "shape.txt"), "utf8") !== readFileSync(resolve(b, "shape.txt"), "utf8")) {
+    if (
+      readFileSync(resolve(a, "shape.txt"), "utf8") !==
+      readFileSync(resolve(b, "shape.txt"), "utf8")
+    ) {
       failures.push(`${id}: shape.txt differs`);
     }
     const ref = loadFl32(resolve(a, "bitmap.fl32"));
     const regen = loadFl32(resolve(b, "bitmap.fl32"));
-    if (ref.width !== regen.width || ref.height !== regen.height || ref.channels !== regen.channels) {
+    if (
+      ref.width !== regen.width ||
+      ref.height !== regen.height ||
+      ref.channels !== regen.channels
+    ) {
       failures.push(`${id}: dimensions differ`);
       continue;
     }
@@ -73,4 +84,6 @@ if (failures.length > 0) {
   console.error(`FAIL: ${failures.length} problem(s):\n  ${failures.join("\n  ")}`);
   process.exit(1);
 }
-console.log("OK: regenerated fixtures match committed (shape.txt exact, bitmaps within tolerance).");
+console.log(
+  "OK: regenerated fixtures match committed (shape.txt exact, bitmaps within tolerance).",
+);

@@ -15,46 +15,46 @@
  * DO NOT run this from CI for normal gate checks — fixtures are committed.
  */
 
-import { execFileSync } from 'child_process';
-import { createWriteStream, existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
-import { dirname, relative, resolve } from 'path';
-import { fileURLToPath } from 'url';
+import { execFileSync } from "child_process";
+import { existsSync, mkdirSync, writeFileSync } from "fs";
+import { dirname, relative, resolve } from "path";
+import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT = resolve(__dirname, '..');
-const FONTS_DIR = resolve(ROOT, 'test/fonts');
-const GOLDEN_DIR = resolve(ROOT, 'test/golden');
-const BINARY = resolve(__dirname, 'msdfgen-ref/build/msdfgen');
+const ROOT = resolve(__dirname, "..");
+const FONTS_DIR = resolve(ROOT, "test/fonts");
+const GOLDEN_DIR = resolve(ROOT, "test/golden");
+const BINARY = resolve(__dirname, "msdfgen-ref/build/msdfgen");
 
 // ── corpus configuration ─────────────────────────────────────────────────────
 
 /** Text + icon fonts to generate fixtures for. */
 const FONTS = [
   {
-    id: 'roboto',
-    file: 'Roboto.ttf',
-    type: /** @type {'text'} */ ('text'),
-    url: 'https://raw.githubusercontent.com/google/fonts/main/ofl/roboto/Roboto%5Bwdth%2Cwght%5D.ttf',
+    id: "roboto",
+    file: "Roboto.ttf",
+    type: /** @type {'text'} */ ("text"),
+    url: "https://raw.githubusercontent.com/google/fonts/main/ofl/roboto/Roboto%5Bwdth%2Cwght%5D.ttf",
   },
   {
-    id: 'notosans',
-    file: 'NotoSans.ttf',
-    type: /** @type {'text'} */ ('text'),
-    url: 'https://raw.githubusercontent.com/google/fonts/main/ofl/notosans/NotoSans%5Bwdth%2Cwght%5D.ttf',
+    id: "notosans",
+    file: "NotoSans.ttf",
+    type: /** @type {'text'} */ ("text"),
+    url: "https://raw.githubusercontent.com/google/fonts/main/ofl/notosans/NotoSans%5Bwdth%2Cwght%5D.ttf",
   },
   {
-    id: 'ptserif',
-    file: 'PTSerif-Regular.ttf',
-    type: /** @type {'text'} */ ('text'),
-    url: 'https://raw.githubusercontent.com/google/fonts/main/ofl/ptserif/PT_Serif-Web-Regular.ttf',
+    id: "ptserif",
+    file: "PTSerif-Regular.ttf",
+    type: /** @type {'text'} */ ("text"),
+    url: "https://raw.githubusercontent.com/google/fonts/main/ofl/ptserif/PT_Serif-Web-Regular.ttf",
   },
   {
-    id: 'lucide',
-    file: 'Lucide.ttf',
-    type: /** @type {'icon'} */ ('icon'),
+    id: "lucide",
+    file: "Lucide.ttf",
+    type: /** @type {'icon'} */ ("icon"),
     /** Zip release; we extract the TTF inside it. */
-    url: 'https://github.com/lucide-icons/lucide/releases/download/1.24.0/lucide-font-1.24.0.zip',
-    zipEntry: 'lucide.ttf',
+    url: "https://github.com/lucide-icons/lucide/releases/download/1.24.0/lucide-font-1.24.0.zip",
+    zipEntry: "lucide.ttf",
   },
 ];
 
@@ -65,21 +65,25 @@ const FONTS = [
  * Latin letters. Russian pangram adds Cyrillic coverage.  Diacritics exercise
  * composite-glyph resolution (needed for M1 parser gate).
  */
-const TEXT_CODEPOINTS = [...new Set([
-  // English pangram — all 26 lowercase + uppercase + space + punctuation
-  ...'The quick brown fox jumps over the lazy dog.',
-  ...'THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG',
-  // Digits
-  ...'0123456789',
-  // Common punctuation
-  ...'!?,.:;()@#&-\'"',
-  // Russian pangram — broad Cyrillic coverage
-  ...'Привет, мир! Съешь же ещё этих мягких французских булок, да выпей чаю.',
-  ...'ПРИВЕТ МИР СЪЕШЬ ЕЩЁ',
-  // Basic Latin diacritics — exercise composite glyphs in M1
-  ...'àáâãäåæçèéêëìíîïðñòóôõöøùúûüýþÿ',
-  ...'ÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖØÙÚÛÜÝÞ',
-].map((c) => c.codePointAt(0) ?? 0))].filter((cp) => cp > 32); // drop control chars + space
+const TEXT_CODEPOINTS = [
+  ...new Set(
+    [
+      // English pangram — all 26 lowercase + uppercase + space + punctuation
+      ..."The quick brown fox jumps over the lazy dog.",
+      ..."THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG",
+      // Digits
+      ..."0123456789",
+      // Common punctuation
+      ..."!?,.:;()@#&-'\"",
+      // Russian pangram — broad Cyrillic coverage
+      ..."Привет, мир! Съешь же ещё этих мягких французских булок, да выпей чаю.",
+      ..."ПРИВЕТ МИР СЪЕШЬ ЕЩЁ",
+      // Basic Latin diacritics — exercise composite glyphs in M1
+      ..."àáâãäåæçèéêëìíîïðñòóôõöøùúûüýþÿ",
+      ..."ÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖØÙÚÛÜÝÞ",
+    ].map((c) => c.codePointAt(0) ?? 0),
+  ),
+].filter((cp) => cp > 32); // drop control chars + space
 
 /** Bitmap sizes (pixels) to generate for each glyph. */
 const SIZES = [32, 48];
@@ -113,7 +117,7 @@ const ICON_GLYPH_COUNT = 30;
 function getParams(size, type) {
   // scale such that 1 em = (size - 2*pxrange) pixels
   const scale = size - 2 * PXRANGE;
-  if (type === 'icon') {
+  if (type === "icon") {
     const t = PXRANGE / scale;
     return { scale, tx: t, ty: t };
   }
@@ -150,8 +154,11 @@ async function downloadFromZip(zipUrl, entry, destTtf) {
   // List contents to find the actual entry path (handles subdirectory prefixes).
   let actualEntry = entry;
   try {
-    const listing = execFileSync('unzip', ['-Z1', zipPath], { encoding: 'utf8' });
-    const lines = listing.split('\n').map((l) => l.trim()).filter(Boolean);
+    const listing = execFileSync("unzip", ["-Z1", zipPath], { encoding: "utf8" });
+    const lines = listing
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean);
     const match = lines.find((l) => l.endsWith(`/${entry}`) || l === entry);
     if (match) actualEntry = match;
   } catch {
@@ -159,11 +166,15 @@ async function downloadFromZip(zipUrl, entry, destTtf) {
   }
 
   console.log(`  Extracting ${actualEntry} from zip...`);
-  const extracted = execFileSync('unzip', ['-p', zipPath, actualEntry]);
+  const extracted = execFileSync("unzip", ["-p", zipPath, actualEntry]);
   writeFileSync(destTtf, extracted);
 
   // Clean up the zip.
-  try { execFileSync('rm', [zipPath]); } catch { /* ignore */ }
+  try {
+    execFileSync("rm", [zipPath]);
+  } catch {
+    /* ignore */
+  }
 }
 
 // ── msdfgen invocation ────────────────────────────────────────────────────────
@@ -183,8 +194,8 @@ async function downloadFromZip(zipUrl, entry, destTtf) {
  */
 function runMsdfgen({ fontPath, charSpec, size, pxrange, scale, tx, ty, outDir }) {
   mkdirSync(outDir, { recursive: true });
-  const bitmapPath = resolve(outDir, 'bitmap.fl32');
-  const shapePath = resolve(outDir, 'shape.txt');
+  const bitmapPath = resolve(outDir, "bitmap.fl32");
+  const shapePath = resolve(outDir, "shape.txt");
 
   // charSpec is either a decimal codepoint or a "g<index>" string.
   const charArg = String(charSpec);
@@ -195,25 +206,36 @@ function runMsdfgen({ fontPath, charSpec, size, pxrange, scale, tx, ty, outDir }
   const rel = (/** @type {string} */ p) => relative(ROOT, p);
 
   const args = [
-    'msdf',
-    '-font', rel(fontPath), charArg,
-    '-o', rel(bitmapPath),
-    '-format', 'fl32',
-    '-dimensions', String(size), String(size),
-    '-pxrange', String(pxrange),
-    '-scale', String(scale),
-    '-translate', String(tx.toFixed(6)), String(ty.toFixed(6)),
-    '-emnormalize',
-    '-exportshape', rel(shapePath),
-    '-scanline',   // non-Skia scanline sign correction (matches our future port)
+    "msdf",
+    "-font",
+    rel(fontPath),
+    charArg,
+    "-o",
+    rel(bitmapPath),
+    "-format",
+    "fl32",
+    "-dimensions",
+    String(size),
+    String(size),
+    "-pxrange",
+    String(pxrange),
+    "-scale",
+    String(scale),
+    "-translate",
+    String(tx.toFixed(6)),
+    String(ty.toFixed(6)),
+    "-emnormalize",
+    "-exportshape",
+    rel(shapePath),
+    "-scanline", // non-Skia scanline sign correction (matches our future port)
   ];
 
   try {
-    execFileSync(BINARY, args, { cwd: ROOT, stdio: ['ignore', 'ignore', 'pipe'] });
+    execFileSync(BINARY, args, { cwd: ROOT, stdio: ["ignore", "ignore", "pipe"] });
   } catch (/** @type {any} */ err) {
     // msdfgen exits non-zero for glyphs not in the font — skip silently.
-    const stderr = err.stderr ? err.stderr.toString() : '';
-    if (stderr.includes('no glyph') || stderr.includes('not found') || stderr.includes('missing')) {
+    const stderr = err.stderr ? err.stderr.toString() : "";
+    if (stderr.includes("no glyph") || stderr.includes("not found") || stderr.includes("missing")) {
       return false;
     }
     throw err;
@@ -231,9 +253,9 @@ function runMsdfgen({ fontPath, charSpec, size, pxrange, scale, tx, ty, outDir }
     scale,
     tx,
     ty,
-    cli: [rel(BINARY), ...args].join(' '),
+    cli: [rel(BINARY), ...args].join(" "),
   };
-  writeFileSync(resolve(outDir, 'meta.json'), JSON.stringify(meta, null, 2));
+  writeFileSync(resolve(outDir, "meta.json"), JSON.stringify(meta, null, 2));
   return true;
 }
 
@@ -249,7 +271,7 @@ async function main() {
   mkdirSync(GOLDEN_DIR, { recursive: true });
 
   // ── download fonts ────────────────────────────────────────────────────────
-  console.log('\n=== Downloading fonts ===');
+  console.log("\n=== Downloading fonts ===");
   for (const font of FONTS) {
     const dest = resolve(FONTS_DIR, font.file);
     if (existsSync(dest)) {
@@ -264,7 +286,7 @@ async function main() {
   }
 
   // ── generate fixtures ─────────────────────────────────────────────────────
-  console.log('\n=== Generating fixtures ===');
+  console.log("\n=== Generating fixtures ===");
   let total = 0;
   let skipped = 0;
 
@@ -276,7 +298,7 @@ async function main() {
     }
 
     const codepoints =
-      font.type === 'icon'
+      font.type === "icon"
         ? Array.from({ length: ICON_GLYPH_COUNT }, (_, i) => `g${i + 1}`)
         : TEXT_CODEPOINTS;
 
@@ -285,17 +307,26 @@ async function main() {
         const { scale, tx, ty } = getParams(size, font.type);
         // Key: for text fonts use 'U+<hex>'; for icons use 'g<index>'.
         const key =
-          typeof charSpec === 'number'
-            ? `U${charSpec.toString(16).padStart(4, '0').toUpperCase()}_${size}px`
+          typeof charSpec === "number"
+            ? `U${charSpec.toString(16).padStart(4, "0").toUpperCase()}_${size}px`
             : `${charSpec}_${size}px`;
         const outDir = resolve(GOLDEN_DIR, font.id, key);
 
-        if (existsSync(resolve(outDir, 'bitmap.fl32'))) {
+        if (existsSync(resolve(outDir, "bitmap.fl32"))) {
           skipped++;
           continue;
         }
 
-        const ok = runMsdfgen({ fontPath, charSpec, size, pxrange: PXRANGE, scale, tx, ty, outDir });
+        const ok = runMsdfgen({
+          fontPath,
+          charSpec,
+          size,
+          pxrange: PXRANGE,
+          scale,
+          tx,
+          ty,
+          outDir,
+        });
         if (ok) total++;
       }
     }
@@ -306,4 +337,7 @@ async function main() {
   console.log(`Fixtures in: ${GOLDEN_DIR}`);
 }
 
-main().catch((err) => { console.error(err); process.exit(1); });
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

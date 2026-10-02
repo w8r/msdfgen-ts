@@ -20,7 +20,15 @@
  * into `src/shape/normalize` for the vector overlay (not part of the
  * public API surface).
  */
-import { Font, Atlas, type AtlasGlyph, type Shape, LINEAR, QUADRATIC, CUBIC } from "../../src/index";
+import {
+  Font,
+  Atlas,
+  type AtlasGlyph,
+  type Shape,
+  LINEAR,
+  QUADRATIC,
+  CUBIC,
+} from "../../src/index";
 import { emNormalizeShape } from "../../src/shape/normalize";
 
 const PANEL = 200; // px per debug panel
@@ -174,9 +182,12 @@ function drawVector(
           break;
         case CUBIC:
           ctx.bezierCurveTo(
-            mapX(seg.p1x), mapY(seg.p1y),
-            mapX(seg.p2x), mapY(seg.p2y),
-            mapX(seg.p3x), mapY(seg.p3y),
+            mapX(seg.p1x),
+            mapY(seg.p1y),
+            mapX(seg.p2x),
+            mapY(seg.p2y),
+            mapX(seg.p3x),
+            mapY(seg.p3y),
           );
           break;
       }

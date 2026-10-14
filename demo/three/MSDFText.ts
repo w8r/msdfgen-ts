@@ -21,6 +21,7 @@ import {
 } from "three";
 import { Atlas, Font } from "../../src/index";
 import type { AtlasOptions } from "../../src/index";
+import { layoutWithLines, prepareWithSegments } from "@chenglou/pretext";
 
 /** Anchor fractions: x 0 = left, 0.5 = centre, 1 = right; y 0 = top, 0.5 = middle, 1 = bottom. */
 export interface MSDFTextProps {
@@ -30,7 +31,7 @@ export interface MSDFTextProps {
   color: string | number;
   anchorX: number;
   anchorY: number;
-  /** Greedy word wrap width in world units. Omit for no wrapping. */
+  /** Word wrap width in world units (pretext line breaking). Omit for no wrapping. */
   maxWidth?: number | undefined;
 }
 
@@ -79,6 +80,8 @@ void main() {
  */
 export class MSDFFont {
   readonly atlas: Atlas;
+  /** CSS family name of the TTF registered with the browser, used by pretext for measuring. */
+  readonly family: string;
   readonly material: ShaderMaterial;
   private readonly _pxrange: number;
   private _texture: DataTexture;
@@ -88,8 +91,9 @@ export class MSDFFont {
    * @param font - parsed TrueType font
    * @param opts - atlas options (pixelsPerEm, pxrange)
    */
-  constructor(font: Font, opts: AtlasOptions = {}) {
+  constructor(font: Font, family: string, opts: AtlasOptions = {}) {
     this.atlas = new Atlas(font, opts);
+    this.family = family;
     this._pxrange = opts.pxrange ?? 4;
     this._texture = this._upload();
     this.material = new ShaderMaterial({
@@ -157,6 +161,7 @@ export class MSDFFont {
 }
 
 const _cache = new Map<string, Promise<MSDFFont>>();
+let _familyCount = 0;
 
 /**
  * Loads a TrueType font from `url` and returns its shared {@link MSDFFont}.
@@ -171,7 +176,13 @@ export function loadMSDFFont(url: string, opts?: AtlasOptions): Promise<MSDFFont
   if (!font) {
     font = fetch(url)
       .then((res) => res.arrayBuffer())
-      .then((buf) => new MSDFFont(new Font(buf), opts));
+      .then(async (buf) => {
+        // Register the TTF so canvas (used by pretext) measures with the same font.
+        const family = `msdf-${++_familyCount}`;
+        const face = new FontFace(family, buf);
+        document.fonts.add(await face.load());
+        return new MSDFFont(new Font(buf), family, opts);
+      });
     _cache.set(url, font);
   }
   return font;
@@ -229,7 +240,9 @@ export class MSDFText extends Mesh {
     this._font.ensure(text);
 
     const lines =
-      maxWidth === undefined ? text.split("\n") : wrap(atlas, text, maxWidth / fontSize);
+      maxWidth === undefined
+        ? text.split("\n")
+        : wrapText(this._font.family, text, maxWidth / fontSize);
     const { glyphs, widthEm, heightEm } = atlas.layoutMultiline(lines.join("\n"));
     const ox = -anchorX * widthEm;
     const oy = anchorY * heightEm;
@@ -277,30 +290,21 @@ export class MSDFText extends Mesh {
   }
 }
 
+/** Pretext measures at this px size. Widths are scaled back to em, so the value only sets precision. */
+const WRAP_PX = 100;
+
 /**
- * Greedy word wrap, measured in em. Words are split on spaces.
- * ponytail: no hyphenation or shaping-aware breaks, add when a demo needs them.
- * Caller must already have generated the glyphs for `text`, so measuring never repacks.
+ * Greedy line breaking with pretext. Widths come from the browser's canvas
+ * measurement of the registered TTF, so they can differ slightly from the
+ * atlas advances used for drawing.
  *
- * @param atlas - atlas that holds every glyph in `text`
+ * @param family - registered CSS family of the font
  * @param text - input text, may contain `\n`
  * @param maxEm - wrap width in em
- * @returns wrapped lines
+ * @returns wrapped lines, without trailing spaces
  */
-function wrap(atlas: Atlas, text: string, maxEm: number): string[] {
-  const out: string[] = [];
-  for (const para of text.split("\n")) {
-    let line = "";
-    for (const word of para.split(" ")) {
-      const candidate = line === "" ? word : `${line} ${word}`;
-      if (line !== "" && atlas.layout(candidate).widthEm > maxEm) {
-        out.push(line);
-        line = word;
-      } else {
-        line = candidate;
-      }
-    }
-    out.push(line);
-  }
-  return out;
+function wrapText(family: string, text: string, maxEm: number): string[] {
+  const prepared = prepareWithSegments(text, `${WRAP_PX}px "${family}"`);
+  const { lines } = layoutWithLines(prepared, maxEm * WRAP_PX, WRAP_PX);
+  return lines.map((line) => line.text.trimEnd());
 }

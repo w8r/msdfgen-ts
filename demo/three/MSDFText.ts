@@ -31,7 +31,7 @@ export interface MSDFTextProps {
   anchorX: number;
   anchorY: number;
   /** Greedy word wrap width in world units. Omit for no wrapping. */
-  maxWidth?: number;
+  maxWidth?: number | undefined;
 }
 
 const VERT = /* glsl */ `

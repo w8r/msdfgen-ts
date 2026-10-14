@@ -42,6 +42,7 @@ export default defineConfig({
         lucide: resolve(__dirname, "demo/lucide/index.html"),
         bench: resolve(__dirname, "demo/bench/index.html"),
         three: resolve(__dirname, "demo/three/index.html"),
+        r3f: resolve(__dirname, "demo/r3f/index.html"),
       },
     },
   },

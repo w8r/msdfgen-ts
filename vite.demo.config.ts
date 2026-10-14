@@ -43,6 +43,7 @@ export default defineConfig({
         bench: resolve(__dirname, "demo/bench/index.html"),
         three: resolve(__dirname, "demo/three/index.html"),
         r3f: resolve(__dirname, "demo/r3f/index.html"),
+        pixi: resolve(__dirname, "demo/pixi/index.html"),
       },
     },
   },

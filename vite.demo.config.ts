@@ -41,6 +41,7 @@ export default defineConfig({
         debug: resolve(__dirname, "demo/debug/index.html"),
         lucide: resolve(__dirname, "demo/lucide/index.html"),
         bench: resolve(__dirname, "demo/bench/index.html"),
+        three: resolve(__dirname, "demo/three/index.html"),
       },
     },
   },

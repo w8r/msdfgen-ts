@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>msdfgen-ts: PixiJS</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #0f1117;
+        color: #8b8f99;
+        font:
+          13px/1.5 system-ui,
+          sans-serif;
+        overflow: hidden;
+      }
+      canvas {
+        display: block;
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        cursor: grab;
+        touch-action: none;
+      }
+      .controls {
+        position: fixed;
+        top: 16px;
+        left: 20px;
+        right: 20px;
+        z-index: 1;
+        display: flex;
+        gap: 14px;
+        align-items: center;
+      }
+      input {
+        width: 100%;
+        max-width: 360px;
+        padding: 6px 10px;
+        font:
+          14px system-ui,
+          sans-serif;
+        color: #f4ecdb;
+        background: transparent;
+        border: 1px solid #8b8f99;
+        border-radius: 6px;
+      }
+      #zoom {
+        font:
+          12px ui-monospace,
+          Menlo,
+          monospace;
+      }
+      footer {
+        position: fixed;
+        left: 20px;
+        bottom: 16px;
+        margin: 0;
+        z-index: 1;
+      }
+      a {
+        color: #f4ecdb;
+        text-decoration: none;
+        border-bottom: 1px solid #8b8f99;
+      }
+    </style>
+    <script type="module" crossorigin src="/msdfgen-ts/assets/pixi-D6bgoN7u.js"></script>
+    <link rel="modulepreload" crossorigin href="/msdfgen-ts/assets/atlas-gen-C6JU4zlt.js">
+    <link rel="modulepreload" crossorigin href="/msdfgen-ts/assets/_commonjsHelpers-CqkleIqs.js">
+  </head>
+  <body>
+    <div class="controls">
+      <input id="input" type="text" value="Type new glyphs: ƒ ő Ж" aria-label="Text" />
+      <span id="zoom"></span>
+    </div>
+    <footer>
+      msdfgen-ts · PixiJS v8 BitmapText (MSDF) · drag to pan, wheel to zoom ·
+      <a href="https://github.com/w8r/msdfgen-ts/tree/main/demo/pixi">source</a> ·
+      <a href="../">all demos</a>
+    </footer>
+  </body>
+</html>

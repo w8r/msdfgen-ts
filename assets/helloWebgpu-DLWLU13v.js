@@ -1,4 +1,4 @@
-import{F as R,A as O}from"./atlas-gen-DqDNe1YC.js";const S="/msdfgen-ts/test/fonts/PTSerif-Regular.ttf",q="Crisp at any size",A=[.96,.93,.86,1],C=`
+import{F as R,A as O}from"./atlas-gen-C6JU4zlt.js";const S="/msdfgen-ts/test/fonts/PTSerif-Regular.ttf",q="Crisp at any size",A=[.96,.93,.86,1],C=`
 struct Uniforms { scale: vec2f, screenPxRange: f32, color: vec4f }
 @group(0) @binding(0) var<uniform> u: Uniforms;
 @group(0) @binding(1) var atlasTexture: texture_2d<f32>;

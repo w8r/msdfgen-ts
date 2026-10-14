@@ -1,4 +1,4 @@
-import{F as P,A as g}from"./atlas-gen-DqDNe1YC.js";const S="/msdfgen-ts/test/fonts/PTSerif-Regular.ttf",p="Crisp at any size",w=[.96,.93,.86,1],U=`#version 300 es
+import{F as P,A as g}from"./atlas-gen-C6JU4zlt.js";const S="/msdfgen-ts/test/fonts/PTSerif-Regular.ttf",p="Crisp at any size",w=[.96,.93,.86,1],U=`#version 300 es
 in vec4 aVertex;     // xy: position in em, zw: atlas uv
 uniform vec2 uScale; // em -> clip space
 out vec2 vUv;

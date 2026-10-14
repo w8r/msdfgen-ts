@@ -143,17 +143,22 @@ export class MSDFBitmapFont {
         const k = this._font.kerning(gids[j]!, gids[i]!);
         if (k) kerning[String.fromCodePoint(prev)] = (k / upe) * ppem;
       });
+      // Half-texel inset on every side. Linear filtering at the exact cell edge
+      // samples the neighbouring glyph in the packed atlas (bright slivers when
+      // zoomed). The outer texel is always outside the shape, since the MSDF
+      // padding is pxrange texels, so dropping it costs nothing visible.
+      const inset = g.w > 0 ? 0.5 : 0;
       chars[String.fromCodePoint(cp)] = {
         id: cp,
         letter: String.fromCodePoint(cp),
         page: 0,
-        x: g.x,
-        y: g.y,
-        width: g.w,
-        height: g.h,
+        x: g.x + inset,
+        y: g.y + inset,
+        width: g.w - 2 * inset,
+        height: g.h - 2 * inset,
         // Pixi draws each texture at (baseline + yOffset), so yOffset is the top of the glyph cell above the baseline.
-        xOffset: g.planeLeft * ppem,
-        yOffset: -g.planeTop * ppem,
+        xOffset: g.planeLeft * ppem + inset,
+        yOffset: -g.planeTop * ppem + inset,
         xAdvance: g.advance * ppem,
         kerning,
       };

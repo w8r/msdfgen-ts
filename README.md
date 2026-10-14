@@ -74,6 +74,20 @@ npm install
 npm run dev:hello-webgpu  # also: dev:hello-webgl, dev:webgpu-zoom, dev:webgl-zoom, dev:lucide, dev:bench
 ```
 
+## Framework examples
+
+The same atlas feeds three JS stacks. Each example is a self-contained module under `demo/`, meant to be copied into an app.
+
+| Stack             | Demo                                                      | Source                                      | Dev command         |
+| ----------------- | --------------------------------------------------------- | ------------------------------------------- | ------------------- |
+| three.js          | [live](https://w8r.github.io/msdfgen-ts/three/index.html) | [`demo/three/`](demo/three/MSDFText.ts)     | `npm run dev:three` |
+| react-three-fiber | [live](https://w8r.github.io/msdfgen-ts/r3f/index.html)   | [`demo/r3f/`](demo/r3f/MSDFText.tsx)        | `npm run dev:r3f`   |
+| PixiJS v8         | [live](https://w8r.github.io/msdfgen-ts/pixi/index.html)  | [`demo/pixi/`](demo/pixi/msdfBitmapFont.ts) | `npm run dev:pixi`  |
+
+- **three.js**: `MSDFText` is a `THREE.Mesh`. One atlas and one shader per font, shared by every text mesh. Glyphs can be added at runtime.
+- **react-three-fiber**: a thin `<MSDFText>` over the three.js mesh, plus a Suspense-friendly `useMSDFFont(url)`.
+- **PixiJS v8**: builds a Pixi `BitmapFont` from the atlas and uses Pixi's own MSDF path, so `BitmapText` needs no custom shader.
+
 ## Development
 
 ```sh

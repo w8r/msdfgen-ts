@@ -70,6 +70,7 @@
     "dev:webgpu-zoom": "vite --open /demo/webgpu-zoom/index.html",
     "dev:lucide": "vite --open /demo/lucide/index.html",
     "dev:svg": "vite --open /demo/svg/index.html",
+    "dev:svg-bounce": "vite --open /demo/svg-bounce/index.html",
     "dev:bench": "vite --open /demo/bench/index.html",
     "build": "vite build && vite build --config vite.worker.config.ts && tsc -p tsconfig.build.json && tsx tools/fix-dts-extensions.ts",
     "build:demo": "vite build --config vite.demo.config.ts",

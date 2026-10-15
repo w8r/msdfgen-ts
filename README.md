@@ -73,7 +73,7 @@ Enable alpha blending (glyph quads overlap), use linear texture filtering, and m
 
 ```sh
 npm install
-npm run dev:hello-webgpu  # also: dev:hello-webgl, dev:webgpu-zoom, dev:webgl-zoom, dev:lucide, dev:svg, dev:bench
+npm run dev:hello-webgpu  # also: dev:hello-webgl, dev:webgpu-zoom, dev:webgl-zoom, dev:lucide, dev:svg, dev:svg-bounce, dev:bench
 ```
 
 ## Framework examples

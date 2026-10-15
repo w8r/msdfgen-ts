@@ -26,7 +26,7 @@ function render(svg: string): void {
 
   // 1. SVG -> one float MSDF cell per path, packed into one texture.
   const t0 = performance.now();
-  renderer.load(svg, Number(resolution.value));
+  renderer.load([svg], Number(resolution.value));
   const { width: w, height: h } = renderer.msdf;
   status.textContent = `${w}×${h} px float MSDF in ${(performance.now() - t0).toFixed(0)} ms`;
 
@@ -35,7 +35,7 @@ function render(svg: string): void {
 
   // 3. Draw at every size, bottom-aligned on a row (device px, y-up).
   const dpr = window.devicePixelRatio || 1;
-  canvas.style.width = `${SIZES.reduce((a, s) => a + s * renderer.width + GAP, GAP)}px`;
+  canvas.style.width = `${SIZES.reduce((a, s) => a + s * renderer.widths[0]! + GAP, GAP)}px`;
   canvas.style.height = `${Math.max(...SIZES) + 2 * GAP}px`;
   canvas.width = Math.round(canvas.clientWidth * dpr);
   canvas.height = Math.round(canvas.clientHeight * dpr);
@@ -45,7 +45,7 @@ function render(svg: string): void {
   const instances: number[] = []; // per size: centre x, centre y, size, angle (+ 4 unused)
   let left = GAP;
   for (const size of SIZES) {
-    const w = size * renderer.width;
+    const w = size * renderer.widths[0]!;
     instances.push((left + w / 2) * dpr, (GAP + size / 2) * dpr, size * dpr, 0, 0, 0, 0, 0);
     left += w + GAP;
   }

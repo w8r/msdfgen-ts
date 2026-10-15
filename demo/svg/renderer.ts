@@ -15,6 +15,7 @@ import potpack from "potpack";
 import { generateShapeMSDF, parseSvgLayers } from "../../src/index";
 
 const MAX_STOPS = 8;
+const MAX_SVGS = 64; // files drawn together; icon i shows SVG i % count
 const TEXELS = 16; // per layer row: plane, cell, colour, info, 2 matrix rows, 8 stops, 2× offsets
 
 /** Default placement: instance attribute `a` is (centre x, centre y, size, angle). */
@@ -23,9 +24,10 @@ const PLACE_STATIC = `vec4 place(vec4 a, vec4 b) { return a; }`;
 const vert = (place: string): string => `#version 300 es
 precision highp float;
 uniform highp sampler2D uLayers;
-uniform int uLayerCount;
+uniform vec3 uSvgs[${MAX_SVGS}]; // per SVG: first layer row, layer count, viewBox width / height
+uniform int uSvgCount;
+uniform int uMaxLayers;   // quads per icon (the largest layer count)
 uniform vec2 uViewport;   // device px
-uniform float uWidth;     // viewBox width / height
 uniform float uPxRangeEm;
 uniform float uTime;
 uniform vec3 uCamera;     // pan x, pan y (device px), zoom — around the viewport centre
@@ -34,17 +36,22 @@ in vec4 aB;
 out vec2 vShape;
 out float vPxRange;
 flat out int vLayer;
+float svgWidth;           // this icon's viewBox width / height (readable by place())
 // place() -> (centre x, centre y) in device px, size in px per viewBox height, angle in radians.
 ${place}
 void main() {
-  vLayer = gl_InstanceID % uLayerCount;
+  int icon = gl_InstanceID / uMaxLayers, k = gl_InstanceID % uMaxLayers;
+  vec3 svg = uSvgs[icon % uSvgCount];
+  svgWidth = svg.z;
+  if (float(k) >= svg.y) { gl_Position = vec4(0.0); return; } // this SVG has fewer layers
+  vLayer = int(svg.x) + k;
   vec4 plane = texelFetch(uLayers, ivec2(0, vLayer), 0);
   vShape = mix(plane.xy, plane.zw, vec2(gl_VertexID & 1, gl_VertexID >> 1)); // strip corner
   vec4 p = place(aA, aB);
   p.xy = (p.xy - uViewport * 0.5 - uCamera.xy) * uCamera.z + uViewport * 0.5;
   p.z *= uCamera.z;
   vPxRange = uPxRangeEm * p.z;
-  vec2 d = mat2(cos(p.w), sin(p.w), -sin(p.w), cos(p.w)) * (vShape - vec2(uWidth, 1.0) * 0.5) * p.z;
+  vec2 d = mat2(cos(p.w), sin(p.w), -sin(p.w), cos(p.w)) * (vShape - vec2(svgWidth, 1.0) * 0.5) * p.z;
   gl_Position = vec4((p.xy + d) / uViewport * 2.0 - 1.0, 0.0, 1.0);
 }`;
 
@@ -104,13 +111,13 @@ function rgba(css: string, opacity: number): number[] {
   return [r / 255, g / 255, b / 255, (a / 255) * opacity];
 }
 
-/** Draws many instances of one SVG (all its layers) with WebGL2. */
+/** Draws many instances of one or more SVGs (all their layers) with WebGL2. */
 export class SvgRenderer {
   /** All layers' float MSDF cells, packed (RGB, rows y-up); set by {@link SvgRenderer.load}. */
   msdf = { width: 0, height: 0, data: new Float32Array(0) };
-  /** viewBox width / height of the loaded SVG. */
-  width = 1;
-  /** Number of drawn layers (paths) of the loaded SVG. */
+  /** viewBox width / height of each loaded SVG. */
+  widths: number[] = [];
+  /** Number of drawn layers (paths), all SVGs together. */
   layers = 0;
   private readonly _gl: WebGL2RenderingContext;
   private readonly _program: WebGLProgram;
@@ -119,11 +126,13 @@ export class SvgRenderer {
   private readonly _instances: WebGLBuffer;
   private _uploaded: Float32Array | null = null;
   private _pxPerEm = 1;
+  private _svgs: number[] = []; // uSvgs, flat
+  private _maxLayers = 0;
 
   /**
    * @param gl Target context.
    * @param place GLSL `vec4 place(vec4 a, vec4 b)` positioning each instance from its two
-   *   per-instance vec4s (may use `uTime`, `uViewport`, `uWidth`). Default: `a` is
+   *   per-instance vec4s (may use `uTime`, `uViewport`, `svgWidth`). Default: `a` is
    *   (centre x, centre y, size, angle).
    */
   constructor(gl: WebGL2RenderingContext, place = PLACE_STATIC) {
@@ -157,14 +166,16 @@ export class SvgRenderer {
     return tex;
   }
 
-  /** Parses `svg` and generates its MSDF cells (`pixelsPerEm` texels per viewBox height). */
-  load(svg: string, pixelsPerEm: number): void {
-    const { layers, width } = parseSvgLayers(svg);
+  /** Parses `svgs` and generates their MSDF cells (`pixelsPerEm` texels per viewBox height). */
+  load(svgs: string[], pixelsPerEm: number): void {
+    const parsed = svgs.slice(0, MAX_SVGS).map(parseSvgLayers);
     // One float MSDF cell per path, packed into one texture without quantization.
-    const cells = layers.flatMap((layer) => {
-      const m = generateShapeMSDF(layer.shape, pixelsPerEm, pixelsPerEm / 8);
-      return m ? [{ layer, m, w: m.w, h: m.h, x: 0, y: 0 }] : [];
-    });
+    const cells = parsed.flatMap(({ layers }, svg) =>
+      layers.flatMap((layer) => {
+        const m = generateShapeMSDF(layer.shape, pixelsPerEm, pixelsPerEm / 8);
+        return m ? [{ svg, layer, m, w: m.w, h: m.h, x: 0, y: 0 }] : [];
+      }),
+    );
     const { w: W, h: H } = potpack([...cells]); // a copy: potpack sorts in place, cells keep paint order
     const texels = new Float32Array(W * H * 3);
     for (const { m, x, y, w, h } of cells) {
@@ -201,7 +212,19 @@ export class SvgRenderer {
     gl.bindTexture(gl.TEXTURE_2D, this._layerTex);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, TEXELS, rows.length, 0, gl.RGBA, gl.FLOAT, data);
     this.msdf = { width: W, height: H, data: texels };
-    [this._pxPerEm, this.width, this.layers] = [pixelsPerEm, width, rows.length];
+    // Each SVG's rows are contiguous (cells are in SVG order): first row, count, width.
+    const counts = parsed.map((_, svg) => cells.filter((c) => c.svg === svg).length);
+    this._svgs = parsed.flatMap(({ width }, svg) => [
+      counts.slice(0, svg).reduce((a, b) => a + b, 0),
+      counts[svg]!,
+      width,
+    ]);
+    this._maxLayers = Math.max(0, ...counts);
+    [this._pxPerEm, this.widths, this.layers] = [
+      pixelsPerEm,
+      parsed.map((p) => p.width),
+      rows.length,
+    ];
   }
 
   /** Draws the loaded float MSDF into `canvas`, one texel per canvas pixel. */
@@ -225,7 +248,7 @@ export class SvgRenderer {
   draw(instances: Float32Array, time = 0, camera = [0, 0, 1]): void {
     const gl = this._gl;
     const count = instances.length / 8;
-    if (this.layers === 0 || count === 0) return;
+    if (this._maxLayers === 0 || count === 0) return;
     const u = (name: string): WebGLUniformLocation | null =>
       gl.getUniformLocation(this._program, name);
     gl.useProgram(this._program);
@@ -242,7 +265,7 @@ export class SvgRenderer {
       if (loc < 0) continue; // unused by place()
       gl.enableVertexAttribArray(loc);
       gl.vertexAttribPointer(loc, 4, gl.FLOAT, false, 32, offset);
-      gl.vertexAttribDivisor(loc, this.layers); // one icon = `layers` consecutive instances
+      gl.vertexAttribDivisor(loc, this._maxLayers); // one icon = `_maxLayers` consecutive quads
     }
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, this._layerTex);
@@ -250,13 +273,14 @@ export class SvgRenderer {
     gl.bindTexture(gl.TEXTURE_2D, this._msdfTex);
     gl.enable(gl.BLEND); // premultiplied output, overlapping layers
     gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-    gl.uniform1i(u("uLayerCount"), this.layers);
+    gl.uniform3fv(u("uSvgs"), this._svgs);
+    gl.uniform1i(u("uSvgCount"), this._svgs.length / 3);
+    gl.uniform1i(u("uMaxLayers"), this._maxLayers);
     gl.uniform2f(u("uViewport"), gl.drawingBufferWidth, gl.drawingBufferHeight);
-    gl.uniform1f(u("uWidth"), this.width);
     gl.uniform1f(u("uPxRangeEm"), 1 / 8); // pxrange = pixelsPerEm / 8 (see load)
     gl.uniform1f(u("uPxPerEm"), this._pxPerEm);
     gl.uniform1f(u("uTime"), time);
     gl.uniform3fv(u("uCamera"), camera);
-    gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, count * this.layers);
+    gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, count * this._maxLayers);
   }
 }

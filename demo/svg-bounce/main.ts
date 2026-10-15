@@ -8,13 +8,13 @@
 import { SvgRenderer } from "../svg/renderer";
 import { SAMPLES } from "../svg/samples";
 
-const COUNT = Number(new URLSearchParams(location.search).get("n")) || 3_000; // ?n=100000
+const COUNT = Number(new URLSearchParams(location.search).get("n")) || 10_000; // ?n=100000
 
 // a: start position (0..1 of the free room), velocity (viewports per second)
 // b: base size (device px), phase (radians), spin (radians per second)
 const PLACE = `vec4 place(vec4 a, vec4 b) {
   float size = b.x * (1.0 + 0.5 * sin(uTime * 1.7 + b.y));
-  vec2 box = vec2(uWidth, 1.0) * size;
+  vec2 box = vec2(svgWidth, 1.0) * size;
   vec2 room = max(uViewport - box, 1.0);
   vec2 p = a.xy * room + a.zw * uViewport * uTime;
   p = room - abs(mod(p, 2.0 * room) - room); // triangle wave = bouncing between 0 and room
@@ -50,10 +50,11 @@ const instances = new Float32Array(
   ]),
 );
 
-let current = "";
-function load(svg: string): void {
+let current: string[] = [];
+// Icon i shows SVG i % svgs.length, all in one atlas and one draw call.
+function load(svgs: string[]): void {
   try {
-    renderer.load((current = svg), Number(resolution.value));
+    renderer.load((current = svgs), Number(resolution.value));
     renderer.showMsdf(atlas);
     atlas.style.width = `${atlas.width / dpr}px`; // one texel per device pixel
   } catch (e) {
@@ -62,14 +63,17 @@ function load(svg: string): void {
 }
 
 for (const name of Object.keys(SAMPLES)) picker.add(new Option(name));
-picker.onchange = () => load(SAMPLES[picker.value]!);
+picker.add(new Option("all samples"));
+const pick = (): string[] =>
+  SAMPLES[picker.value] ? [SAMPLES[picker.value]!] : Object.values(SAMPLES);
+picker.onchange = () => load(pick());
 resolution.onchange = () => load(current);
 file.onchange = async () => {
-  const text = await file.files?.[0]?.text();
-  if (text) load(text);
+  const texts = await Promise.all([...(file.files ?? [])].map((f) => f.text()));
+  if (texts.length) load(texts);
 };
-picker.value = "sunset";
-load(SAMPLES.sunset!);
+picker.value = "all samples";
+load(pick());
 
 // ── Camera: pan + zoom around the viewport centre, device px, y-up (see uCamera).
 // Zoom eases toward `target` around an anchor point; panning keeps a decaying velocity.
@@ -164,7 +168,7 @@ function frame(now: number): void {
   frames++;
   if (now - lastFps > 500) {
     const fps = (frames * 1000) / (now - lastFps);
-    status.textContent = `${COUNT.toLocaleString()} icons × ${renderer.layers} layers = ${(COUNT * renderer.layers).toLocaleString()} quads, 1 draw call · ${fps.toFixed(0)} fps · zoom ${cam.zoom.toFixed(1)}×`;
+    status.textContent = `${COUNT.toLocaleString()} icons of ${renderer.widths.length} SVG(s), ${renderer.layers} paths, 1 draw call · ${fps.toFixed(0)} fps · zoom ${cam.zoom.toFixed(1)}×`;
     [frames, lastFps] = [0, now];
   }
   requestAnimationFrame(frame);

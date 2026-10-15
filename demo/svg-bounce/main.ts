@@ -9,7 +9,6 @@ import { SvgRenderer } from "../svg/renderer";
 import { SAMPLES } from "../svg/samples";
 
 const COUNT = Number(new URLSearchParams(location.search).get("n")) || 3_000; // ?n=100000
-const ATLAS_PX = 64; // MSDF texels per viewBox height; icons draw at up to ~2× that
 
 // a: start position (0..1 of the free room), velocity (viewports per second)
 // b: base size (device px), phase (radians), spin (radians per second)
@@ -27,6 +26,8 @@ const status = document.querySelector("#status")!;
 const pause = document.querySelector<HTMLButtonElement>("#pause")!;
 const picker = document.querySelector<HTMLSelectElement>("#sample")!;
 const file = document.querySelector<HTMLInputElement>("#file")!;
+const resolution = document.querySelector<HTMLSelectElement>("#res")!; // MSDF texels per viewBox height
+const atlas = document.querySelector<HTMLCanvasElement>("#atlas")!;
 const gl = canvas.getContext("webgl2")!;
 const renderer = new SvgRenderer(gl, PLACE);
 
@@ -49,9 +50,12 @@ const instances = new Float32Array(
   ]),
 );
 
+let current = "";
 function load(svg: string): void {
   try {
-    renderer.load(svg, ATLAS_PX);
+    renderer.load((current = svg), Number(resolution.value));
+    renderer.showMsdf(atlas);
+    atlas.style.width = `${atlas.width / dpr}px`; // one texel per device pixel
   } catch (e) {
     status.textContent = String(e);
   }
@@ -59,6 +63,7 @@ function load(svg: string): void {
 
 for (const name of Object.keys(SAMPLES)) picker.add(new Option(name));
 picker.onchange = () => load(SAMPLES[picker.value]!);
+resolution.onchange = () => load(current);
 file.onchange = async () => {
   const text = await file.files?.[0]?.text();
   if (text) load(text);

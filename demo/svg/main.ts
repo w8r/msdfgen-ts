@@ -24,18 +24,14 @@ const renderer = new SvgRenderer(gl);
 function render(svg: string): void {
   native.src = `data:image/svg+xml,${encodeURIComponent(svg)}`;
 
-  // 1. SVG -> one MSDF cell per path, packed into one atlas.
+  // 1. SVG -> one float MSDF cell per path, packed into one texture.
   const t0 = performance.now();
-  const atlas = renderer.load(svg, Number(resolution.value));
-  status.textContent = `${atlas.width}×${atlas.height} px atlas in ${(performance.now() - t0).toFixed(0)} ms`;
+  renderer.load(svg, Number(resolution.value));
+  const { width: w, height: h } = renderer.msdf;
+  status.textContent = `${w}×${h} px float MSDF in ${(performance.now() - t0).toFixed(0)} ms`;
 
   // 2. Show the raw MSDF texture itself.
-  preview.width = atlas.width;
-  preview.height = atlas.height;
-  if (atlas.width > 0) {
-    const pixels = new ImageData(new Uint8ClampedArray(atlas.texture), atlas.width, atlas.height);
-    preview.getContext("2d")!.putImageData(pixels, 0, 0);
-  }
+  renderer.showMsdf(preview);
 
   // 3. Draw at every size, bottom-aligned on a row (device px, y-up).
   const dpr = window.devicePixelRatio || 1;

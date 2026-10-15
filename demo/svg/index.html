@@ -67,13 +67,14 @@
     <div id="root">
       <h1>SVG → MSDF</h1>
       <p>
-        One 32 px MSDF cell, drawn at every size with WebGL2. Edit the SVG below (filled
-        <code>&lt;path&gt;</code>s only; strokes, transforms and basic shapes are ignored).
+        One MSDF cell per path, drawn at every size with its fill colour or gradient (WebGL2). Edit
+        the SVG below or import one (filled <code>&lt;path&gt;</code>s only; strokes, transforms and
+        basic shapes are ignored).
       </p>
       <div class="panel">
         <figure>
           <canvas id="gl"></canvas>
-          <figcaption>MSDF (WebGL2)</figcaption>
+          <figcaption>MSDF (WebGL2), 16–256 px</figcaption>
         </figure>
         <figure>
           <img alt="" />
@@ -85,7 +86,17 @@
         </figure>
       </div>
       <p id="status"></p>
-      <div id="samples">Samples:</div>
+      <div id="samples">
+        Atlas
+        <select id="res">
+          <option>32</option>
+          <option selected>64</option>
+          <option>128</option>
+          <option>256</option>
+        </select>
+        px per viewBox height · <input id="file" type="file" accept=".svg,image/svg+xml" /> ·
+        Samples:
+      </div>
       <textarea spellcheck="false"></textarea>
       <p><a href="../">all demos</a></p>
     </div>

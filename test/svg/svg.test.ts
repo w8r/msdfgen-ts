@@ -13,8 +13,9 @@ import { fileURLToPath } from "url";
 import { tmpdir } from "os";
 import { execFileSync } from "child_process";
 import { describe, it, expect } from "vitest";
-import { parseSvg } from "../../src/svg/svg";
+import { parseSvg, parseSvgLayers } from "../../src/svg/svg";
 import { type Contour } from "../../src/shape/contour";
+import { type SvgLayer } from "../../src/svg/svg";
 import { generateShapeMSDF } from "../../src/msdf/shape-msdf";
 import { CUBIC, LINEAR } from "../../src/shape/segments";
 import { parseShapeDesc, serializeShape } from "../utils/shapedesc";
@@ -80,6 +81,44 @@ describe("parseSvg", () => {
     expect(Math.sign(outer!)).toBe(-Math.sign(hole!));
     const plain = parseSvg(ICONS.ring!.replace(' fill-rule="evenodd"', "")).contours.map(area);
     expect(Math.sign(plain[0]!)).toBe(Math.sign(plain[1]!));
+  });
+});
+
+describe("parseSvgLayers", () => {
+  // Shape-space point → gradient parameter t.
+  const t = (layer: SvgLayer, x: number, y: number): number => {
+    const {
+      radial,
+      matrix: [a = 0, b = 0, c = 0, d = 0, e = 0, f = 0],
+    } = layer.gradient!;
+    const [gx, gy] = [a * x + c * y + e, b * x + d * y + f];
+    return radial ? Math.hypot(gx, gy) : gx;
+  };
+  const { layers, width } = parseSvgLayers(`<svg viewBox="0 0 20 10">
+    <defs>
+      <linearGradient id="h"><stop offset="0" stop-color="red"/><stop offset="100%" style="stop-color:blue"/></linearGradient>
+      <radialGradient id="r" gradientUnits="userSpaceOnUse" cx="15" cy="5" r="5" xlink:href="#h"/>
+      <clipPath id="c"><path d="M0 0H1V1Z"/></clipPath>
+    </defs>
+    <path fill="url(#h)" d="M2 2H8V8H2Z"/>
+    <path style="fill:url(#r);opacity:.5" fill-opacity="0.5" d="M10 0H20V10H10Z"/>
+    <path fill="#0f0" d="M0 0H1V1Z"/>
+  </svg>`);
+
+  it("keeps one layer per drawn path, in order, with its paint", () => {
+    expect(width).toBe(2);
+    expect(layers.map((l) => l.color)).toEqual(["url(#h)", "url(#r)", "#0f0"]);
+    expect(layers.map((l) => l.opacity)).toEqual([1, 0.25, 1]);
+    expect(layers[1]!.gradient!.stops.map((s) => s.color)).toEqual(["red", "blue"]); // via href
+    expect(layers[2]!.gradient).toBeNull();
+  });
+
+  it("maps gradients to shape space: bounding box (linear) and user space (radial)", () => {
+    // Square spans x 2..8 of a 10-high viewBox → shape x 0.2..0.8.
+    expect(t(layers[0]!, 0.2, 0.5)).toBeCloseTo(0, 12);
+    expect(t(layers[0]!, 0.8, 0.5)).toBeCloseTo(1, 12);
+    expect(t(layers[1]!, 1.5, 0.5)).toBeCloseTo(0, 12); // centre (15, 5)
+    expect(t(layers[1]!, 1.5, 1.0)).toBeCloseTo(1, 12); // r = 5 above it
   });
 });
 

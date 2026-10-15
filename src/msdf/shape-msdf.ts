@@ -53,7 +53,7 @@ export function generateShapeMSDF(
 ): ShapeMSDF | null {
   if (shape.contours.length === 0) return null;
 
-  const bounds = _shapeBounds(shape);
+  const bounds = shapeBounds(shape);
   const s = pixelsPerUnit;
   const pxr = pxrange;
   // Cell size in texels = ceil(bbox in texels) + 2*pxr on each side.
@@ -84,15 +84,19 @@ export function generateShapeMSDF(
   };
 }
 
-/** Reusable point sample buffer for `_shapeBounds`. */
+/** Reusable point sample buffer for `shapeBounds`. */
 const _pt: number[] = [0, 0];
 
 /**
  * Axis-aligned bounds of a shape, sampled at `BOUNDS_SAMPLES` t-values per
  * segment. Not mathematically tight, but well under a texel of slop at any
- * realistic `pixelsPerUnit` — good enough for cropping.
+ * realistic `pixelsPerUnit` — good enough for cropping (and for SVG
+ * `objectBoundingBox` gradients).
+ *
+ * @param shape Shape to measure.
+ * @returns Its axis-aligned bounds, in shape units.
  */
-function _shapeBounds(shape: Shape): {
+export function shapeBounds(shape: Shape): {
   minX: number;
   minY: number;
   maxX: number;

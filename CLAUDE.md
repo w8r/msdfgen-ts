@@ -23,8 +23,9 @@ Target: < 50 KB minified, zero runtime dependencies, no WASM.
 - Variable fonts (`gvar`, `fvar`)
 - Text shaping: ligatures, complex scripts, GSUB. Kerning = `kern` table only (format 0)
 - PNG output
-- SVG beyond filled `<path>`s: strokes, transforms, `<g>`/CSS styling, basic shapes
-  (`<circle>`, `<rect>`, …), per-path colours. No DOM-based parsing in the library.
+- SVG beyond filled `<path>`s: strokes, path/group transforms, `<g>` inheritance, CSS classes,
+  basic shapes (`<circle>`, `<rect>`, …), gradient spread/focal points. No DOM-based parsing in
+  the library.
 - Skia-style overlap resolution — use scanline sign correction like msdfgen without
   `MSDFGEN_USE_SKIA`
 - Node canvas / DOM dependencies in the library itself (demo may use DOM)
@@ -107,7 +108,7 @@ src/
       kern.ts          # format 0 horizontal kerning
     font.ts            # public Font class: glyphId(codepoint), shape(glyphId), metrics
   svg/
-    svg.ts             # parseSvg(text) -> Shape: <path d> commands, arcs -> cubics, evenodd
+    svg.ts             # parseSvg -> Shape; parseSvgLayers -> per-path shape + fill/gradient
   shape/
     segments.ts        # EdgeSegment: single class, type tag LINEAR|QUADRATIC|CUBIC,
                        # flat numeric fields p0x..p3x etc. HOT.
@@ -260,7 +261,12 @@ zero allocations in the per-pixel loop verified by a heap-delta assertion around
 code in `msdf/` or the atlas.
 
 - **Scope:** filled `<path d>` only, all path commands. Arcs become ≤ 90° cubics (SVG spec
-  F.6.5). All paths are unioned into one nonzero shape; `fill="none"` paths are skipped.
+  F.6.5). `parseSvg` unions all paths into one nonzero shape; `parseSvgLayers` keeps one shape
+  per path plus its paint (CSS colour string or linear/radial gradient, resolved to one
+  shape-space affine matrix + stops). `fill="none"` paths and `<defs>`/`<clipPath>`/`<mask>`/
+  `<symbol>` contents are skipped.
+- **Rendering stays out of the library:** colour strings are returned raw (no CSS colour parser
+  in the library) and the WebGL2 renderer lives in `demo/svg/renderer.ts`, not `src/`.
 - **Units:** 1 shape unit = the viewBox height (so `pixelsPerEm` = pixels per icon). The scale
   goes through `emNormalizeShape(shape, viewBoxHeight)`, like a font's `unitsPerEm`, which also
   collapses degenerate quadratics/cubics exactly like C++ `EdgeSegment::create`.

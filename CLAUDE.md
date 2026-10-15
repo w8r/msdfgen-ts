@@ -1,13 +1,15 @@
 # msdf-ts — CLAUDE.md
 
 TypeScript port of [Chlumsky/msdfgen](https://github.com/Chlumsky/msdfgen) (core only) with a
-minimal built-in TrueType parser, runtime atlas generation, and a WebGPU text rendering demo.
+minimal built-in TrueType parser, a minimal SVG path parser, runtime atlas generation, and a
+WebGPU text rendering demo.
 
 ## Mission
 
 A near-zero-dependency TypeScript library that, at runtime in the browser:
 
-1. Parses TrueType fonts (`glyf` outlines) directly from an `ArrayBuffer`
+1. Parses TrueType fonts (`glyf` outlines) directly from an `ArrayBuffer`, and filled SVG
+   `<path>`s from a string (see "SVG input")
 2. Generates MSDF/MTSDF bitmaps per glyph, numerically matching C++ msdfgen
 3. Packs glyphs into a dynamically growing atlas texture
 4. Ships an **interactive WebGPU demo**: pan + smooth "infinite" zoom over rendered text,
@@ -20,7 +22,9 @@ Target: < 50 KB minified, zero runtime dependencies, no WASM.
 - CFF/OTF (cubic charstrings) — v2
 - Variable fonts (`gvar`, `fvar`)
 - Text shaping: ligatures, complex scripts, GSUB. Kerning = `kern` table only (format 0)
-- SVG input, PNG output
+- PNG output
+- SVG beyond filled `<path>`s: strokes, transforms, `<g>`/CSS styling, basic shapes
+  (`<circle>`, `<rect>`, …), per-path colours. No DOM-based parsing in the library.
 - Skia-style overlap resolution — use scanline sign correction like msdfgen without
   `MSDFGEN_USE_SKIA`
 - Node canvas / DOM dependencies in the library itself (demo may use DOM)
@@ -102,23 +106,27 @@ src/
       glyf.ts          # simple + composite glyphs -> Shape (quadratic segments)
       kern.ts          # format 0 horizontal kerning
     font.ts            # public Font class: glyphId(codepoint), shape(glyphId), metrics
+  svg/
+    svg.ts             # parseSvg(text) -> Shape: <path d> commands, arcs -> cubics, evenodd
   shape/
     segments.ts        # EdgeSegment: single class, type tag LINEAR|QUADRATIC|CUBIC,
                        # flat numeric fields p0x..p3x etc. HOT.
     contour.ts  shape.ts
-    normalize.ts       # contour normalization, winding, scanline sign correction
+    normalize.ts       # em-normalization, Shape::normalize, orientContours (even-odd -> nonzero)
   msdf/
     edge-coloring.ts   # edgeColoringSimple (deterministic, same seed behavior as C++)
     distance.ts        # signed (pseudo-)distance per segment. HOTTEST code in the repo.
     generate.ts        # generateMSDF / generateMTSDF into Float32Array
     error-correction.ts# full MSDFErrorCorrection port — required, not optional
-  atlas-gen.ts         # Atlas class: glyph cache + potpack packing + MSDF generation, in one file
+    shape-msdf.ts      # generateShapeMSDF: the whole pipeline for one Shape, any source
+  atlas-gen.ts         # Atlas class: glyph/shape caches + potpack packing, in one file
   index.ts             # explicit named exports — this file defines the public API surface
 demo/
   webgpu/              # instanced quads, WGSL median shader, screenPxRange uniform
 test/
   golden/              # committed fixtures from C++ msdfgen — READ ONLY for Claude
   parser/              # font parsing tests (metrics vs opentype.js, devDependency only)
+  svg/                 # SVG parser tests + live reference diff for cubic / even-odd shapes
   diff.test.ts         # golden bitmap comparison
   e2e.test.ts          # SSIM vs OffscreenCanvas rasterization
 tools/
@@ -244,6 +252,29 @@ zero allocations in the per-pixel loop verified by a heap-delta assertion around
    When adding to or reviewing `generate.ts`'s pixel loop: before adding anything to the
    per-edge inner loop, ask whether it depends on `px`/`py` — if it doesn't, it belongs in
    a precompute pass, not the pixel loop, however small it looks per-call.
+
+## SVG input
+
+`src/svg/` is the `font/` twin: source text in, `Shape` out; everything after that
+(`generateShapeMSDF`, `Atlas.shapes`) is shared with fonts. Keep it that way: no SVG-specific
+code in `msdf/` or the atlas.
+
+- **Scope:** filled `<path d>` only, all path commands. Arcs become ≤ 90° cubics (SVG spec
+  F.6.5). All paths are unioned into one nonzero shape; `fill="none"` paths are skipped.
+- **Units:** 1 shape unit = the viewBox height (so `pixelsPerEm` = pixels per icon). The scale
+  goes through `emNormalizeShape(shape, viewBoxHeight)`, like a font's `unitsPerEm`, which also
+  collapses degenerate quadratics/cubics exactly like C++ `EdgeSegment::create`.
+- **Y-axis:** SVG is y-down; the parser flips to y-up while reading coordinates. That is a source
+  coordinate conversion, not the texture flip (which stays in exactly one place, the atlas blit).
+- **`fill-rule="evenodd"`:** that path's contours go through `orientContours` (port of
+  `Shape::orientContours`, what msdfgen's `-windingpreprocess` uses) so nonzero gives the same
+  fill. Do not thread an even-odd fill rule through sign correction instead: the generator's
+  contour combiner then sees same-direction holes and mangles their corners. Self-intersecting
+  even-odd paths are approximate, as in msdfgen without Skia.
+- **Verification:** TrueType goldens never contain cubics, so `test/svg/` is the only coverage of
+  the CUBIC paths. The reference build is core-only and can't read SVG, so the test serializes
+  the parsed shape to shapedesc and diffs `msdf -shapedesc` against `generateShapeMSDF` live
+  (same `1e-4` rule, same CI behavior as gate:m2b/m3 for a missing binary).
 
 ## Code style
 

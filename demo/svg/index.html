@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>msdfgen-ts: SVG icons</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 24px;
+        background: #0f1117;
+        color: #8b8f99;
+        font:
+          13px/1.5 system-ui,
+          sans-serif;
+      }
+      h1 {
+        color: #f4ecdb;
+        font-size: 18px;
+        font-weight: 600;
+      }
+      .panel {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-end;
+        gap: 24px;
+        padding: 16px;
+        background: #fff;
+        border-radius: 8px;
+        overflow-x: auto;
+      }
+      .panel figure {
+        margin: 0;
+        color: #555;
+      }
+      #msdf {
+        width: 128px;
+        image-rendering: pixelated;
+      }
+      img {
+        width: 256px;
+        height: 256px;
+      }
+      textarea {
+        display: block;
+        width: 100%;
+        max-width: 900px;
+        height: 120px;
+        margin-top: 8px;
+        box-sizing: border-box;
+        background: #161922;
+        color: #f4ecdb;
+        border: 1px solid #252a36;
+        font:
+          12px ui-monospace,
+          monospace;
+      }
+      button {
+        margin-right: 6px;
+      }
+      a {
+        color: #f4ecdb;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <h1>SVG → MSDF</h1>
+      <p>
+        One 32 px MSDF cell, drawn at every size with WebGL2. Edit the SVG below (filled
+        <code>&lt;path&gt;</code>s only; strokes, transforms and basic shapes are ignored).
+      </p>
+      <div class="panel">
+        <figure>
+          <canvas id="gl"></canvas>
+          <figcaption>MSDF (WebGL2)</figcaption>
+        </figure>
+        <figure>
+          <img alt="" />
+          <figcaption>browser SVG, 256 px</figcaption>
+        </figure>
+        <figure>
+          <canvas id="msdf"></canvas>
+          <figcaption>the MSDF texture</figcaption>
+        </figure>
+      </div>
+      <p id="status"></p>
+      <div id="samples">Samples:</div>
+      <textarea spellcheck="false"></textarea>
+      <p><a href="../">all demos</a></p>
+    </div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

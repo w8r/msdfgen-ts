@@ -65,7 +65,7 @@ Enable alpha blending (glyph quads overlap), use linear texture filtering, and m
 ## Limitations
 
 - TrueType (`glyf`) outlines only. No CFF/OTF, no variable fonts.
-- SVG: filled `<path>`s only, with solid, linear or radial gradient fills. No strokes, path/group transforms, CSS classes or basic shapes (`<circle>`, `<rect>`, …).
+- SVG: fills only (paths and basic shapes, transforms, `.class` CSS, solid / linear / radial gradient fills). No strokes, clip paths, masks, filters, `<use>` or `<text>`.
 - No text shaping (ligatures, complex scripts). Kerning comes from the `kern` table only.
 - Generation takes about 2–10 ms per glyph at 48 px/em, depending on complexity. Build atlases up front or in the worker, not per frame.
 

@@ -16,7 +16,7 @@ import { describe, it, expect } from "vitest";
 import { parseSvg, parseSvgLayers } from "../../src/svg/svg";
 import { type Contour } from "../../src/shape/contour";
 import { type SvgLayer } from "../../src/svg/svg";
-import { generateShapeMSDF } from "../../src/msdf/shape-msdf";
+import { generateShapeMSDF, shapeBounds } from "../../src/msdf/shape-msdf";
 import { CUBIC, LINEAR } from "../../src/shape/segments";
 import { parseShapeDesc, serializeShape } from "../utils/shapedesc";
 import { compareBitmaps, fl32FromBuffer } from "../utils/compare";
@@ -119,6 +119,27 @@ describe("parseSvgLayers", () => {
     expect(t(layers[0]!, 0.8, 0.5)).toBeCloseTo(1, 12);
     expect(t(layers[1]!, 1.5, 0.5)).toBeCloseTo(0, 12); // centre (15, 5)
     expect(t(layers[1]!, 1.5, 1.0)).toBeCloseTo(1, 12); // r = 5 above it
+  });
+});
+
+describe("parseSvgLayers: document structure", () => {
+  it("composes group transforms, converts basic shapes, applies CSS classes and mixed quotes", () => {
+    const { layers } = parseSvgLayers(`<svg viewBox="0 0 10 10">
+      <style>.a, .b { fill: red } .b { fill: blue }</style>
+      <!-- <path d="M0 0H9V9Z"/> comments are not drawn -->
+      <g transform="translate(5 0)" fill="green">
+        <rect width="2" height="2"/>
+        <circle class="a b" cx="1" cy="5" r="1"/>
+      </g>
+      <polygon points="0,8 2,8 2,10" style="font-family:'X Y';fill:#123"/>
+    </svg>`);
+    expect(layers.map((l) => l.color)).toEqual(["green", "blue", "#123"]);
+    const box = (i: number): number[] => {
+      const b = shapeBounds(layers[i]!.shape);
+      return [b.minX, b.minY, b.maxX, b.maxY].map((v) => Math.round(v * 1e9) / 1e9);
+    };
+    expect(box(0)).toEqual([0.5, 0.8, 0.7, 1]); // rect x 5..7, y 0..2 (y-up: 0.8..1)
+    expect(box(1)).toEqual([0.5, 0.4, 0.7, 0.6]); // circle centre (6, 5), r 1
   });
 });
 

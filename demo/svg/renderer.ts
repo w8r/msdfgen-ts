@@ -165,7 +165,7 @@ export class SvgRenderer {
       const m = generateShapeMSDF(layer.shape, pixelsPerEm, pixelsPerEm / 8);
       return m ? [{ layer, m, w: m.w, h: m.h, x: 0, y: 0 }] : [];
     });
-    const { w: W, h: H } = potpack(cells);
+    const { w: W, h: H } = potpack([...cells]); // a copy: potpack sorts in place, cells keep paint order
     const texels = new Float32Array(W * H * 3);
     for (const { m, x, y, w, h } of cells) {
       for (let row = 0; row < h; row++) {

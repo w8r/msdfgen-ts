@@ -59,11 +59,13 @@ Enable alpha blending (glyph quads overlap), use linear texture filtering, and m
 - **Preload a character range:** `atlas.glyphs(codepoints)` generates any iterable of codepoints in one batch, e.g. all of Latin and Cyrillic up front.
 - **Icon fonts:** `atlas.glyphsByIndex(ids)` addresses glyphs by index, for glyphs with no codepoint. `font.numGlyphs` gives the count.
 - **Adding glyphs repacks the atlas.** Glyph objects are updated in place, so keep the objects you got and re-read `x`/`y` after adding more; don't copy them into variables.
+- **SVG icons:** `atlas.shapes([["heart", parseSvg(svgText)]])` adds any SVG as a shape (1 unit = the viewBox height, so `pixelsPerEm` means pixels per icon). Pass `null` instead of a font for an SVG-only atlas. `generateShapeMSDF(shape, pixelsPerUnit, pxrange)` gives one bitmap without an atlas. For colour, `parseSvgLayers(svgText)` returns one shape per path with its fill colour or gradient; the [SVG demo](demo/svg/renderer.ts) has a small WebGL2 renderer for it.
 - **Off the main thread:** `msdfgen-ts/worker` runs the same build in a Web Worker. See [`src/atlas-worker.ts`](src/atlas-worker.ts) for the message protocol.
 
 ## Limitations
 
 - TrueType (`glyf`) outlines only. No CFF/OTF, no variable fonts.
+- SVG: fills only (paths and basic shapes, transforms, `.class` CSS, solid / linear / radial gradient fills). No strokes, clip paths, masks, filters, `<use>` or `<text>`.
 - No text shaping (ligatures, complex scripts). Kerning comes from the `kern` table only.
 - Generation takes about 2–10 ms per glyph at 48 px/em, depending on complexity. Build atlases up front or in the worker, not per frame.
 
@@ -71,7 +73,7 @@ Enable alpha blending (glyph quads overlap), use linear texture filtering, and m
 
 ```sh
 npm install
-npm run dev:hello-webgpu  # also: dev:hello-webgl, dev:webgpu-zoom, dev:webgl-zoom, dev:lucide, dev:bench
+npm run dev:hello-webgpu  # also: dev:hello-webgl, dev:webgpu-zoom, dev:webgl-zoom, dev:lucide, dev:svg, dev:svg-bounce, dev:bench
 ```
 
 ## Framework examples

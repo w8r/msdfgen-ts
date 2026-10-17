@@ -1,7 +1,8 @@
 /**
  * 10,000 instances of one SVG, bouncing off the edges, pulsing and spinning.
  * All motion runs in the vertex shader from `uTime` (see PLACE below): the
- * instance buffer is uploaded once, and each frame is a single draw call.
+ * instance buffer is uploaded once, and each frame is a few instanced draw
+ * calls (a single one for one SVG, see SvgRenderer.draw).
  * Drag to pan (with momentum), wheel / pinch / double-click to zoom at the
  * cursor, arrows or WASD to slide, 0 to reset, space (or the button) to pause.
  */
@@ -168,7 +169,7 @@ function frame(now: number): void {
   frames++;
   if (now - lastFps > 500) {
     const fps = (frames * 1000) / (now - lastFps);
-    status.textContent = `${COUNT.toLocaleString()} icons of ${renderer.widths.length} SVG(s), ${renderer.layers} paths, 1 draw call · ${fps.toFixed(0)} fps · zoom ${cam.zoom.toFixed(1)}×`;
+    status.textContent = `${COUNT.toLocaleString()} icons of ${renderer.widths.length} SVG(s), ${renderer.layers} paths, ${renderer.drawCalls} draw call${renderer.drawCalls === 1 ? "" : "s"} · ${fps.toFixed(0)} fps · zoom ${cam.zoom.toFixed(1)}×`;
     [frames, lastFps] = [0, now];
   }
   requestAnimationFrame(frame);

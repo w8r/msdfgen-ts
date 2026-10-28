@@ -156,11 +156,11 @@ function renderAtSize(
       maxY = glyph.y + glyph.h - 1;
 
     for (let dy = dstY0; dy < dstY1; dy++) {
-      const cellFracY = (dy - cellTop) / cellHeightPx; // [0, 1)
-      const srcY = glyph.y + cellFracY * glyph.h;
+      const cellFracY = (dy + 0.5 - cellTop) / cellHeightPx;
+      const srcY = glyph.y + cellFracY * glyph.h - 0.5; // texel centres sit at integers here
       for (let dx = dstX0; dx < dstX1; dx++) {
-        const cellFracX = (dx - cellLeft) / cellWidthPx;
-        const srcX = glyph.x + cellFracX * glyph.w;
+        const cellFracX = (dx + 0.5 - cellLeft) / cellWidthPx;
+        const srcX = glyph.x + cellFracX * glyph.w - 0.5;
 
         const [r, g, b] = sampleAtlas(atlas, srcX, srcY, minX, minY, maxX, maxY);
         const sd = median3(r, g, b) - 0.5;

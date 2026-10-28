@@ -1,0 +1,1324 @@
+<title>msdfgen-ts vs webgl-sdf-generator</title>
+<meta name="claude:viewport-fit-sides" content="cover" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  rel="stylesheet"
+  href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=Spectral:wght@500;600&display=swap"
+/>
+<style>
+  /* Layout: a 68ch reading column for prose; the viewer, findings and charts break out to a 1120px band. */
+  :root {
+    --paper: #f4f5f7;
+    --surface: #ffffff;
+    --ink: #15171c;
+    --ink-2: #4a4f5a;
+    --muted: #7d828c;
+    --rule: #dbdee4;
+    --accent: #2a63b8;
+    --msdf: #2a78d6;
+    --sdf: #eb6834;
+    --band: #e9f1fb;
+    --glyph-ink: #111318;
+    --glyph-paper: #ffffff;
+    --err-extra: #e34948;
+    --err-missing: #6250d6;
+    --plate: #0b0c0f;
+    --display: "Spectral", Georgia, "Times New Roman", serif;
+    --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    --band-w: 1120px;
+    --text-w: 68ch;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #0e1013;
+      --surface: #16191e;
+      --ink: #e8eaee;
+      --ink-2: #b2b7c1;
+      --muted: #80868f;
+      --rule: #2a2e35;
+      --accent: #7fb0f0;
+      --msdf: #3987e5;
+      --sdf: #d95926;
+      --band: #172338;
+      --glyph-ink: #eceef2;
+      --glyph-paper: #16191e;
+      --err-extra: #e66767;
+      --err-missing: #9085e9;
+      --plate: #060708;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #0e1013;
+    --surface: #16191e;
+    --ink: #e8eaee;
+    --ink-2: #b2b7c1;
+    --muted: #80868f;
+    --rule: #2a2e35;
+    --accent: #7fb0f0;
+    --msdf: #3987e5;
+    --sdf: #d95926;
+    --band: #172338;
+    --glyph-ink: #eceef2;
+    --glyph-paper: #16191e;
+    --err-extra: #e66767;
+    --err-missing: #9085e9;
+    --plate: #060708;
+    color-scheme: dark;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font: 400 16px/1.6 var(--body);
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: 0 72px;
+  }
+  main {
+    display: flex;
+    flex-direction: column;
+    gap: 72px;
+  }
+  section,
+  header {
+    width: 100%;
+    max-width: var(--band-w);
+    margin-inline: auto;
+  }
+  .prose {
+    max-width: var(--text-w);
+  }
+  h1,
+  h2,
+  h3 {
+    font-family: var(--display);
+    font-weight: 600;
+    text-wrap: balance;
+    margin: 0;
+    letter-spacing: -0.005em;
+  }
+  h1 {
+    font-size: clamp(2rem, 4.2vw, 3rem);
+    line-height: 1.1;
+  }
+  h2 {
+    font-size: 1.75rem;
+    line-height: 1.2;
+  }
+  h3 {
+    font-size: 1.2rem;
+    line-height: 1.3;
+  }
+  h4 {
+    margin: 0;
+    font: 600 0.95rem/1.4 var(--body);
+  }
+  p {
+    margin: 0;
+  }
+  a {
+    color: var(--accent);
+    text-underline-offset: 2px;
+  }
+  code {
+    font: 400 0.88em var(--mono);
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: 0 4px;
+  }
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  .num,
+  td.num,
+  th.num {
+    font-variant-numeric: tabular-nums;
+  }
+  .eyebrow {
+    font: 500 0.75rem/1.4 var(--mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .section-head {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 24px;
+  }
+  .section-head p {
+    color: var(--ink-2);
+    max-width: var(--text-w);
+  }
+
+  /* Header */
+  header {
+    padding-top: 56px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  .lede {
+    font-size: 1.15rem;
+    color: var(--ink-2);
+    max-width: var(--text-w);
+  }
+  .verdict {
+    list-style: none;
+    margin: 8px 0 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 28px;
+  }
+  .verdict li {
+    border-top: 2px solid var(--ink);
+    padding-top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .verdict strong {
+    font: 600 1rem/1.35 var(--body);
+  }
+  .verdict span {
+    color: var(--ink-2);
+    font-size: 0.94rem;
+  }
+  .setup {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 20px;
+    font: 400 0.8rem/1.5 var(--mono);
+    color: var(--muted);
+  }
+  .setup b {
+    color: var(--ink-2);
+    font-weight: 500;
+  }
+
+  /* Controls */
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px 20px;
+    align-items: end;
+    margin-bottom: 16px;
+  }
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+  .field label,
+  .field .lbl {
+    font: 500 0.72rem/1.3 var(--mono);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  select,
+  input[type="text"],
+  button {
+    font: 400 0.92rem/1.2 var(--body);
+    color: var(--ink);
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    padding: 8px 10px;
+    min-height: 38px;
+  }
+  input[type="text"] {
+    width: 15em;
+    max-width: 100%;
+  }
+  button {
+    cursor: pointer;
+  }
+  button:hover,
+  select:hover,
+  input[type="text"]:hover {
+    border-color: var(--muted);
+  }
+  .check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 38px;
+    font-size: 0.92rem;
+  }
+  .check input {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--accent);
+  }
+  .zoom {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+  .zoom input[type="range"] {
+    flex: 1 1 220px;
+    min-width: 0;
+    accent-color: var(--accent);
+  }
+  .zoom button {
+    min-width: 38px;
+    padding: 6px 10px;
+  }
+  #v-zoom-readout {
+    font: 500 0.85rem/1.3 var(--mono);
+    color: var(--ink-2);
+    /* Fixed width (longest readout is ~20 mono chars wide in em) so the slider doesn't jitter. */
+    flex: none;
+    width: 21em;
+    max-width: 100%;
+    white-space: nowrap;
+  }
+
+  /* Viewer */
+  #v-stage {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 14px;
+  }
+  .panel {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+  }
+  .p-head {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .p-title {
+    font: 600 0.95rem/1.3 var(--body);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .key {
+    width: 14px;
+    height: 3px;
+    border-radius: 2px;
+    background: var(--ink);
+    flex: none;
+  }
+  .key.msdf {
+    background: var(--msdf);
+  }
+  .key.sdf {
+    background: var(--sdf);
+  }
+  .p-meta,
+  .p-stat {
+    font: 400 0.78rem/1.4 var(--mono);
+    color: var(--muted);
+  }
+  .panel canvas {
+    width: 100%;
+    aspect-ratio: 1 / 0.92;
+    display: block;
+    background: var(--glyph-paper);
+    /* A shadow, not a border: a border would shrink the content box and resample the pixels. */
+    box-shadow: 0 0 0 1px var(--rule);
+    border-radius: 6px;
+    touch-action: none;
+    cursor: grab;
+  }
+  .panel canvas:active {
+    cursor: grabbing;
+  }
+  .hint {
+    font-size: 0.85rem;
+    color: var(--muted);
+    margin-top: 12px;
+  }
+  .diff-key {
+    display: inline-flex;
+    gap: 14px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .sw {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .sw i {
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+    display: inline-block;
+  }
+  .sw .extra {
+    background: var(--err-extra);
+  }
+  .sw .missing {
+    background: var(--err-missing);
+  }
+
+  /* Findings */
+  .findings {
+    display: flex;
+    flex-direction: column;
+    gap: 40px;
+  }
+  .finding {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding-top: 18px;
+    border-top: 1px solid var(--rule);
+  }
+  .finding-head {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 8px 24px;
+    align-items: baseline;
+  }
+  .finding-head .eyebrow {
+    flex-basis: 100%;
+  }
+  .finding p {
+    color: var(--ink-2);
+    max-width: var(--text-w);
+  }
+  .finding button {
+    align-self: flex-start;
+    font-size: 0.85rem;
+    padding: 6px 12px;
+    min-height: 34px;
+  }
+  .tiles {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 240px));
+    gap: 12px;
+  }
+  .tile {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+  .tile canvas {
+    width: 100%;
+    max-width: 240px;
+    aspect-ratio: 1;
+    image-rendering: pixelated;
+    box-shadow: 0 0 0 1px var(--rule);
+    border-radius: 4px;
+    background: var(--glyph-paper);
+    display: block;
+  }
+  .t-name {
+    font: 600 0.8rem/1.3 var(--body);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .t-meta,
+  .t-stat {
+    font: 400 0.72rem/1.35 var(--mono);
+    color: var(--muted);
+  }
+  .t-stat {
+    color: var(--ink-2);
+  }
+  @media (max-width: 720px) {
+    .tiles {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  /* Charts */
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 22px;
+    font-size: 0.88rem;
+    color: var(--ink-2);
+    margin-bottom: 18px;
+    align-items: center;
+  }
+  .legend .lk {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .legend .ln {
+    width: 18px;
+    height: 2px;
+    border-radius: 1px;
+    display: inline-block;
+  }
+  .legend .ln.msdf {
+    background: var(--msdf);
+  }
+  .legend .ln.sdf {
+    background: var(--sdf);
+  }
+  .legend .bandkey {
+    width: 16px;
+    height: 12px;
+    background: var(--band);
+    border: 1px solid var(--rule);
+    display: inline-block;
+  }
+  .chart-row {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 28px;
+  }
+  .chart-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 14px;
+  }
+  .chart {
+    margin: 0;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    padding: 12px 10px 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+  .chart-cap {
+    font-size: 0.85rem;
+    color: var(--ink-2);
+    padding-left: 6px;
+  }
+  .chart-cap strong {
+    color: var(--ink);
+    font-weight: 600;
+  }
+  .chart svg {
+    width: 100%;
+    height: auto;
+    display: block;
+    overflow: visible;
+  }
+  .chart .grid {
+    stroke: var(--rule);
+    stroke-width: 1;
+  }
+  .chart .axis {
+    stroke: var(--muted);
+    stroke-width: 1;
+  }
+  .chart .tick {
+    fill: var(--muted);
+    font: 400 10.5px var(--mono);
+  }
+  .chart .band {
+    fill: var(--band);
+  }
+  .chart .line {
+    fill: none;
+    stroke-width: 2;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+  }
+  .chart .line.msdf {
+    stroke: var(--msdf);
+  }
+  .chart .line.sdf {
+    stroke: var(--sdf);
+  }
+  .chart .dot {
+    stroke: var(--surface);
+    stroke-width: 2;
+  }
+  .chart .dot.msdf {
+    fill: var(--msdf);
+  }
+  .chart .dot.sdf {
+    fill: var(--sdf);
+  }
+  .chart .end-label {
+    fill: var(--ink-2);
+    font: 500 11px var(--body);
+  }
+  .chart .hover-ring {
+    fill: none;
+    stroke: var(--ink);
+    stroke-width: 1.5;
+  }
+  #chart-tip {
+    position: fixed;
+    z-index: 20;
+    pointer-events: none;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    padding: 8px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 0.8rem;
+    color: var(--ink-2);
+    box-shadow: 0 4px 16px rgb(0 0 0 / 0.12);
+  }
+  #chart-tip strong {
+    color: var(--ink);
+    font-size: 0.9rem;
+  }
+
+  /* Tables */
+  .table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    background: var(--surface);
+  }
+  table.results {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 0.86rem;
+  }
+  .results th,
+  .results td {
+    padding: 9px 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--rule);
+    white-space: nowrap;
+  }
+  .results thead th {
+    font: 500 0.72rem/1.3 var(--mono);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--muted);
+    vertical-align: bottom;
+  }
+  .results th.num,
+  .results td.num {
+    text-align: right;
+    font-family: var(--mono);
+  }
+  .results tbody th {
+    font-weight: 500;
+  }
+  .results tr:last-child th,
+  .results tr:last-child td {
+    border-bottom: 0;
+  }
+  .results td.best {
+    font-weight: 600;
+    color: var(--ink);
+    background: var(--band);
+  }
+  .results tr.control th,
+  .results tr.control td {
+    color: var(--muted);
+    font-style: italic;
+  }
+  .results tr.msdf th::before,
+  .results tr.webgl-sdf th::before {
+    content: "";
+    display: inline-block;
+    width: 10px;
+    height: 3px;
+    border-radius: 2px;
+    margin-right: 8px;
+    vertical-align: middle;
+    background: var(--sdf);
+  }
+  .results tr.msdf th::before {
+    background: var(--msdf);
+  }
+  .defs {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px 32px;
+    margin-top: 18px;
+    font-size: 0.9rem;
+    color: var(--ink-2);
+  }
+  .defs dt {
+    font-weight: 600;
+    color: var(--ink);
+  }
+  .defs dd {
+    margin: 2px 0 0;
+  }
+
+  /* Atlases */
+  #atlases {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    align-items: flex-end;
+    background: var(--plate);
+    border-radius: 8px;
+    padding: 24px;
+  }
+  .atlas {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+    max-width: 100%;
+  }
+  .atlas canvas {
+    max-width: 100%;
+    height: auto;
+    display: block;
+    image-rendering: pixelated;
+  }
+  .atlas figcaption {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font: 400 0.75rem/1.4 var(--mono);
+    color: #9aa0aa;
+  }
+  .atlas figcaption strong {
+    font: 600 0.82rem/1.3 var(--body);
+    color: #e8eaee;
+  }
+
+  /* Method */
+  .method {
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+  }
+  .method h3 {
+    margin-bottom: 8px;
+  }
+  .method ul {
+    margin: 0;
+    padding-left: 1.2em;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    color: var(--ink-2);
+  }
+  .method li strong {
+    color: var(--ink);
+    font-weight: 600;
+  }
+  .method p {
+    color: var(--ink-2);
+  }
+  .timing {
+    margin-top: 10px;
+  }
+  pre {
+    margin: 0;
+    font: 400 0.85rem/1.6 var(--mono);
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    padding: 14px 16px;
+    overflow-x: auto;
+  }
+  #load-error {
+    color: var(--err-extra);
+    font-weight: 600;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+  }
+</style>
+
+<main>
+  <header>
+    <span class="eyebrow">msdfgen-ts · distance-field comparison · October 2026</span>
+    <h1>msdfgen-ts vs webgl-sdf-generator, at equal memory</h1>
+    <p class="lede">
+      Both libraries turn TrueType outlines into distance-field atlases at runtime: msdfgen-ts
+      builds a three-channel MSDF on the CPU, webgl-sdf-generator (the generator behind
+      troika-three-text) builds a one-channel SDF on the GPU. Here both get the same outlines, the
+      same atlas layout and the same texture memory, and the rendered glyphs are compared against an
+      exact rasterization of the outline.
+    </p>
+    <ul class="verdict">
+      <li>
+        <strong>At normal sizes, a tie.</strong
+        ><span
+          >Up to 2× the atlas resolution, PT Serif shows at most {{pt.d80.msdf}}% wrong pixels for
+          either method. Mean edge error is about 0.02 px for both; the SDF is slightly lower at 1×
+          ({{pt.e40.rgb}} vs {{pt.e40.msdf}} px) because it has more texels.</span
+        >
+      </li>
+      <li>
+        <strong>Magnified, MSDF keeps its corners.</strong
+        ><span
+          >PT Serif at 8× (320 px/em): {{pt.d320.msdf}}% wrong pixels for MSDF against
+          {{pt.d320.rgb}}% and {{pt.d320.rgba}}% for the SDF. The SDF needs {{pt.iso320.rgb}}×
+          MSDF's bytes to catch up ({{pt.iso320.rgba}}× counting the RGBA8 texture msdfgen-ts
+          uploads).</span
+        >
+      </li>
+      <li>
+        <strong>Overlapping contours erase that lead.</strong
+        ><span
+          >Roboto at 8×: {{rb.d320.msdf}}% for MSDF against {{rb.d320.rgb}}% and {{rb.d320.rgba}}%.
+          msdfgen, and so msdfgen-ts, cuts seams where contours overlap, which also costs a few
+          pixels at 1×.</span
+        >
+      </li>
+      <li>
+        <strong>webgl-sdf-generator is far faster to build.</strong
+        ><span
+          >On the GPU it writes the 160-glyph equal-memory atlas in {{pt.t.into}} ms; msdfgen-ts
+          takes {{pt.t.ours}} ms on the CPU, about {{pt.t.speedup}}× longer.</span
+        >
+      </li>
+    </ul>
+    <div class="setup">
+      <span><b>{{glyphs}} glyphs</b> × 2 fonts (ASCII + Cyrillic)</span>
+      <span><b>MSDF</b> {{P}} px/em, pxrange 4, {{pt.msdf.atlas}} = {{pt.msdf.kb}}</span>
+      <span
+        ><b>SDF, equal bytes</b> {{pt.rgb.px}} px/em (vs RGB8) · {{pt.rgba.px}} px/em (vs
+        RGBA8)</span
+      >
+      <span><b>Truth</b> exact area coverage of the outline</span>
+    </div>
+    <p id="load-error" hidden></p>
+  </header>
+
+  <section id="viewer">
+    <div class="section-head">
+      <h2>Compare them yourself</h2>
+      <p>
+        The three panels share one camera: drag to pan, scroll or pinch to zoom. Choose the MSDF
+        atlas's resolution, and the SDF's budget follows it under the rule you pick. Memory figures
+        are for the full {{glyphs}}-glyph atlas; the glyphs of your text are generated in your
+        browser by the same code that produced the numbers on this page, and drawn with the same
+        filtering and anti-aliasing for both. Zoom is in device pixels per em.
+      </p>
+    </div>
+    <div class="controls">
+      <div class="field">
+        <label for="v-font">Font</label
+        ><select id="v-font"></select>
+      </div>
+      <div class="field">
+        <label for="v-msdf">MSDF memory budget</label
+        ><select id="v-msdf"></select>
+      </div>
+      <div class="field">
+        <label for="v-sdf">SDF memory budget</label
+        ><select id="v-sdf"></select>
+      </div>
+      <div class="field">
+        <label for="v-text">Text</label
+        ><input id="v-text" type="text" value="W" spellcheck="false" autocomplete="off" />
+      </div>
+      <div class="field">
+        <span class="lbl">Display</span
+        ><label class="check" for="v-diff"
+          ><input id="v-diff" type="checkbox" /> Show error against truth</label
+        >
+      </div>
+    </div>
+    <div class="zoom">
+      <button id="v-zoom-out" type="button" aria-label="Zoom out">−</button>
+      <input id="v-zoom" type="range" min="0" max="1000" step="1" aria-label="Zoom" />
+      <button id="v-zoom-in" type="button" aria-label="Zoom in">+</button>
+      <button id="v-fit" type="button">Fit text</button>
+      <span id="v-zoom-readout" aria-live="polite"></span>
+    </div>
+    <div id="v-stage">
+      <div class="panel" data-panel="truth">
+        <div class="p-head">
+          <span class="p-title"><i class="key"></i>Ground truth</span><span class="p-meta"></span>
+        </div>
+        <canvas aria-label="Ground truth rendering"></canvas>
+      </div>
+      <div class="panel" data-panel="msdf">
+        <div class="p-head">
+          <span class="p-title"><i class="key msdf"></i>msdfgen-ts MSDF</span
+          ><span class="p-meta"></span>
+        </div>
+        <canvas aria-label="msdfgen-ts MSDF rendering"></canvas>
+        <span class="p-stat"></span>
+      </div>
+      <div class="panel" data-panel="sdf">
+        <div class="p-head">
+          <span class="p-title"
+            ><i class="key sdf"></i><span class="p-name">webgl-sdf-generator SDF</span></span
+          ><span class="p-meta"></span>
+        </div>
+        <canvas aria-label="webgl-sdf-generator SDF rendering"></canvas>
+        <span class="p-stat"></span>
+      </div>
+    </div>
+    <p class="hint">
+      <span class="diff-key"
+        >With “Show error” on: <span class="sw"><i class="extra"></i>extra ink</span
+        ><span class="sw"><i class="missing"></i>missing ink</span> compared with the truth. A wrong
+        pixel is one whose coverage is off by more than half.</span
+      >
+    </p>
+  </section>
+
+  <section id="findings">
+    <div class="section-head">
+      <h2>Where they differ</h2>
+      <p>
+        Six crops at fixed zoom levels, rendered at 240 × 240 device pixels and pixel-doubled on
+        high-density screens. Each compares the MSDF with the SDF at both equal-memory budgets. The
+        count under each crop is its wrong pixels.
+      </p>
+    </div>
+    <div class="findings">
+      <article class="finding" data-preset="0">
+        <div class="finding-head">
+          <span class="eyebrow">Body text · 40 px/em · 1×</span>
+          <h3>At the atlas's own size, no difference</h3>
+        </div>
+        <p>
+          This is where most text is drawn. All three distance fields reproduce the truth to within
+          anti-aliasing, without a single wrong pixel.
+        </p>
+        <div class="tiles">
+          <div class="tile" data-tile="truth">
+            <span class="t-name"><i class="key"></i>Truth</span><canvas></canvas
+            ><span class="t-meta"></span>
+          </div>
+          <div class="tile" data-tile="msdf">
+            <span class="t-name"><i class="key msdf"></i>MSDF</span><canvas></canvas
+            ><span class="t-meta"></span><span class="t-stat"></span>
+          </div>
+          <div class="tile" data-tile="sdf-rgb">
+            <span class="t-name"><i class="key sdf"></i>SDF, = RGB8 bytes</span><canvas></canvas
+            ><span class="t-meta"></span><span class="t-stat"></span>
+          </div>
+          <div class="tile" data-tile="sdf-rgba">
+            <span class="t-name"><i class="key sdf"></i>SDF, = RGBA8 bytes</span><canvas></canvas
+            ><span class="t-meta"></span><span class="t-stat"></span>
+          </div>
+        </div>
+        <button type="button">Open in viewer</button>
+      </article>
+      <article class="finding" data-preset="1">
+        <div class="finding-head">
+          <span class="eyebrow">PT Serif W · 640 px/em · 16×</span>
+          <h3>Corners under magnification: MSDF wins</h3>
+        </div>
+        <p>
+          The bottom of the W. MSDF keeps the vertex and the inner notch sharp. Both SDFs round them
+          off, even with 1.7× and 2× its resolution. This is what MSDF exists for.
+        </p>
+        <div class="tiles">
+          <div class="tile" data-tile="truth">
+            <span class="t-name"><i class="key"></i>Truth</span><canvas></canvas
+            ><span class="t-meta"></span>
+          </div>
+          <div class="tile" data-tile="msdf">
+            <span class="t-name"><i class="key msdf"></i>MSDF</span><canvas></canvas
+            ><span class="t-meta"></span><span class="t-stat"></span>
+          </div>
+          <div class="tile" data-tile="sdf-rgb">
+            <span class="t-name"><i class="key sdf"></i>SDF, = RGB8 bytes</span><canvas></canvas
+            ><span class="t-meta"></span><span class="t-stat"></span>
+          </div>
+          <div class="tile" data-tile="sdf-rgba">
+            <span class="t-name"><i class="key sdf"></i>SDF, = RGBA8 bytes</span><canvas></canvas
+            ><span class="t-meta"></span><span class="t-stat"></span>
+          </div>
+        </div>
+        <button type="button">Open in viewer</button>
+      </article>
+      <article class="finding" data-preset="2">
+        <div class="finding-head">
+          <span class="eyebrow">PT Serif Ж · 320 px/em · 8×</span>
+          <h3>A typical magnified glyph: each has its own flaws</h3>
+        </div>
+        <p>
+          The SDF softens every serif corner. MSDF keeps them square but leaves small specks where
+          the stem, crossbar and arms meet.
+        </p>
+        <div class="tiles">
+          <div class="tile" data-tile="truth">
+            <span class="t-name"><i class="key"></i>Truth</span><canvas></canvas
+            ><span class="t-meta"></span>
+          </div>
+          <div class="tile" data-tile="msdf">
+            <span class="t-name"><i class="key msdf"></i>MSDF</span><canvas></canvas
+            ><span class="t-meta"></span><span class="t-stat"></span>
+          </div>
+          <div class="tile" data-tile="sdf-rgb">
+            <span class="t-name"><i class="key sdf"></i>SDF, = RGB8 bytes</span><canvas></canvas
+            ><span class="t-meta"></span><span class="t-stat"></span>
+          </div>
+          <div class="tile" data-tile="sdf-rgba">
+            <span class="t-name"><i class="key sdf"></i>SDF, = RGBA8 bytes</span><canvas></canvas
+            ><span class="t-meta"></span><span class="t-stat"></span>
+          </div>
+        </div>
+        <button type="button">Open in viewer</button>
+      </article>
+      <article class="finding" data-preset="3">
+        <div class="finding-head">
+          <span class="eyebrow">Roboto 8 · 320 px/em · 8×</span>
+          <h3>Overlapping contours: MSDF cuts a seam</h3>
+        </div>
+        <p>
+          Roboto draws the 8 as two overlapping loops. msdfgen's channel logic fails where they
+          cross and cuts a seam through the waist. The C++ msdfgen reference does the same (its
+          bitmap for this glyph is in <code>test/golden/roboto/U0038_48px</code>), so this is
+          inherited behavior, not a porting bug. Upstream avoids it by merging overlaps with Skia
+          first, which this port leaves out. The single-channel SDFs are unaffected.
+        </p>
+        <div class="tiles">
+          <div class="tile" data-tile="truth">
+            <span class="t-name"><i class="key"></i>Truth</span><canvas></canvas
+            ><span class="t-meta"></span>
+          </div>
+          <div class="tile" data-tile="msdf">
+            <span class="t-name"><i class="key msdf"></i>MSDF</span><canvas></canvas
+            ><span class="t-meta"></span><span class="t-stat"></span>
+          </div>
+          <div class="tile" data-tile="sdf-rgb">
+            <span class="t-name"><i class="key sdf"></i>SDF, = RGB8 bytes</span><canvas></canvas
+            ><span class="t-meta"></span><span class="t-stat"></span>
+          </div>
+          <div class="tile" data-tile="sdf-rgba">
+            <span class="t-name"><i class="key sdf"></i>SDF, = RGBA8 bytes</span><canvas></canvas
+            ><span class="t-meta"></span><span class="t-stat"></span>
+          </div>
+        </div>
+        <button type="button">Open in viewer</button>
+      </article>
+      <article class="finding" data-preset="4">
+        <div class="finding-head">
+          <span class="eyebrow">PT Serif * · 480 px/em · 12×</span>
+          <h3>Contours that nearly touch: MSDF notches them</h3>
+        </div>
+        <p>
+          The asterisk's six petals almost meet in the middle. MSDF error correction cannot keep
+          contours this close apart and notches their tips. The SDFs only blur them slightly.
+        </p>
+        <div class="tiles">
+          <div class="tile" data-tile="truth">
+            <span class="t-name"><i class="key"></i>Truth</span><canvas></canvas
+            ><span class="t-meta"></span>
+          </div>
+          <div class="tile" data-tile="msdf">
+            <span class="t-name"><i class="key msdf"></i>MSDF</span><canvas></canvas
+            ><span class="t-meta"></span><span class="t-stat"></span>
+          </div>
+          <div class="tile" data-tile="sdf-rgb">
+            <span class="t-name"><i class="key sdf"></i>SDF, = RGB8 bytes</span><canvas></canvas
+            ><span class="t-meta"></span><span class="t-stat"></span>
+          </div>
+          <div class="tile" data-tile="sdf-rgba">
+            <span class="t-name"><i class="key sdf"></i>SDF, = RGBA8 bytes</span><canvas></canvas
+            ><span class="t-meta"></span><span class="t-stat"></span>
+          </div>
+        </div>
+        <button type="button">Open in viewer</button>
+      </article>
+      <article class="finding" data-preset="5">
+        <div class="finding-head">
+          <span class="eyebrow">Roboto Б · 320 px/em · 8×</span>
+          <h3>Overlapping contours: webgl-sdf-generator draws a line</h3>
+        </div>
+        <p>
+          Roboto builds Б from a stem that overlaps the rest of the letter. webgl-sdf-generator
+          measures distance to every edge, including the one buried inside the stem, and leaves a
+          faint line down the stroke. The line only dims pixels to about half coverage, so it barely
+          registers as wrong pixels, but you can see it. msdfgen's exact SDF, the control in the
+          tables below, has no such line.
+        </p>
+        <div class="tiles">
+          <div class="tile" data-tile="truth">
+            <span class="t-name"><i class="key"></i>Truth</span><canvas></canvas
+            ><span class="t-meta"></span>
+          </div>
+          <div class="tile" data-tile="msdf">
+            <span class="t-name"><i class="key msdf"></i>MSDF</span><canvas></canvas
+            ><span class="t-meta"></span><span class="t-stat"></span>
+          </div>
+          <div class="tile" data-tile="sdf-rgb">
+            <span class="t-name"><i class="key sdf"></i>SDF, = RGB8 bytes</span><canvas></canvas
+            ><span class="t-meta"></span><span class="t-stat"></span>
+          </div>
+          <div class="tile" data-tile="sdf-rgba">
+            <span class="t-name"><i class="key sdf"></i>SDF, = RGBA8 bytes</span><canvas></canvas
+            ><span class="t-meta"></span><span class="t-stat"></span>
+          </div>
+        </div>
+        <button type="button">Open in viewer</button>
+      </article>
+    </div>
+  </section>
+
+  <section id="memory">
+    <div class="section-head">
+      <h2>Quality against memory</h2>
+      <p>
+        Each point is a complete {{glyphs}}-glyph atlas at one resolution. Across is its size in
+        bytes of distance data: MSDF stores three bytes per texel, the SDF one. Up is the share of
+        wrong pixels at a fixed display size, on a log scale. The shaded band spans the default MSDF
+        atlas's footprint, from its RGB8 data to the RGBA8 texture msdfgen-ts uploads, so any SDF
+        point inside it uses the same memory.
+      </p>
+    </div>
+    <div class="legend">
+      <span class="lk"><i class="ln msdf"></i>msdfgen-ts MSDF (20–80 px/em)</span>
+      <span class="lk"><i class="ln sdf"></i>webgl-sdf-generator SDF (40–160 px/em)</span>
+      <span class="lk"><i class="bandkey"></i>Same memory as the default MSDF atlas</span>
+    </div>
+    <div id="charts"></div>
+    <div id="chart-tip" role="status" hidden></div>
+  </section>
+
+  <section id="numbers">
+    <div class="section-head">
+      <h2>All numbers</h2>
+      <p>
+        The equal-budget comparison over all {{glyphs}} glyphs, each rendered on its own at six
+        display sizes, from 20 px/em (0.5× the MSDF atlas) to 640 px/em (16×). The best value in
+        each column is highlighted. The exact SDF row is a control: msdfgen's own single-channel SDF
+        at the same budget as the RGB8-matched SDF.
+      </p>
+    </div>
+    <div class="controls">
+      <div class="field">
+        <label for="t-font">Font</label
+        ><select id="t-font"></select>
+      </div>
+      <div class="field">
+        <label for="t-metric">Metric</label
+        ><select id="t-metric">
+          <option value="defectPct">Wrong pixels (% of edge pixels)</option>
+          <option value="edgeErrPx">Edge error (px)</option>
+        </select>
+      </div>
+    </div>
+    <div class="table-wrap" id="tables"></div>
+    <dl class="defs">
+      <div>
+        <dt>Wrong pixels</dt>
+        <dd>
+          Pixels whose coverage differs from the truth by more than 0.5, as a percentage of the
+          pixels the true edge passes through. At extreme magnification it can pass 100%.
+        </dd>
+      </div>
+      <div>
+        <dt>Edge error</dt>
+        <dd>
+          Sum of |coverage − truth| divided by the outline's length in pixels: roughly the average
+          distance between the drawn edge and the true edge, in screen pixels.
+        </dd>
+      </div>
+      <div>
+        <dt>Display sizes</dt>
+        <dd>
+          Device pixels per em. 40 px/em is the MSDF atlas's resolution, so 320 px/em is 8×
+          magnification for the MSDF and about 4.6× for the RGB8-matched SDF.
+        </dd>
+      </div>
+    </dl>
+  </section>
+
+  <section id="atlas-section">
+    <div class="section-head">
+      <h2>The atlases</h2>
+      <p>
+        The three equal-budget atlases as they are stored, drawn at one shared texel scale, so their
+        areas compare directly. The MSDF packs three distance channels into each texel; the SDF
+        spends the same bytes on about three or four times as many single-channel texels.
+      </p>
+    </div>
+    <div class="controls">
+      <div class="field">
+        <label for="a-font">Font</label
+        ><select id="a-font"></select>
+      </div>
+    </div>
+    <div id="atlases"></div>
+  </section>
+
+  <section id="method" class="method">
+    <div class="section-head"><h2>How the comparison was made</h2></div>
+    <div class="prose">
+      <h3>Held equal</h3>
+      <ul>
+        <li>
+          <strong>Outlines.</strong> Both generators receive the same em-normalized outline from the
+          msdfgen-ts TrueType parser, passed to webgl-sdf-generator as an SVG path (<code>M</code>,
+          <code>L</code>, <code>Q</code>, <code>Z</code>). The ground truth uses that outline too.
+        </li>
+        <li>
+          <strong>Atlas layout.</strong> Every glyph is cropped to its ink bounds plus the same
+          padding in em, as msdfgen-ts's <code>Atlas</code> does, and packed with potpack. Texel
+          centres sit at the same positions in both.
+        </li>
+        <li>
+          <strong>Distance range.</strong> 0.1 em in total for both: pxrange 4 at 40 px/em for the
+          MSDF, <code>maxDistance</code> 0.05 em with exponent 1 for webgl-sdf-generator. With those
+          settings its bytes encode distance exactly as msdfgen does (<code>d / range + 0.5</code>).
+          An equal range in em means both support the same smallest text size and leave the same
+          room for outlines and glows.
+        </li>
+        <li>
+          <strong>Rendering.</strong> One function draws both: bilinear filtering of the 8-bit
+          texels, clamped to the glyph's cell, then
+          <code>clamp(screenPxRange × (d − 0.5) + 0.5, 0, 1)</code>. The only difference is
+          <code>d = median(r, g, b)</code> for MSDF and <code>d = r</code> for the SDF.
+        </li>
+        <li>
+          <strong>Memory.</strong> The SDF's resolution was raised in 0.25 px/em steps until its
+          packed atlas was as large as the MSDF atlas. Two accountings: equal bytes of distance data
+          (MSDF at 3 bytes per texel), giving {{pt.rgb.px}} px/em ({{pt.rgb.atlas}} =
+          {{pt.rgb.kb}}); and equal bytes against the 4-byte RGBA8 texture msdfgen-ts's
+          <code>Atlas</code> uploads today, since WebGPU has no RGB8 format, giving {{pt.rgba.px}}
+          px/em ({{pt.rgba.atlas}}). A one-channel SDF costs one byte per texel, whether as R8 or
+          packed four glyphs per RGBA texel as troika does. The “same texel size” option in the
+          viewer gives the SDF only a third of the memory, for reference.
+        </li>
+      </ul>
+    </div>
+    <div class="prose">
+      <h3>Measured</h3>
+      <ul>
+        <li>
+          <strong>Glyphs.</strong> {{glyphs}} per font, printable ASCII plus Cyrillic А–я, Ё and ё,
+          from PT Serif Regular (serifs, sharp corners) and Roboto (sans-serif, overlapping
+          contours), the repository's test fonts.
+        </li>
+        <li>
+          <strong>Ground truth.</strong> Exact area coverage of the outline under the nonzero fill
+          rule: 64 sub-scanlines per pixel row with analytic horizontal coverage, curves flattened
+          to within 0.01 px. It shares no code with either generator.
+        </li>
+        <li>
+          <strong>Renders.</strong> Each glyph alone at 20, 40, 80, 160, 320 and 640 px/em, at a
+          fixed sub-pixel offset (0.37, 0.61 px) so straight stems do not land exactly on pixel
+          boundaries.
+        </li>
+      </ul>
+    </div>
+    <div class="prose">
+      <h3>Fairness checks</h3>
+      <ul>
+        <li>
+          <strong>The JavaScript path is the GPU path.</strong> The numbers use
+          webgl-sdf-generator's JavaScript implementation, which needs no GPU. Running its WebGL
+          implementation in headless Chromium on {{renderer}} produced identical bytes, apart from
+          {{pt.parity.diff}} of {{pt.parity.total}} (PT Serif) and {{rb.parity.diff}} of
+          {{rb.parity.total}} (Roboto) that were off by at most {{pt.parity.max}}, from float32
+          versus float64 rounding.
+        </li>
+        <li>
+          <strong>Curve flattening costs nothing visible.</strong> webgl-sdf-generator replaces each
+          curve with 15 straight segments. msdfgen's exact single-channel SDF at the same budget
+          scores the same on PT Serif ({{pt.d320.rgb}}% and {{pt.d320.exact}}% wrong pixels at 320
+          px/em). On Roboto the exact SDF does better because it handles overlapping contours.
+        </li>
+        <li>
+          <strong>Encoding.</strong> troika-three-text uses exponent 9 with a range as large as the
+          glyph cell, decoded after filtering. A one-off check at the RGB8 budget gave the same
+          wrong-pixel rate as exponent 1 to within 0.05 points (PT Serif at 320 px/em: 2.52% for
+          both) and about 30% more edge error, so the linear encoding used here does not handicap
+          the SDF.
+        </li>
+        <li>
+          <strong>Limits.</strong> One MSDF setting (40 px/em, pxrange 4, the library default).
+          Filtering is exact bilinear on the CPU; GPU filtering of 8-bit textures is coarser,
+          equally for both. No mipmaps, so minification is only tested down to 0.5×.
+        </li>
+      </ul>
+    </div>
+    <div class="prose">
+      <h3>Side findings</h3>
+      <ul>
+        <li>
+          <strong>msdfgen-ts inherits msdfgen's overlap artifacts.</strong> Roboto's 8, Ф, q and 4
+          show seams or notches. The repository's golden bitmap from the C++ reference for Roboto 8
+          has the same seam. Upstream msdfgen fixes this by resolving overlaps with Skia before
+          generating, which this port leaves out by design.
+        </li>
+        <li>
+          <strong>webgl-sdf-generator's WebGL1 path breaks on non-power-of-two sizes.</strong> By
+          default it creates a WebGL1 context, and its internal textures keep the default REPEAT
+          wrap mode. Under WebGL1 a non-power-of-two texture with REPEAT is incomplete, so every
+          texel comes back as 255, with no error and no fallback. Its
+          <code>isSupported()</code> check renders a 4×4 test and misses this. troika avoids it with
+          fixed 64×64 cells. Passing a WebGL2 context, as this comparison does, fixes it.
+        </li>
+        <li>
+          <strong>webgl-sdf-generator draws lines inside overlapping contours.</strong> It takes the
+          nearest distance over every segment, including edges buried inside the fill, as the Roboto
+          Б above shows.
+        </li>
+      </ul>
+    </div>
+    <div class="prose">
+      <h3>Generation time</h3>
+      <p>
+        The full {{glyphs}}-glyph equal-memory atlas, in headless Chromium on {{renderer}}, best of
+        {{runs}} runs.
+      </p>
+      <div class="table-wrap timing">
+        <table class="results">
+          <thead>
+            <tr>
+              <th>Generator</th>
+              <th class="num">PT Serif</th>
+              <th class="num">Roboto</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="msdf">
+              <th scope="row">msdfgen-ts <code>Atlas</code>, CPU, {{P}} px/em</th>
+              <td class="num">{{pt.t.ours}} ms</td>
+              <td class="num">{{rb.t.ours}} ms</td>
+            </tr>
+            <tr class="webgl-sdf">
+              <th scope="row">webgl-sdf-generator, GPU, into an atlas canvas</th>
+              <td class="num">{{pt.t.into}} ms</td>
+              <td class="num">{{rb.t.into}} ms</td>
+            </tr>
+            <tr class="webgl-sdf">
+              <th scope="row">webgl-sdf-generator, GPU, read back per glyph</th>
+              <td class="num">{{pt.t.gen}} ms</td>
+              <td class="num">{{rb.t.gen}} ms</td>
+            </tr>
+            <tr class="webgl-sdf">
+              <th scope="row">webgl-sdf-generator, JavaScript fallback</th>
+              <td class="num">{{pt.t.js}} ms</td>
+              <td class="num">{{rb.t.js}} ms</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="prose">
+      <h3>Reproduce</h3>
+      <pre>
+npx tsx tools/compare-sdf/build.ts       # atlases + metrics (about 80 s)
+npx tsx tools/compare-sdf/gl-parity.ts   # GPU parity + timing (headless Chromium)
+npx tsx tools/compare-sdf/report.ts      # this page → tools/compare-sdf-out/report.html</pre>
+    </div>
+  </section>
+</main>
+<!-- @data -->
+<!-- @script -->

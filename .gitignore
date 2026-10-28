@@ -22,3 +22,4 @@ test/**/*.js.map
 test/**/*.d.ts.map
 
 msdfgen-*.tgz
+tools/compare-sdf-out/

@@ -26,8 +26,11 @@ Target: < 50 KB minified, zero runtime dependencies, no WASM.
 - SVG beyond fills: strokes, clip paths, masks, filters, `<use>`, `<text>`, nested `<svg>`,
   CSS beyond `.class` selectors, gradient spread/focal points. No DOM-based parsing in the
   library.
-- Skia-style overlap resolution — use scanline sign correction like msdfgen without
-  `MSDFGEN_USE_SKIA`
+- Skia itself. Overlapping contours ARE merged (`src/shape/union.ts`, run by `Atlas` on
+  glyphs and `shapes()` alike before `generateShapeMSDF` — msdfgen's `MSDFGEN_USE_SKIA` step
+  done without Skia; it leaves shapes without overlaps untouched). `generateShapeMSDF` itself
+  stays msdfgen-without-Skia (overlapping-contour combiner + scanline sign correction), so
+  the goldens and the SVG reference diff still apply to it.
 - Node canvas / DOM dependencies in the library itself (demo may use DOM)
 
 ## Ground truth: the C++ reference
@@ -114,6 +117,7 @@ src/
                        # flat numeric fields p0x..p3x etc. HOT.
     contour.ts  shape.ts
     normalize.ts       # em-normalization, Shape::normalize, orientContours (even-odd -> nonzero)
+    union.ts           # overlapping contours -> boundary of their nonzero fill (Atlas only)
   msdf/
     edge-coloring.ts   # edgeColoringSimple (deterministic, same seed behavior as C++)
     distance.ts        # signed (pseudo-)distance per segment. HOTTEST code in the repo.

@@ -10,16 +10,19 @@
  *     `screenPxRange = atlas.pxrangeEm × pixelPerEm` uniform, no per-instance
  *     range varying and no per-glyph reasoning about crispness.
  *
- * The MSDF pipeline (normalize → colour → generate → sign-correct →
- * error-correct → byte-quantise → y-flip) is byte-for-byte identical to
- * the C++ msdfgen reference — see test/msdf/msdf.test.ts for the direct
- * pipeline golden. The atlas layout on top (crop + shelf-pack) is our own.
+ * Overlapping contours are first merged into their union (src/shape/union.ts,
+ * msdfgen's Skia step done without Skia). From there the MSDF pipeline
+ * (normalize → colour → generate → sign-correct → error-correct →
+ * byte-quantise → y-flip) is byte-for-byte identical to the C++ msdfgen
+ * reference — see test/msdf/msdf.test.ts for the direct pipeline golden.
+ * The atlas layout on top (crop + shelf-pack) is our own.
  *
  * msdfgen is MIT © Viktor Chlumský; this file is original.
  */
 
 import { type Font } from "./font/font";
 import { emNormalizeShape } from "./shape/normalize";
+import { unionShape } from "./shape/union";
 import { generateShapeMSDF } from "./msdf/shape-msdf";
 import { type Shape } from "./shape/shape";
 import potpack from "potpack";
@@ -91,14 +94,12 @@ export class Atlas {
   private _width = 0;
   private _height = 0;
   private _pixels = new Uint8Array(0);
-  /** Cached glyph + retained float MSDF (for repacking on new inserts).
-   *  Keyed by Unicode codepoint — see {@link Atlas.glyphs}. */
+  /** Cached glyph + retained float MSDF (for repacking on new inserts), keyed
+   *  by glyph index: codepoints sharing a glyph (every character missing from
+   *  the font maps to .notdef) share one atlas cell. */
   private readonly _cache = new Map<number, Entry>();
-  /** Same shape as {@link Atlas._cache}, keyed by raw glyph index instead —
-   *  see {@link Atlas.glyphsByIndex}. Separate map: a codepoint and a glyph
-   *  index are different numbers in the same integer space. */
-  private readonly _cacheByGid = new Map<number, Entry>();
-  /** Same again, keyed by caller-chosen string — see {@link Atlas.shapes}. */
+  /** Same shape as {@link Atlas._cache}, keyed by caller-chosen string — see
+   *  {@link Atlas.shapes}. */
   private readonly _cacheByKey = new Map<string, Entry>();
   /** SDF distance range in em — UNIFORM across all glyphs (that's the point). */
   readonly pxrangeEm: number;
@@ -133,21 +134,8 @@ export class Atlas {
    * Returns the `AtlasGlyph` for each requested codepoint, in order.
    */
   glyphs(codepoints: Iterable<number>): AtlasGlyph[] {
-    const result: AtlasGlyph[] = [];
-    let added = 0;
-    for (const cp of codepoints) {
-      const cached = this._cache.get(cp);
-      if (cached) {
-        result.push(cached.glyph);
-        continue;
-      }
-      const entry = this._generateForGlyphId(this._requireFont().glyphId(cp));
-      this._cache.set(cp, entry);
-      result.push(entry.glyph);
-      added++;
-    }
-    if (added > 0) this._repack();
-    return result;
+    const font = this._requireFont();
+    return this.glyphsByIndex(Array.from(codepoints, (cp) => font.glyphId(cp)));
   }
 
   /**
@@ -164,23 +152,20 @@ export class Atlas {
    * Unicode codepoint — the {@link Atlas.glyphs} twin for glyphs with no
    * reachable cmap entry. Icon fonts (e.g. Lucide) commonly have far more
    * glyphs than mapped codepoints; this is how the rest of the set gets
-   * generated. Shares one packed atlas texture with the codepoint-addressed
-   * cache — {@link Atlas.texture} always reflects everything requested
-   * through either method. Cached separately from {@link Atlas.glyphs} (a
-   * codepoint and a glyph index are different numbers in the same integer
-   * space — sharing one cache would collide them).
+   * generated. Shares one cache and one packed atlas texture with
+   * {@link Atlas.glyphs}, which maps codepoints to glyph indices first.
    */
   glyphsByIndex(glyphIds: Iterable<number>): AtlasGlyph[] {
     const result: AtlasGlyph[] = [];
     let added = 0;
     for (const gid of glyphIds) {
-      const cached = this._cacheByGid.get(gid);
+      const cached = this._cache.get(gid);
       if (cached) {
         result.push(cached.glyph);
         continue;
       }
       const entry = this._generateForGlyphId(gid);
-      this._cacheByGid.set(gid, entry);
+      this._cache.set(gid, entry);
       result.push(entry.glyph);
       added++;
     }
@@ -200,8 +185,8 @@ export class Atlas {
    * keyed by a caller-chosen string — the {@link Atlas.glyphs} twin for
    * non-font input. Shapes must be y-up, in the units `pixelsPerEm` scales
    * (`parseSvg` makes 1 unit = the viewBox height). A new shape is mutated
-   * (normalized + coloured); a cached key ignores the shape passed. `advance`
-   * is 0. Shares the one packed texture with the glyph caches.
+   * (overlaps merged, normalized + coloured); a cached key ignores the shape
+   * passed. `advance` is 0. Shares the one packed texture with the glyph cache.
    */
   shapes(entries: Iterable<readonly [key: string, shape: Shape]>): AtlasGlyph[] {
     const result: AtlasGlyph[] = [];
@@ -225,11 +210,7 @@ export class Atlas {
     return this._font;
   }
 
-  /**
-   * Generates the MSDF for `glyphId`. Does not cache and does not pack —
-   * callers own the cache key (a codepoint for {@link Atlas.glyphs}, the
-   * glyph ID itself for {@link Atlas.glyphsByIndex}) and the repack.
-   */
+  /** Generates the MSDF for `glyphId`. Does not cache and does not pack. */
   private _generateForGlyphId(glyphId: number): Entry {
     const font = this._requireFont();
     const unitsPerEm = font.metrics.unitsPerEm;
@@ -238,8 +219,11 @@ export class Atlas {
     return this._generate(shape, font.advance(glyphId) / unitsPerEm);
   }
 
-  /** Generates one entry from an em-unit shape. Does not cache or pack. */
+  /** Generates one entry from an em-unit shape: merges overlapping contours
+   *  (src/shape/union.ts), then runs the msdfgen pipeline. Does not cache or
+   *  pack. */
   private _generate(shape: Shape, advance: number): Entry {
+    unionShape(shape);
     const r = generateShapeMSDF(shape, this._pxPerEm, this._pxrange);
     // Empty outline (space, .notdef with no glyf): no atlas slot needed.
     const glyph: AtlasGlyph = {
@@ -276,7 +260,7 @@ export class Atlas {
     for (const cp of codepoints) {
       const gid = font.glyphId(cp);
       if (prevGid >= 0) penX += font.kerning(prevGid, gid) / upe;
-      const glyph = this._cache.get(cp)!.glyph;
+      const glyph = this._cache.get(gid)!.glyph;
       laid.push({ glyph, penX, penY: 0 });
       penX += glyph.advance;
       prevGid = gid;
@@ -316,22 +300,27 @@ export class Atlas {
     return { glyphs, widthEm, heightEm: lines.length * lineHeightEm };
   }
 
-  /** Repacks every cached entry (codepoint-, glyph-index- and string-keyed
-   *  caches — one shared texture) with potpack, reallocates the texture,
-   *  and re-blits each MSDF at its assigned rect. Called by `glyphs()`/
-   *  `glyphsByIndex()` after any batch of new inserts — once per batch. */
+  /** Repacks every cached entry (glyph-index- and string-keyed caches — one
+   *  shared texture) with potpack, reallocates the texture, and re-blits each
+   *  MSDF at its assigned rect. Called by `glyphsByIndex()`/`shapes()` after
+   *  any batch of new inserts — once per batch.
+   *
+   *  Each cell gets a 1-texel gutter of zeros on its right and bottom, so a
+   *  quad covering the whole cell can sample its full rect: linear filtering
+   *  at the edge blends with zeros (further outside the glyph), never with a
+   *  neighbouring glyph's texels. */
   private _repack(): void {
     const boxes: {
       w: number;
       h: number;
       x: number;
       y: number;
-      entry: Entry;
+      glyph: AtlasGlyph;
+      msdf: Float32Array;
     }[] = [];
-    for (const cache of [this._cache, this._cacheByGid, this._cacheByKey]) {
-      for (const entry of cache.values()) {
-        if (entry.msdf === null) continue; // empty outline
-        boxes.push({ w: entry.glyph.w, h: entry.glyph.h, x: 0, y: 0, entry });
+    for (const cache of [this._cache, this._cacheByKey]) {
+      for (const { glyph, msdf } of cache.values()) {
+        if (msdf) boxes.push({ w: glyph.w + 1, h: glyph.h + 1, x: 0, y: 0, glyph, msdf });
       }
     }
     const { w: W, h: H } = potpack(boxes);
@@ -339,9 +328,9 @@ export class Atlas {
     this._height = H;
     this._pixels = new Uint8Array(W * H * CHANNELS);
     for (const box of boxes) {
-      box.entry.glyph.x = box.x;
-      box.entry.glyph.y = box.y;
-      this._blit(box.entry.msdf!, box.x, box.y, box.w, box.h);
+      box.glyph.x = box.x;
+      box.glyph.y = box.y;
+      this._blit(box.msdf, box.x, box.y, box.glyph.w, box.glyph.h);
     }
   }
 

@@ -94,9 +94,6 @@ async function renderAtSize(
   const context = canvas.getContext("webgpu")!;
   context.configure({ device, format, alphaMode: "opaque" });
 
-  const halfTexelU = 0.5 / atlas.width;
-  const halfTexelV = 0.5 / atlas.height;
-
   // ── Instance buffer: [posX, posY, sizeX, sizeY, uvMinX, uvMinY, uvSizeX, uvSizeY] ──
   // pxrangeEm is uniform across all glyphs (crop, not scale — see atlas-gen.ts),
   // so screenPxRange stays a single frame-wide uniform.
@@ -119,10 +116,10 @@ async function renderAtSize(
     instanceData[base + 1] = cellTop;
     instanceData[base + 2] = cellWidthPx;
     instanceData[base + 3] = cellHeightPx;
-    instanceData[base + 4] = glyph.x / atlas.width + halfTexelU;
-    instanceData[base + 5] = glyph.y / atlas.height + halfTexelV;
-    instanceData[base + 6] = glyph.w / atlas.width - 2 * halfTexelU;
-    instanceData[base + 7] = glyph.h / atlas.height - 2 * halfTexelV;
+    instanceData[base + 4] = glyph.x / atlas.width;
+    instanceData[base + 5] = glyph.y / atlas.height;
+    instanceData[base + 6] = glyph.w / atlas.width;
+    instanceData[base + 7] = glyph.h / atlas.height;
   }
   const instanceBuffer = device.createBuffer({
     size: instanceData.byteLength,
@@ -207,10 +204,6 @@ async function main(): Promise<void> {
 
   // ── Atlas texture + sampler (shared across all output sizes) ────────────
   const atlasTexture = createAtlasTexture(device, atlas);
-  // Adjacent atlas cells are packed with zero gap — sampling exactly at a
-  // cell's edge with bilinear filtering would blend in the next glyph's texels.
-  // Inset the sampled UV rect by half a texel on each side so no sample ever
-  // reaches outside this glyph's own cell (done per-instance in renderAtSize).
   const sampler = device.createSampler({
     magFilter: "linear",
     minFilter: "linear",

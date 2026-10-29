@@ -208,7 +208,10 @@ function crossings(
   }
   const sa = Math.max(ax1 - ax0, ay1 - ay0);
   const sb = Math.max(bx1 - bx0, by1 - by0);
-  if (sa < FLAT && sb < FLAT) {
+  // A line is its own chord, so two lines are intersected exactly right away.
+  // Subdividing them gains nothing, and near-parallel diagonals overlap in so
+  // many boxes that they can exhaust BUDGET and abandon the whole shape.
+  if ((na === 4 && nb === 4) || (sa < FLAT && sb < FLAT)) {
     const rx = _p[na - 2]! - _p[0]!;
     const ry = _p[na - 1]! - _p[1]!;
     const sx = _q[nb - 2]! - _q[0]!;

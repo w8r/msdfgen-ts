@@ -12,7 +12,7 @@ import { Font } from "../../src/font/font";
 import { emNormalizeShape } from "../../src/shape/normalize";
 import { unionShape } from "../../src/shape/union";
 import { Scanline, computeShapeScanline } from "../../src/shape/scanline";
-import { type SignedDistanceResult } from "../../src/shape/segments";
+import { EdgeSegment, LINEAR, type SignedDistanceResult } from "../../src/shape/segments";
 import { type Shape } from "../../src/shape/shape";
 
 const FONTS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../fonts");
@@ -37,7 +37,35 @@ function windings(shape: Shape): Int32Array {
   return out;
 }
 
+/** Closed polygon contour through the points [x0, y0, x1, y1, ...]. */
+function polygon(...p: number[]): EdgeSegment[] {
+  const n = p.length / 2;
+  return Array.from({ length: n }, (_, i) => {
+    const j = (i + 1) % n;
+    return new EdgeSegment(LINEAR, p[2 * i]!, p[2 * i + 1]!, p[2 * j]!, p[2 * j + 1]!, 0, 0, 0, 0);
+  });
+}
+
 describe("unionShape", () => {
+  it("still merges a shape that has near-parallel diagonal lines", () => {
+    // Parallel 45° diagonals one font unit (1/2048 em) apart overlap in
+    // thousands of subdivision boxes; subdividing them used to exhaust the
+    // per-pair budget and leave every overlap in the shape unresolved.
+    const u = 1 / 2048;
+    const shape: Shape = {
+      contours: [
+        polygon(0, 0, 1, 1, 1, 0),
+        polygon(0, u, 0, 1 + u, 1, 1 + u),
+        polygon(2, 0, 2, 1, 3, 1, 3, 0),
+        polygon(2.4, 0.2, 2.4, 1.2, 3.4, 1.2, 3.4, 0.2),
+      ],
+      inverseYAxis: false,
+    };
+    unionShape(shape);
+    // The two triangles stay apart; the two overlapping squares become one.
+    expect(shape.contours.length).toBe(3);
+  });
+
   for (const file of ["Roboto.ttf", "NotoSans.ttf", "PTSerif-Regular.ttf"]) {
     it(`keeps the fill and removes every overlap (${file}, printable ASCII + Latin-1)`, () => {
       const buf = readFileSync(resolve(FONTS_DIR, file));

@@ -46,10 +46,10 @@ quads.forEach(({ glyph: g, penX, penY }, i) => {
   const x1 = penX + g.planeRight - widthEm / 2;
   const y0 = penY + g.planeBottom - CAP_HEIGHT_EM / 2;
   const y1 = penY + g.planeTop - CAP_HEIGHT_EM / 2;
-  const u0 = (g.x + 0.5) / atlas.width;
-  const u1 = (g.x + g.w - 0.5) / atlas.width;
-  const vTop = (g.y + 0.5) / atlas.height; // the texture is y-down
-  const vBottom = (g.y + g.h - 0.5) / atlas.height;
+  const u0 = g.x / atlas.width;
+  const u1 = (g.x + g.w) / atlas.width;
+  const vTop = g.y / atlas.height; // the texture is y-down
+  const vBottom = (g.y + g.h) / atlas.height;
   // prettier-ignore
   vertices.set([
     x0, y0, u0, vBottom,  x1, y0, u1, vBottom,  x0, y1, u0, vTop,

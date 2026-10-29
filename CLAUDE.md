@@ -21,8 +21,10 @@ Target: < 50 KB minified, zero runtime dependencies, no WASM.
 - Variable fonts (`gvar`, `fvar`)
 - Text shaping: ligatures, complex scripts, GSUB. Kerning = `kern` table only (format 0)
 - SVG input, PNG output
-- Skia-style overlap resolution — use scanline sign correction like msdfgen without
-  `MSDFGEN_USE_SKIA`
+- Skia itself. Overlapping contours ARE merged (`src/shape/union.ts`, run by `Atlas` before
+  `normalizeShape` — msdfgen's `MSDFGEN_USE_SKIA` step done without Skia; it leaves shapes
+  without overlaps untouched). The core pipeline after it stays msdfgen-without-Skia
+  (overlapping-contour combiner + scanline sign correction), so the goldens still apply.
 - Node canvas / DOM dependencies in the library itself (demo may use DOM)
 
 ## Ground truth: the C++ reference
@@ -107,6 +109,7 @@ src/
                        # flat numeric fields p0x..p3x etc. HOT.
     contour.ts  shape.ts
     normalize.ts       # contour normalization, winding, scanline sign correction
+    union.ts           # overlapping contours -> boundary of their nonzero fill (Atlas only)
   msdf/
     edge-coloring.ts   # edgeColoringSimple (deterministic, same seed behavior as C++)
     distance.ts        # signed (pseudo-)distance per segment. HOTTEST code in the repo.

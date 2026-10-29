@@ -6,7 +6,7 @@ Crisp text at any size for WebGL and WebGPU. Load a TrueType font, get a multi-c
 
 - TypeScript port of [msdfgen](https://github.com/Chlumsky/msdfgen) that matches the C++ output to 1e-4 per texel
 - Built-in TrueType parser with kerning
-- 15 KB gzipped, no WASM, one tiny dependency ([potpack](https://github.com/mapbox/potpack))
+- 16 KB gzipped, no WASM, one tiny dependency ([potpack](https://github.com/mapbox/potpack))
 
 ## Install
 

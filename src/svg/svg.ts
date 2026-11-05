@@ -1,0 +1,661 @@
+/**
+ * Minimal SVG → Shape parser: the `svg/` twin of `font/`. No DOM.
+ *
+ * Supported: `<path>` (all commands, arcs converted to cubics) and the basic
+ * shapes (`<rect>` incl. rounded, `<circle>`, `<ellipse>`, `<polygon>`,
+ * `<polyline>`); `transform` on any element, composed through `<g>`; `fill`,
+ * `fill-rule`, `fill-opacity` (inherited) and `opacity` from attributes, CSS
+ * class rules in `<style>` (`.name` selectors only, later rules win) or inline
+ * `style`; group `opacity` applied to the group's composite (exact when its
+ * content is opaque, see parseSvgLayers); percentage lengths; linear/
+ * radial gradient fills (`gradientUnits`, `gradientTransform`; attributes and
+ * stops a gradient doesn't set come from the one its `href` links to; pad only,
+ * focal point ignored); `clip-path` on any element, composed through `<g>`
+ * (`<clipPath>` children: basic shapes, or `<use>` of one, with `clip-rule`;
+ * user space only), applied as geometry: each shape is intersected with its
+ * clip (clipShape); the root `viewBox` (or `width`/`height`), which also clips
+ * like a browser's viewport. `fill-rule="evenodd"` shapes are re-oriented so
+ * nonzero gives the same fill (msdfgen's orientContours; self-intersecting
+ * even-odd paths are approximate, as in msdfgen without Skia).
+ * Not supported: strokes, masks, filters, blend modes, `<use>` outside
+ * `<clipPath>`, `<text>`, nested `<svg>`, `clipPathUnits="objectBoundingBox"`
+ * (the clip is ignored). `<defs>`, `<clipPath>`, `<mask>`, `<symbol>`,
+ * `<pattern>` and `<marker>` contents are not drawn.
+ */
+
+import { EdgeSegment, LINEAR, QUADRATIC, CUBIC, type SegmentType } from "../shape/segments";
+import { type Contour } from "../shape/contour";
+import { type Shape } from "../shape/shape";
+import { emNormalizeShape, orientContours } from "../shape/normalize";
+import { clipShape, subtractShape } from "../shape/union";
+import { shapeBounds } from "../msdf/shape-msdf";
+
+/** A gradient fill, ready for a shader. Colours are raw CSS strings. */
+export interface SvgGradient {
+  /** Linear: t = x'. Radial: t = length(x', y'). Clamped to [0, 1] (pad). */
+  radial: boolean;
+  /** Affine `[a, b, c, d, e, f]` (SVG `matrix()` order) from shape space
+   *  to gradient space: x' = a·x + c·y + e, y' = b·x + d·y + f. */
+  matrix: number[];
+  stops: { offset: number; color: string; opacity: number }[];
+}
+
+/** One filled `<path>`: its own shape (same space as {@link parseSvg}) and paint. */
+export interface SvgLayer {
+  shape: Shape;
+  /** CSS colour of `fill`; unused when `gradient` is set. */
+  color: string;
+  /** `opacity × fill-opacity`. */
+  opacity: number;
+  gradient: SvgGradient | null;
+}
+
+/** Reads attribute `name` from one tag's source text (the value may hold the other quote). */
+function _attr(tag: string, name: string): string | undefined {
+  return new RegExp(`\\s${name}\\s*=\\s*(["'])([\\s\\S]*?)\\1`).exec(tag)?.[2];
+}
+
+/** `.class` rules from `<style>` blocks, in source order: [class name, declarations]. */
+type Rules = [string, string][];
+
+/**
+ * Reads presentation property `name` of one tag, in CSS precedence: inline
+ * `style`, then the `rules` for its `class`es, then the attribute. Within CSS,
+ * the last declaration wins: `.class` selectors are equally specific, so that
+ * is stylesheet order, whatever the order of the names in `class`.
+ */
+function _prop(tag: string, name: string, rules?: Rules): string | undefined {
+  const re = new RegExp(`(?:^|;)\\s*${name}\\s*:\\s*([^;]+)`, "g");
+  const last = (css: string): string | undefined => [...css.matchAll(re)].pop()?.[1]?.trim();
+  const cls = _attr(tag, "class");
+  let css = "";
+  if (cls && rules) {
+    const mine = new Set(cls.split(/\s+/));
+    css = rules
+      .filter(([c]) => mine.has(c))
+      .map(([, decls]) => decls)
+      .join(";");
+  }
+  return last(_attr(tag, "style") ?? "") ?? last(css) ?? _attr(tag, name);
+}
+
+/** Parses a number or percentage (`50%` → 0.5); `def` when absent. */
+function _num(v: string | undefined, def: number): number {
+  return v === undefined ? def : parseFloat(v) / (v.trim().endsWith("%") ? 100 : 1);
+}
+
+/** Parses a length; a percentage is of `ref` (its viewport dimension). 0 when absent. */
+function _len(v: string | undefined, ref: number): number {
+  return v === undefined ? 0 : parseFloat(v) * (v.trim().endsWith("%") ? ref / 100 : 1);
+}
+
+/**
+ * Parses an SVG document into one filled {@link Shape}: y-up, origin at the
+ * viewBox's bottom-left, 1 unit = the viewBox height, clipped to the viewBox.
+ * All paths are unioned.
+ *
+ * @param svg SVG source text.
+ * @returns The shape, ready for `Atlas.shapes` or `generateShapeMSDF`.
+ */
+export function parseSvg(svg: string): Shape {
+  // Known gap (rare): the elements' contours are concatenated into one nonzero fill, so two
+  // overlapping elements wound in opposite directions cancel where they overlap (a hole
+  // where both are drawn). Unioning each element's fill separately fixes that, but layers
+  // usually share curved edges (a clipped shape and its clip outline, repeated corners),
+  // which the boolean ops in shape/union.ts can't resolve: they spend their subdivision
+  // budget (2.5-6.6 ms per Noto emoji), give up, and return this same concatenation.
+  const contours = parseSvgLayers(svg).layers.flatMap((l) => l.shape.contours);
+  return { contours, inverseYAxis: false };
+}
+
+/**
+ * Parses an SVG document into one {@link SvgLayer} per filled path, in paint
+ * order (back to front), for drawing with real colours and gradients. Each
+ * layer's shape is already clipped (clip paths, viewBox); a path clipped away
+ * entirely has no layer. A group's `opacity` applies to its composite, which
+ * layers drawn one by one can't do directly; when everything in the group is
+ * opaque, each member is cut down to the part no later member covers, so
+ * drawing the members with the group's opacity is exact. A group holding
+ * translucent content keeps that opacity multiplied into its members, an
+ * approximation where they overlap.
+ *
+ * @param svg SVG source text.
+ * @returns The layers, plus the viewBox width (shape units; height is 1).
+ */
+export function parseSvgLayers(svg: string): { layers: SvgLayer[]; width: number } {
+  svg = svg.replace(/<!--[\s\S]*?-->/g, ""); // comments may contain tags
+  const root = /<svg\b[^>]*>/.exec(svg)?.[0] ?? "";
+  const box = (_attr(root, "viewBox") ?? `0 0 ${_attr(root, "width")} ${_attr(root, "height")}`)
+    .trim()
+    .split(/[\s,]+/)
+    .map(parseFloat);
+  const [x0 = 0, y0 = 0, w = NaN, h = NaN] = box;
+  if (!(h > 0)) throw new Error("parseSvg: needs a viewBox or width/height");
+  const vp = [w, h]; // what percentage lengths refer to
+  const toUser = [h, 0, 0, -h, x0, y0 + h]; // shape space → SVG user space
+  const flip = [1, 0, 0, -1, -x0, y0 + h]; // user space → shape space, before ÷ h
+  // The viewport clips like a <clipPath> holding one rect: the viewBox, [0, vw] × [0, 1].
+  const vw = w / h;
+  const viewport: Contour[] = [];
+  if (w > 0) _parsePath(`M${x0} ${y0}h${w}v${h}h${-w}z`, flip, viewport);
+  emNormalizeShape({ contours: viewport, inverseYAxis: false }, h);
+
+  const gradients = new Map<string, string[]>(); // id → [kind, attributes, body]
+  const gradientRe = /<(linear|radial)Gradient\b([^>]*?)(?:\/>|>([\s\S]*?)<\/\1Gradient>)/g;
+  for (const [, kind = "", attrs = "", body = ""] of svg.matchAll(gradientRe)) {
+    gradients.set(_attr(attrs, "id") ?? "", [kind, attrs, body]);
+  }
+  // Clip paths: id → [attributes, body]; elements by id (for <use> inside them): [name, attributes].
+  const clipPaths = new Map<string, string[]>();
+  for (const [, attrs = "", body = ""] of svg.matchAll(
+    /<clipPath\b([^>]*?)(?:\/>|>([\s\S]*?)<\/clipPath>)/g,
+  )) {
+    clipPaths.set(_attr(attrs, "id") ?? "", [attrs, body]);
+  }
+  const byId = new Map<string, string[]>();
+  for (const [, name = "", attrs = ""] of svg.matchAll(_TAG)) {
+    const id = _attr(attrs, "id");
+    if (id !== undefined) byId.set(id, [name, attrs]);
+  }
+  // CSS class rules from <style> blocks (".a, .b { … }"), in source order.
+  const rules: Rules = [];
+  for (const [, css = ""] of svg.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/g)) {
+    for (const [, selectors = "", decls = ""] of css.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
+      for (const sel of selectors.split(",")) {
+        const name = /^\s*\.([\w-]+)\s*$/.exec(sel)?.[1];
+        if (name) rules.push([name, decls]);
+      }
+    }
+  }
+
+  // Walk the tags in paint order, keeping each open element's inherited state.
+  const layers: SvgLayer[] = [];
+  // Containers with opacity < 1: their layers (indices), the enclosing such group, and
+  // whether anything inside is translucent (then the group can't be made exact).
+  const groups: { members: number[]; parent: number; translucent: boolean }[] = [];
+  const stack = [
+    {
+      m: [1, 0, 0, 1, 0, 0],
+      fill: "black",
+      rule: "nonzero",
+      fillOpacity: 1,
+      opacity: 1,
+      clips: [] as Contour[][][], // every clip region on the way here, each in shape space
+      group: -1, // innermost container with opacity < 1, in `groups`
+    },
+  ];
+  let hidden = 0; // depth inside containers that are never drawn
+  for (const [, close, name = "", attrs = "", selfClose] of svg.matchAll(
+    /<(\/?)([\w:-]+)([^>]*?)(\/?)>/g,
+  )) {
+    if (hidden > 0 || /^(defs|clipPath|mask|symbol|pattern|marker|style)$/.test(name)) {
+      if (close) hidden--;
+      else if (!selfClose) hidden++;
+      continue;
+    }
+    if (close) {
+      stack.pop();
+      continue;
+    }
+    const parent = stack[stack.length - 1]!;
+    const prop = (key: string): string | undefined => _prop(attrs, key, rules);
+    const own = _num(prop("opacity"), 1);
+    const d = _outline(name, attrs, vp);
+    const state = {
+      m: _mul(parent.m, _transform(_attr(attrs, "transform") ?? "")),
+      fill: prop("fill") ?? parent.fill,
+      rule: prop("fill-rule") ?? parent.rule,
+      fillOpacity: _num(prop("fill-opacity"), parent.fillOpacity),
+      opacity: parent.opacity * own,
+      clips: parent.clips,
+      group: parent.group,
+    };
+    if (d === undefined && own < 1 && !selfClose) {
+      state.group = groups.push({ members: [], parent: parent.group, translucent: false }) - 1;
+    }
+    // clip-path, in this element's user space: clips it and everything inside it. Missing
+    // clip paths and objectBoundingBox units are ignored.
+    const clip = clipPaths.get(_url(prop("clip-path")));
+    if (clip && _attr(clip[0]!, "clipPathUnits") !== "objectBoundingBox") {
+      state.clips = [...parent.clips, _clipRegion(clip, byId, rules, _mul(flip, state.m), vp)];
+    }
+    if (!selfClose) stack.push(state);
+    if (d === undefined || state.fill === "none") continue;
+
+    const contours: Contour[] = [];
+    _parsePath(d, _mul(flip, state.m), contours);
+    if (state.rule === "evenodd") orientContours(contours);
+    const shape: Shape = { contours, inverseYAxis: false };
+    emNormalizeShape(shape, h);
+    const ref = gradients.get(_url(state.fill));
+    const toLocal = _mul(_invert(state.m), toUser); // shape space → this element's user space
+    // From the unclipped outline: objectBoundingBox gradients span the whole element.
+    const gradient = ref ? _gradient(ref, gradients, rules, toLocal, d, vp) : null;
+    for (const region of state.clips) clipShape(shape, region);
+    // Then the viewport, unless the shape lies inside it (or entirely outside: dropped).
+    const b = shapeBounds(shape);
+    if (b.maxX <= 0 || b.minX >= vw || b.maxY <= 0 || b.minY >= 1) continue;
+    const out = b.minX < 0 || b.minY < 0 || b.maxX > vw || b.maxY > 1;
+    if (out && viewport.length > 0) clipShape(shape, [viewport]);
+    if (shape.contours.length === 0) continue;
+    if (state.group >= 0) {
+      const g = groups[state.group]!;
+      g.members.push(layers.length);
+      const clear = gradient ? gradient.stops.some((s) => s.opacity < 1) : false;
+      if (own < 1 || state.fillOpacity < 1 || clear) g.translucent = true;
+      // To the groups around it, this group's composite is translucent content.
+      for (let k = g.parent; k >= 0; k = groups[k]!.parent) groups[k]!.translucent = true;
+    }
+    layers.push({
+      shape,
+      color: state.fill,
+      opacity: state.opacity * state.fillOpacity,
+      gradient,
+    });
+  }
+
+  // Opaque groups: the composite shows each point's topmost member, so cut every member
+  // by the later ones (originals, as they are cut after it) whose bounds overlap its own.
+  for (const g of groups) {
+    if (g.translucent || g.members.length < 2) continue;
+    const bounds = g.members.map((k) => shapeBounds(layers[k]!.shape));
+    for (let i = 0; i < g.members.length - 1; i++) {
+      const a = bounds[i]!;
+      const cut: Contour[][] = [];
+      for (let j = i + 1; j < g.members.length; j++) {
+        const o = bounds[j]!;
+        if (o.minX < a.maxX && a.minX < o.maxX && o.minY < a.maxY && a.minY < o.maxY) {
+          cut.push(layers[g.members[j]!]!.shape.contours);
+        }
+      }
+      subtractShape(layers[g.members[i]!]!.shape, cut);
+    }
+  }
+  return { layers: layers.filter((l) => l.shape.contours.length > 0), width: w / h };
+}
+
+/** Start tags (and self-closing ones): name, attributes. */
+const _TAG = /<([\w:-]+)\b([^>]*?)\/?>/g;
+
+/** The id in a `url(#id)` paint or clip reference ("" for none). */
+function _url(v: string | undefined): string {
+  return /url\(\s*['"]?#([^)'"\s]+)/.exec(v ?? "")?.[1] ?? "";
+}
+
+/**
+ * A `<clipPath>`'s region in shape space, for clipShape: one contour group per
+ * child shape (a basic shape, or a `<use>` of one), so overlapping children
+ * union whatever their orientation. `xf` maps the referencing element's user
+ * space to shape space before ÷ `h`.
+ */
+function _clipRegion(
+  [attrs = "", body = ""]: string[],
+  byId: Map<string, string[]>,
+  rules: Rules,
+  xf: number[],
+  vp: number[],
+): Contour[][] {
+  const [vw = 0, vh = 1] = vp;
+  const groups: Contour[][] = [];
+  const m = _mul(xf, _transform(_attr(attrs, "transform") ?? ""));
+  for (const [, name = "", child = ""] of body.matchAll(_TAG)) {
+    let el = [name, child];
+    let cm = _mul(m, _transform(_attr(child, "transform") ?? ""));
+    if (name === "use") {
+      // <use>: its transform, then translate(x, y), then the target's own transform.
+      const target = byId.get(_attr(child, "(?:xlink:)?href")?.slice(1) ?? "");
+      if (!target) continue;
+      cm = _mul(cm, [1, 0, 0, 1, _len(_attr(child, "x"), vw), _len(_attr(child, "y"), vh)]);
+      cm = _mul(cm, _transform(_attr(target[1]!, "transform") ?? ""));
+      el = target;
+    }
+    const d = _outline(el[0]!, el[1]!, vp);
+    if (d === undefined) continue;
+    const contours: Contour[] = [];
+    _parsePath(d, cm, contours);
+    const rule = [el[1]!, child, attrs].map((a) => _prop(a, "clip-rule", rules)).find(Boolean);
+    if (rule === "evenodd") orientContours(contours);
+    emNormalizeShape({ contours, inverseYAxis: false }, vh);
+    groups.push(contours);
+  }
+  return groups;
+}
+
+/**
+ * A drawable element's outline as path data (basic shapes converted), or
+ * undefined. Percentages are of the viewport `vp` (width, height): x of its
+ * width, y of its height, `r` of their root mean square, as in SVG.
+ */
+function _outline(name: string, attrs: string, [vw = 0, vh = 0]: number[]): string | undefined {
+  const n = (key: string, ref: number): number => _len(_attr(attrs, key), ref);
+  const [x, y, w, h] = [n("x", vw), n("y", vh), n("width", vw), n("height", vh)];
+  const [cx, cy, diag] = [n("cx", vw), n("cy", vh), Math.hypot(vw, vh) / Math.SQRT2];
+  switch (name) {
+    case "path":
+      return _attr(attrs, "d") ?? "";
+    case "polygon":
+    case "polyline": // filled as if closed, like a path
+      return `M${_attr(attrs, "points") ?? "0 0"}`;
+    case "circle":
+    case "ellipse": {
+      const [rx, ry] =
+        name === "circle" ? [n("r", diag), n("r", diag)] : [n("rx", vw), n("ry", vh)];
+      const arc = `A${rx} ${ry} 0 1 0`;
+      return `M${cx - rx} ${cy}${arc} ${cx + rx} ${cy}${arc} ${cx - rx} ${cy}Z`;
+    }
+    case "rect": {
+      // A missing rx/ry copies the other; both clamp to half the size. 0 radius arcs are skipped.
+      const [ax, ay] = [_attr(attrs, "rx"), _attr(attrs, "ry")];
+      const rx = Math.min(ax === undefined ? _len(ay, vh) : _len(ax, vw), w / 2);
+      const ry = Math.min(ay === undefined ? _len(ax, vw) : _len(ay, vh), h / 2);
+      const arc = `A${rx} ${ry} 0 0 1`;
+      return (
+        `M${x + rx} ${y}H${x + w - rx}${arc} ${x + w} ${y + ry}V${y + h - ry}` +
+        `${arc} ${x + w - rx} ${y + h}H${x + rx}${arc} ${x} ${y + h - ry}V${y + ry}${arc} ${x + rx} ${y}Z`
+      );
+    }
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Resolves one gradient element to a shape-space → gradient-space matrix + stops.
+ * What it doesn't set (attributes, stops) comes from the gradient its `href`
+ * links to, and so on down the chain (Illustrator and Inkscape both do this).
+ * `d` is the element's outline in its own user space (`toLocal`'s target), for
+ * objectBoundingBox units; `vp` the viewport, for userSpaceOnUse percentages.
+ */
+function _gradient(
+  def: string[],
+  gradients: Map<string, string[]>,
+  rules: Rules,
+  toLocal: number[],
+  d: string,
+  [vw = 0, vh = 0]: number[],
+): SvgGradient {
+  const chain: string[][] = [];
+  for (let g = def as string[] | undefined; g && !chain.includes(g);) {
+    chain.push(g);
+    g = gradients.get(_attr(g[1] ?? "", "(?:xlink:)?href")?.slice(1) ?? "");
+  }
+  const attr = (name: string): string | undefined =>
+    chain.map((g) => _attr(g[1] ?? "", name)).find((v) => v !== undefined);
+  const user = attr("gradientUnits") === "userSpaceOnUse";
+  // A coordinate, or its default (all percentages): a percentage is of the viewport in user
+  // space (x of its width, y of its height, r of their root mean square), else of the box.
+  const n = (name: string, value: string, ref: number): number => {
+    const v = attr(name) ?? value;
+    return parseFloat(v) * (v.trim().endsWith("%") ? (user ? ref : 1) / 100 : 1);
+  };
+  // Gradient → the element's user space: [bounding box ·] gradientTransform.
+  let m = _transform(attr("gradientTransform") ?? "");
+  if (!user) {
+    // Unit square → the element's bounding box, measured in its own user space.
+    const local: Contour[] = [];
+    _parsePath(d, [1, 0, 0, 1, 0, 0], local);
+    const b = shapeBounds({ contours: local, inverseYAxis: false });
+    m = _mul([b.maxX - b.minX, 0, 0, b.maxY - b.minY, b.minX, b.minY], m);
+  }
+  // Gradient space → normalized: linear p1→0, p2→1 along x; radial centre→0, r→1.
+  const radial = def[0] === "radial";
+  const [x1, y1] = [n("x1", "0%", vw), n("y1", "0%", vh)];
+  const [dx, dy] = [n("x2", "100%", vw) - x1, n("y2", "0%", vh) - y1];
+  const diag = Math.hypot(vw, vh) / Math.SQRT2;
+  const [cx, cy, r] = [n("cx", "50%", vw), n("cy", "50%", vh), n("r", "50%", diag)];
+  const len2 = dx * dx + dy * dy || 1;
+  const norm = radial
+    ? [1 / r, 0, 0, 1 / r, -cx / r, -cy / r]
+    : [dx / len2, 0, dy / len2, 0, -(x1 * dx + y1 * dy) / len2, 0];
+
+  const stopSrc = chain.map((g) => g[2] ?? "").find((b) => /<stop\b/.test(b)) ?? "";
+  const stops = [...stopSrc.matchAll(/<stop\b[^>]*>/g)].map(([stop]) => ({
+    offset: _num(_attr(stop, "offset"), 0),
+    color: _prop(stop, "stop-color", rules) ?? "black",
+    opacity: _num(_prop(stop, "stop-opacity", rules), 1),
+  }));
+  return { radial, matrix: _mul(norm, _mul(_invert(m), toLocal)), stops };
+}
+
+/** Composes affine matrices (SVG `matrix()` order): `m · n` (n applied first). */
+function _mul(m: number[], n: number[]): number[] {
+  const [a = 0, b = 0, c = 0, d = 0, e = 0, f = 0] = m;
+  const [na = 0, nb = 0, nc = 0, nd = 0, ne = 0, nf = 0] = n;
+  return [
+    a * na + c * nb,
+    b * na + d * nb,
+    a * nc + c * nd,
+    b * nc + d * nd,
+    a * ne + c * nf + e,
+    b * ne + d * nf + f,
+  ];
+}
+
+/** Applies an affine matrix (SVG `matrix()` order) to a point. */
+function _apply(
+  [a = 0, b = 0, c = 0, d = 0, e = 0, f = 0]: number[],
+  x: number,
+  y: number,
+): [number, number] {
+  return [a * x + c * y + e, b * x + d * y + f];
+}
+
+/** Inverts an affine matrix (SVG `matrix()` order). */
+function _invert([a = 0, b = 0, c = 0, d = 0, e = 0, f = 0]: number[]): number[] {
+  const det = a * d - b * c;
+  return [d / det, -b / det, -c / det, a / det, (c * f - d * e) / det, (b * e - a * f) / det];
+}
+
+/** Parses an SVG `transform` list into one affine matrix. */
+function _transform(src: string): number[] {
+  let m = [1, 0, 0, 1, 0, 0];
+  for (const [, fn, args = ""] of src.matchAll(/(\w+)\s*\(([^)]*)\)/g)) {
+    const [a = 0, b, c, d = 0, e = 0, f = 0] = args
+      .trim()
+      .split(/[\s,]+/)
+      .map(parseFloat);
+    const rad = (a * Math.PI) / 180;
+    const [cos, sin] = [Math.cos(rad), Math.sin(rad)];
+    const [px, py] = [b ?? 0, c ?? 0]; // rotate(angle, px, py) pivot
+    m = _mul(
+      m,
+      fn === "matrix"
+        ? [a, b ?? 0, c ?? 0, d, e, f]
+        : fn === "translate"
+          ? [1, 0, 0, 1, a, b ?? 0]
+          : fn === "scale"
+            ? [a, 0, 0, b ?? a, 0, 0]
+            : fn === "rotate"
+              ? [cos, sin, -sin, cos, px - cos * px + sin * py, py - sin * px - cos * py]
+              : fn === "skewX"
+                ? [1, 0, Math.tan(rad), 1, 0, 0]
+                : [1, Math.tan(rad), 0, 1, 0, 0], // skewY
+    );
+  }
+  return m;
+}
+
+const _NUM = /[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/y;
+
+/**
+ * Appends the closed contours of path data `d` to `out`, every point mapped by
+ * `xf` (the element's transform, then the y-flip into shape space).
+ */
+function _parsePath(d: string, xf: number[], out: Contour[]): void {
+  let i = 0;
+  let cx = 0; // current point (SVG coordinates)
+  let cy = 0;
+  let sx = 0; // subpath start
+  let sy = 0;
+  let qx = 0; // last control point, for S/T reflection
+  let qy = 0;
+  let cmd = "";
+  let prev = "";
+  let contour: Contour = [];
+
+  const skip = (): void => {
+    while (i < d.length && " \t\r\n,".includes(d[i]!)) i++;
+  };
+  const num = (): number => {
+    skip();
+    _NUM.lastIndex = i;
+    const m = _NUM.exec(d);
+    if (!m) throw new Error(`parseSvg: expected a number at ${i} in path "${d}"`);
+    i = _NUM.lastIndex;
+    return parseFloat(m[0]);
+  };
+  const flag = (): number => {
+    skip();
+    return d[i++] === "1" ? 1 : 0;
+  };
+  // Segment from the current point through control/end points `p` (x, y pairs),
+  // mapped by `xf` (exact for curves: affine maps keep Béziers Béziers); unused fields stay 0.
+  const seg = (type: SegmentType, ...p: number[]): void => {
+    const q = [cx, cy, ...p];
+    const t: number[] = [];
+    for (let k = 0; k < q.length; k += 2) t.push(..._apply(xf, q[k]!, q[k + 1]!));
+    const [p0x = 0, p0y = 0, p1x = 0, p1y = 0, p2x = 0, p2y = 0, p3x = 0, p3y = 0] = t;
+    contour.push(new EdgeSegment(type, p0x, p0y, p1x, p1y, p2x, p2y, p3x, p3y));
+    cx = p[p.length - 2]!;
+    cy = p[p.length - 1]!;
+  };
+  const close = (): void => {
+    if (contour.length > 0) {
+      if (cx !== sx || cy !== sy) seg(LINEAR, sx, sy);
+      out.push(contour);
+      contour = [];
+    }
+    cx = sx;
+    cy = sy;
+  };
+
+  for (skip(); i < d.length; skip()) {
+    if (/[a-zA-Z]/.test(d[i]!)) cmd = d[i++]!;
+    else if (!cmd) throw new Error(`parseSvg: expected a command at ${i} in path "${d}"`);
+    const C = cmd.toUpperCase();
+    const rx = cmd === C ? 0 : cx; // relative offset
+    const ry = cmd === C ? 0 : cy;
+    // S/T reflect the previous curve's last control point, else use the current point.
+    const reflect = (C === "S" && "CS".includes(prev)) || (C === "T" && "QT".includes(prev));
+    const kx = reflect ? 2 * cx - qx : cx;
+    const ky = reflect ? 2 * cy - qy : cy;
+    switch (C) {
+      case "M": {
+        const x = rx + num();
+        const y = ry + num();
+        close();
+        cx = sx = x;
+        cy = sy = y;
+        cmd = cmd === "M" ? "L" : "l"; // extra pairs are implicit lineto
+        break;
+      }
+      case "L":
+        seg(LINEAR, rx + num(), ry + num());
+        break;
+      case "H":
+        seg(LINEAR, rx + num(), cy);
+        break;
+      case "V":
+        seg(LINEAR, cx, ry + num());
+        break;
+      case "C":
+      case "S": {
+        const x1 = C === "C" ? rx + num() : kx;
+        const y1 = C === "C" ? ry + num() : ky;
+        qx = rx + num();
+        qy = ry + num();
+        seg(CUBIC, x1, y1, qx, qy, rx + num(), ry + num());
+        break;
+      }
+      case "Q":
+      case "T":
+        qx = C === "Q" ? rx + num() : kx;
+        qy = C === "Q" ? ry + num() : ky;
+        seg(QUADRATIC, qx, qy, rx + num(), ry + num());
+        break;
+      case "A": {
+        const arx = num();
+        const ary = num();
+        const rot = num();
+        const large = flag();
+        const sweep = flag();
+        _arc(seg, cx, cy, arx, ary, rot, large, sweep, rx + num(), ry + num());
+        break;
+      }
+      case "Z":
+        close();
+        cmd = ""; // Z takes no arguments
+        break;
+      default:
+        throw new Error(`parseSvg: unknown path command "${cmd}"`);
+    }
+    prev = C;
+  }
+  close();
+}
+
+/**
+ * SVG elliptical arc (endpoint parameterization) as ≤ 90° cubic pieces —
+ * SVG spec, implementation notes F.6.5 (endpoint → center conversion).
+ */
+function _arc(
+  seg: (type: SegmentType, ...p: number[]) => void,
+  x1: number,
+  y1: number,
+  rx: number,
+  ry: number,
+  rotDeg: number,
+  large: number,
+  sweep: number,
+  x2: number,
+  y2: number,
+): void {
+  if (x1 === x2 && y1 === y2) return;
+  rx = Math.abs(rx);
+  ry = Math.abs(ry);
+  if (rx === 0 || ry === 0) return seg(LINEAR, x2, y2);
+  const cos = Math.cos((rotDeg * Math.PI) / 180);
+  const sin = Math.sin((rotDeg * Math.PI) / 180);
+  const dx = (x1 - x2) / 2;
+  const dy = (y1 - y2) / 2;
+  const xp = cos * dx + sin * dy;
+  const yp = -sin * dx + cos * dy;
+  const lambda = (xp * xp) / (rx * rx) + (yp * yp) / (ry * ry);
+  if (lambda > 1) {
+    rx *= Math.sqrt(lambda);
+    ry *= Math.sqrt(lambda);
+  }
+  const rr = rx * rx * yp * yp + ry * ry * xp * xp;
+  const k = (large === sweep ? -1 : 1) * Math.sqrt(Math.max(0, (rx * rx * ry * ry - rr) / rr));
+  const cxp = (k * rx * yp) / ry;
+  const cyp = (-k * ry * xp) / rx;
+  const ccx = cos * cxp - sin * cyp + (x1 + x2) / 2;
+  const ccy = sin * cxp + cos * cyp + (y1 + y2) / 2;
+  const t1 = Math.atan2((yp - cyp) / ry, (xp - cxp) / rx);
+  let dt = Math.atan2((-yp - cyp) / ry, (-xp - cxp) / rx) - t1;
+  if (sweep && dt < 0) dt += 2 * Math.PI;
+  else if (!sweep && dt > 0) dt -= 2 * Math.PI;
+
+  const n = Math.max(1, Math.ceil(Math.abs(dt) / (Math.PI / 2) - 1e-9));
+  const step = dt / n;
+  const a = (4 / 3) * Math.tan(step / 4); // control-arm length on the unit circle
+  // Unit-circle point (u, v) → ellipse → rotated → translated.
+  const X = (u: number, v: number): number => ccx + rx * u * cos - ry * v * sin;
+  const Y = (u: number, v: number): number => ccy + rx * u * sin + ry * v * cos;
+  for (let j = 0; j < n; j++) {
+    const c0 = Math.cos(t1 + j * step);
+    const s0 = Math.sin(t1 + j * step);
+    const c1 = Math.cos(t1 + (j + 1) * step);
+    const s1 = Math.sin(t1 + (j + 1) * step);
+    const last = j === n - 1; // land exactly on the endpoint so contours close
+    seg(
+      CUBIC,
+      X(c0 - a * s0, s0 + a * c0),
+      Y(c0 - a * s0, s0 + a * c0),
+      X(c1 + a * s1, s1 - a * c1),
+      Y(c1 + a * s1, s1 - a * c1),
+      last ? x2 : X(c1, s1),
+      last ? y2 : Y(c1, s1),
+    );
+  }
+}

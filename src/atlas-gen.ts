@@ -21,24 +21,16 @@
  */
 
 import { type Font } from "./font/font";
-import { emNormalizeShape, normalizeShape } from "./shape/normalize";
-import { unionShape } from "./shape/union";
-import { edgeColoringSimple } from "./msdf/edge-coloring";
-import { generateMSDF } from "./msdf/generate";
-import { distanceSignCorrection, msdfErrorCorrection } from "./msdf/error-correction";
+import { emNormalizeShape } from "./shape/normalize";
+import { generateShapeMSDF } from "./msdf/shape-msdf";
 import { type Shape } from "./shape/shape";
 import potpack from "potpack";
 
-/** Edge-coloring corner angle threshold (radians) — matches msdfgen CLI default. */
-const ANGLE_THRESHOLD = 3.0;
-/** Edge-coloring PRNG seed — matches msdfgen CLI default. */
-const COLOR_SEED = 0n;
 /** Bytes per atlas texel (RGBA8; MSDF only uses 3 channels — alpha = 255). */
 const CHANNELS = 4;
-/** Segment t-samples per axis for shape bounds (control-hull would be tighter
- *  in theory but is looser in practice for outward-curving Béziers; 16 is
- *  well under a texel of slop at any realistic pixelsPerEm). */
-const BOUNDS_SAMPLES = 16;
+
+/** One cached atlas entry: layout + retained float MSDF (for repacking). */
+type Entry = { glyph: AtlasGlyph; msdf: Float32Array | null };
 
 /** Converts a msdfgen float channel value to a byte, matching C++
  *  `pixelFloatToByte` exactly. */
@@ -53,6 +45,8 @@ export interface AtlasOptions {
   pixelsPerEm?: number;
   /** MSDF distance range in texels (msdfgen `-pxrange`). Default 4. */
   pxrange?: number;
+  /** Also keep {@link Atlas.floatTexture}. Default false. */
+  float?: boolean;
 }
 
 /** Cached layout + metrics for one atlas-resident glyph. */
@@ -83,7 +77,8 @@ export interface LaidOutGlyph {
 }
 
 /**
- * Runtime MSDF glyph atlas backed by a single `Font`.
+ * Runtime MSDF glyph atlas backed by a single `Font` (or none, for an atlas
+ * of arbitrary shapes such as SVG icons — see {@link Atlas.shapes}).
  *
  * Prefer {@link Atlas.glyphs} (batched — one potpack for the whole set) over
  * calling {@link Atlas.glyph} in a loop (one potpack per insert).
@@ -94,23 +89,32 @@ export interface LaidOutGlyph {
  * before a subsequent insert is not.
  */
 export class Atlas {
-  private readonly _font: Font;
+  private readonly _font: Font | null;
   private readonly _pxPerEm: number;
   private readonly _pxrange: number;
   private _width = 0;
   private _height = 0;
   private _pixels = new Uint8Array(0);
+  private _floats: Float32Array | null;
   /** Cached glyph + retained float MSDF (for repacking on new inserts), keyed
    *  by glyph index: codepoints sharing a glyph (every character missing from
    *  the font maps to .notdef) share one atlas cell. */
-  private readonly _cache = new Map<number, { glyph: AtlasGlyph; msdf: Float32Array | null }>();
+  private readonly _cache = new Map<number, Entry>();
+  /** Same shape as {@link Atlas._cache}, keyed by caller-chosen string — see
+   *  {@link Atlas.shapes}. */
+  private readonly _cacheByKey = new Map<string, Entry>();
   /** SDF distance range in em — UNIFORM across all glyphs (that's the point). */
   readonly pxrangeEm: number;
 
-  constructor(font: Font, opts: AtlasOptions = {}) {
+  /**
+   * @param font Font for the glyph/layout methods; `null` for a shapes-only atlas.
+   * @param opts Generation scale and distance range.
+   */
+  constructor(font: Font | null, opts: AtlasOptions = {}) {
     this._font = font;
     this._pxPerEm = opts.pixelsPerEm ?? 40;
     this._pxrange = opts.pxrange ?? 4;
+    this._floats = opts.float ? new Float32Array(0) : null;
     this.pxrangeEm = this._pxrange / this._pxPerEm;
   }
 
@@ -126,6 +130,11 @@ export class Atlas {
   get texture(): Uint8Array {
     return this._pixels;
   }
+  /** {@link Atlas.texture} as raw float RGB, not clamped to [0, 1], for zoom that
+   *  outruns 8 bits; `null` without the `float` option. */
+  get floatTexture(): Float32Array | null {
+    return this._floats;
+  }
 
   /**
    * Batched generate + pack. Generates MSDFs for any codepoints not
@@ -133,7 +142,8 @@ export class Atlas {
    * Returns the `AtlasGlyph` for each requested codepoint, in order.
    */
   glyphs(codepoints: Iterable<number>): AtlasGlyph[] {
-    return this.glyphsByIndex(Array.from(codepoints, (cp) => this._font.glyphId(cp)));
+    const font = this._requireFont();
+    return this.glyphsByIndex(Array.from(codepoints, (cp) => font.glyphId(cp)));
   }
 
   /**
@@ -178,63 +188,61 @@ export class Atlas {
     return this.glyphsByIndex([glyphId])[0]!;
   }
 
+  /**
+   * Batched generate + pack for arbitrary shapes (e.g. from `parseSvg`),
+   * keyed by a caller-chosen string — the {@link Atlas.glyphs} twin for
+   * non-font input. Shapes must be y-up, in the units `pixelsPerEm` scales
+   * (`parseSvg` makes 1 unit = the viewBox height). A new shape is mutated
+   * (overlaps merged, normalized + coloured); a cached key ignores the shape
+   * passed. `advance` is 0. Shares the one packed texture with the glyph cache.
+   */
+  shapes(entries: Iterable<readonly [key: string, shape: Shape]>): AtlasGlyph[] {
+    const result: AtlasGlyph[] = [];
+    let added = 0;
+    for (const [key, shape] of entries) {
+      let entry = this._cacheByKey.get(key);
+      if (!entry) {
+        entry = this._generate(shape, 0);
+        this._cacheByKey.set(key, entry);
+        added++;
+      }
+      result.push(entry.glyph);
+    }
+    if (added > 0) this._repack();
+    return result;
+  }
+
+  /** The font, or a clear error for glyph/layout calls on a shapes-only atlas. */
+  private _requireFont(): Font {
+    if (!this._font) throw new Error("Atlas: no font — this atlas only supports shapes()");
+    return this._font;
+  }
+
   /** Generates the MSDF for `glyphId`. Does not cache and does not pack. */
-  private _generateForGlyphId(glyphId: number): { glyph: AtlasGlyph; msdf: Float32Array | null } {
-    const font = this._font;
+  private _generateForGlyphId(glyphId: number): Entry {
+    const font = this._requireFont();
     const unitsPerEm = font.metrics.unitsPerEm;
-    const advance = font.advance(glyphId) / unitsPerEm;
     const shape = font.shape(glyphId);
     emNormalizeShape(shape, unitsPerEm);
-    unionShape(shape);
+    return this._generate(shape, font.advance(glyphId) / unitsPerEm);
+  }
 
+  /** Generates one entry from an em-unit shape. Does not cache or pack. */
+  private _generate(shape: Shape, advance: number): Entry {
+    const r = generateShapeMSDF(shape, this._pxPerEm, this._pxrange);
     // Empty outline (space, .notdef with no glyf): no atlas slot needed.
-    if (shape.contours.length === 0) {
-      const glyph: AtlasGlyph = {
-        x: 0,
-        y: 0,
-        w: 0,
-        h: 0,
-        advance,
-        planeLeft: 0,
-        planeBottom: 0,
-        planeRight: 0,
-        planeTop: 0,
-      };
-      return { glyph, msdf: null };
-    }
-
-    const bounds = _shapeBounds(shape);
-    const s = this._pxPerEm;
-    const pxr = this._pxrange;
-    // Cell size in texels = ceil(bbox in texels) + 2*pxr on each side.
-    const w = Math.max(1, Math.ceil((bounds.maxX - bounds.minX) * s)) + 2 * pxr;
-    const h = Math.max(1, Math.ceil((bounds.maxY - bounds.minY) * s)) + 2 * pxr;
-    // Place the glyph so its bbox min sits at cell texel (pxr, pxr).
-    // msdfgen projection convention: pixel = s*(shape + t) (ignoring the
-    // −0.5 texel-centre offset, as elsewhere in this codebase's plane bounds).
-    const tx = pxr / s - bounds.minX;
-    const ty = pxr / s - bounds.minY;
-
-    normalizeShape(shape);
-    edgeColoringSimple(shape, ANGLE_THRESHOLD, COLOR_SEED);
-
-    const msdf = new Float32Array(w * h * 3);
-    generateMSDF(shape, w, h, s, tx, ty, pxr, msdf);
-    distanceSignCorrection(msdf, shape, w, h, s, tx, ty);
-    msdfErrorCorrection(msdf, shape, w, h, s, tx, ty, pxr);
-
     const glyph: AtlasGlyph = {
       x: 0,
       y: 0,
-      w,
-      h,
+      w: r ? r.w : 0,
+      h: r ? r.h : 0,
       advance,
-      planeLeft: -tx,
-      planeBottom: -ty,
-      planeRight: w / s - tx,
-      planeTop: h / s - ty,
+      planeLeft: r ? r.planeLeft : 0,
+      planeBottom: r ? r.planeBottom : 0,
+      planeRight: r ? r.planeRight : 0,
+      planeTop: r ? r.planeTop : 0,
     };
-    return { glyph, msdf };
+    return { glyph, msdf: r ? r.msdf : null };
   }
 
   /**
@@ -250,7 +258,7 @@ export class Atlas {
     this.glyphs(codepoints); // one potpack for the whole string
 
     const laid: LaidOutGlyph[] = [];
-    const font = this._font;
+    const font = this._requireFont();
     const upe = font.metrics.unitsPerEm;
     let penX = 0;
     let prevGid = -1;
@@ -281,7 +289,7 @@ export class Atlas {
    * cropping.
    */
   layoutMultiline(text: string): { glyphs: LaidOutGlyph[]; widthEm: number; heightEm: number } {
-    const font = this._font;
+    const font = this._requireFont();
     const upe = font.metrics.unitsPerEm;
     const lineHeightEm =
       (font.metrics.ascender - font.metrics.descender + font.metrics.lineGap) / upe;
@@ -297,9 +305,10 @@ export class Atlas {
     return { glyphs, widthEm, heightEm: lines.length * lineHeightEm };
   }
 
-  /** Repacks every cached glyph with potpack, reallocates the texture, and
-   *  re-blits each MSDF at its assigned rect. Called by `glyphsByIndex()`
-   *  after any batch of new inserts — once per batch.
+  /** Repacks every cached entry (glyph-index- and string-keyed caches — one
+   *  shared texture) with potpack, reallocates the texture, and re-blits each
+   *  MSDF at its assigned rect. Called by `glyphsByIndex()`/`shapes()` after
+   *  any batch of new inserts — once per batch.
    *
    *  Each cell gets a 1-texel gutter of zeros on its right and bottom, so a
    *  quad covering the whole cell can sample its full rect: linear filtering
@@ -314,13 +323,16 @@ export class Atlas {
       glyph: AtlasGlyph;
       msdf: Float32Array;
     }[] = [];
-    for (const { glyph, msdf } of this._cache.values()) {
-      if (msdf) boxes.push({ w: glyph.w + 1, h: glyph.h + 1, x: 0, y: 0, glyph, msdf });
+    for (const cache of [this._cache, this._cacheByKey]) {
+      for (const { glyph, msdf } of cache.values()) {
+        if (msdf) boxes.push({ w: glyph.w + 1, h: glyph.h + 1, x: 0, y: 0, glyph, msdf });
+      }
     }
     const { w: W, h: H } = potpack(boxes);
     this._width = W;
     this._height = H;
     this._pixels = new Uint8Array(W * H * CHANNELS);
+    if (this._floats) this._floats = new Float32Array(W * H * 3);
     for (const box of boxes) {
       box.glyph.x = box.x;
       box.glyph.y = box.y;
@@ -337,6 +349,7 @@ export class Atlas {
     const dst = this._pixels;
     for (let sy = 0; sy < h; sy++) {
       const dstRow = ay + (h - 1 - sy); // y-up bitmap row -> y-down atlas row
+      this._floats?.set(msdf.subarray(sy * w * 3, (sy + 1) * w * 3), (dstRow * W + ax) * 3);
       for (let sx = 0; sx < w; sx++) {
         const s = (sy * w + sx) * 3;
         const d = (dstRow * W + (ax + sx)) * CHANNELS;
@@ -347,38 +360,4 @@ export class Atlas {
       }
     }
   }
-}
-
-/** Reusable point sample buffer for `_shapeBounds`. */
-const _pt: number[] = [0, 0];
-
-/**
- * Axis-aligned bounds of a shape (em units), sampled at `BOUNDS_SAMPLES`
- * t-values per segment. Not mathematically tight, but well under a texel
- * of slop at any realistic `pixelsPerEm` — good enough for cropping.
- */
-function _shapeBounds(shape: Shape): {
-  minX: number;
-  minY: number;
-  maxX: number;
-  maxY: number;
-} {
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  for (const contour of shape.contours) {
-    for (const seg of contour) {
-      for (let i = 0; i <= BOUNDS_SAMPLES; i++) {
-        seg.point(i / BOUNDS_SAMPLES, _pt);
-        const x = _pt[0]!;
-        const y = _pt[1]!;
-        if (x < minX) minX = x;
-        if (y < minY) minY = y;
-        if (x > maxX) maxX = x;
-        if (y > maxY) maxY = y;
-      }
-    }
-  }
-  return { minX, minY, maxX, maxY };
 }

@@ -6,7 +6,7 @@
     <title>msdfgen-ts: crisp GPU text at any size</title>
     <meta
       name="description"
-      content="Runtime MSDF font atlases for WebGL and WebGPU. A TypeScript port of msdfgen with a built-in TrueType parser. 16 KB gzipped, no WASM."
+      content="Runtime MSDF font atlases for WebGL and WebGPU. A TypeScript port of msdfgen with a built-in TrueType parser. 20 KB gzipped, no WASM."
     />
     <style>
       :root {
@@ -413,7 +413,7 @@
     <main class="wrap">
       <section>
         <div class="stats">
-          <div class="stat"><b>16 KB</b><span>gzipped, one tiny dependency</span></div>
+          <div class="stat"><b>20 KB</b><span>gzipped, one tiny dependency</span></div>
           <div class="stat"><b>0 WASM</b><span>plain TypeScript, runs anywhere JS does</span></div>
           <div class="stat">
             <b>≤ 1e-4</b><span>max difference from C++ msdfgen per texel</span>
@@ -485,6 +485,26 @@
             <div>
               <h3>Every Lucide icon<span class="tag">icon font</span></h3>
               <p>About 1,700 icons from one font, addressed by glyph index.</p>
+            </div>
+          </a>
+          <a class="card" href="./svg/index.html">
+            <img src="./thumbs/svg.jpg" alt="" loading="lazy" />
+            <div>
+              <h3>SVG icons<span class="tag">SVG</span></h3>
+              <p>
+                Import an SVG: one MSDF cell per path, real fills and gradients, crisp from 16 to
+                256 px.
+              </p>
+            </div>
+          </a>
+          <a class="card" href="./svg-bounce/index.html">
+            <img src="./thumbs/svg-bounce.jpg" alt="" loading="lazy" />
+            <div>
+              <h3>10,000 SVGs<span class="tag">SVG</span></h3>
+              <p>
+                One SVG, instanced 10,000 times: bouncing, pulsing and spinning in the vertex
+                shader, one draw call.
+              </p>
             </div>
           </a>
           <a class="card" href="./three/index.html">

@@ -1,13 +1,15 @@
 # msdf-ts — CLAUDE.md
 
 TypeScript port of [Chlumsky/msdfgen](https://github.com/Chlumsky/msdfgen) (core only) with a
-minimal built-in TrueType parser, runtime atlas generation, and a WebGPU text rendering demo.
+minimal built-in TrueType parser, a minimal SVG path parser, runtime atlas generation, and a
+WebGPU text rendering demo.
 
 ## Mission
 
 A near-zero-dependency TypeScript library that, at runtime in the browser:
 
-1. Parses TrueType fonts (`glyf` outlines) directly from an `ArrayBuffer`
+1. Parses TrueType fonts (`glyf` outlines) directly from an `ArrayBuffer`, and filled SVG
+   `<path>`s from a string (see "SVG input")
 2. Generates MSDF/MTSDF bitmaps per glyph, numerically matching C++ msdfgen
 3. Packs glyphs into a dynamically growing atlas texture
 4. Ships an **interactive WebGPU demo**: pan + smooth "infinite" zoom over rendered text,
@@ -20,11 +22,16 @@ Target: < 50 KB minified, zero runtime dependencies, no WASM.
 - CFF/OTF (cubic charstrings) — v2
 - Variable fonts (`gvar`, `fvar`)
 - Text shaping: ligatures, complex scripts, GSUB. Kerning = `kern` table only (format 0)
-- SVG input, PNG output
-- Skia itself. Overlapping contours ARE merged (`src/shape/union.ts`, run by `Atlas` before
-  `normalizeShape` — msdfgen's `MSDFGEN_USE_SKIA` step done without Skia; it leaves shapes
-  without overlaps untouched). The core pipeline after it stays msdfgen-without-Skia
-  (overlapping-contour combiner + scanline sign correction), so the goldens still apply.
+- PNG output
+- SVG beyond fills: strokes, masks, filters, blend modes, `<use>` outside `<clipPath>`,
+  `<text>`, nested `<svg>`, CSS beyond `.class` selectors, gradient spread/focal points. No
+  DOM-based parsing in the library. (Clip paths are in scope, as geometry: see "SVG input".)
+- Skia itself. Overlapping contours ARE merged (`src/shape/union.ts`, run by
+  `generateShapeMSDF` unless its `union` argument is `false`, so by `Atlas` on glyphs and
+  `shapes()` alike — msdfgen's `MSDFGEN_USE_SKIA` step done without Skia; it leaves shapes
+  without overlaps untouched). Below that the pipeline stays msdfgen-without-Skia (overlapping-contour combiner
+  and scanline sign correction): the goldens call `generateMSDF` directly, and the SVG
+  reference diff passes `union = false`.
 - Node canvas / DOM dependencies in the library itself (demo may use DOM)
 
 ## Ground truth: the C++ reference
@@ -68,6 +75,8 @@ distance normalization to range, fill rule).
   (see Working agreement).
 - **Atlas format:** plain MSDF, 3 channels. GPU upload is still `rgba8unorm` (WebGPU has
   no 3-channel sampled format) — alpha written as 255 and ignored by the shader.
+  The `float` option also keeps `Atlas.floatTexture`, the same cells as raw float RGB, for
+  renderers whose zoom outruns 8 bits, like `demo/svg`.
   Keep `generateMTSDF` out of scope; do not scaffold it.
 - **Lint/format:** oxlint + oxfmt. Pre-commit hook via `git config core.hooksPath .githooks`
   (plain shell script, no husky/lint-staged deps): runs `oxfmt --check` and `oxlint` on
@@ -104,24 +113,30 @@ src/
       glyf.ts          # simple + composite glyphs -> Shape (quadratic segments)
       kern.ts          # format 0 horizontal kerning
     font.ts            # public Font class: glyphId(codepoint), shape(glyphId), metrics
+  svg/
+    svg.ts             # parseSvg -> Shape; parseSvgLayers -> per-element shape + fill/gradient
   shape/
     segments.ts        # EdgeSegment: single class, type tag LINEAR|QUADRATIC|CUBIC,
                        # flat numeric fields p0x..p3x etc. HOT.
     contour.ts  shape.ts
-    normalize.ts       # contour normalization, winding, scanline sign correction
-    union.ts           # overlapping contours -> boundary of their nonzero fill (Atlas only)
+    normalize.ts       # em-normalization, Shape::normalize, orientContours (even-odd -> nonzero)
+    union.ts           # boolean ops on nonzero fills: unionShape (overlaps, generateShapeMSDF),
+                       # clipShape (clip paths + viewport), subtractShape (group opacity)
   msdf/
     edge-coloring.ts   # edgeColoringSimple (deterministic, same seed behavior as C++)
     distance.ts        # signed (pseudo-)distance per segment. HOTTEST code in the repo.
     generate.ts        # generateMSDF / generateMTSDF into Float32Array
     error-correction.ts# full MSDFErrorCorrection port — required, not optional
-  atlas-gen.ts         # Atlas class: glyph cache + potpack packing + MSDF generation, in one file
+    shape-msdf.ts      # generateShapeMSDF: the whole pipeline for one Shape, any source
+  atlas-gen.ts         # Atlas class: glyph/shape caches + potpack packing, in one file
   index.ts             # explicit named exports — this file defines the public API surface
 demo/
   webgpu/              # instanced quads, WGSL median shader, screenPxRange uniform
 test/
   golden/              # committed fixtures from C++ msdfgen — READ ONLY for Claude
   parser/              # font parsing tests (metrics vs opentype.js, devDependency only)
+  svg/                 # SVG parser tests, Noto emoji regressions (svg/noto/), live reference
+                       # diff for cubic / even-odd shapes
   diff.test.ts         # golden bitmap comparison
   e2e.test.ts          # SSIM vs OffscreenCanvas rasterization
 tools/
@@ -247,6 +262,49 @@ zero allocations in the per-pixel loop verified by a heap-delta assertion around
    When adding to or reviewing `generate.ts`'s pixel loop: before adding anything to the
    per-edge inner loop, ask whether it depends on `px`/`py` — if it doesn't, it belongs in
    a precompute pass, not the pixel loop, however small it looks per-call.
+
+## SVG input
+
+`src/svg/` is the `font/` twin: source text in, `Shape` out; everything after that
+(`generateShapeMSDF`, `Atlas.shapes`) is shared with fonts. Keep it that way: no SVG-specific
+code in `msdf/` or the atlas.
+
+- **Scope:** fills only. `<path>` (all commands; arcs become ≤ 90° cubics, SVG spec F.6.5) and
+  the basic shapes, which are converted to path data first. One tag walker keeps each open
+  element's inherited state: `transform` composed through `<g>`, plus `fill`, `fill-rule`,
+  `fill-opacity` and `opacity`, read in CSS precedence (inline `style` > `.class` rules from
+  `<style>` > attribute). `parseSvg` unions everything into one nonzero shape (concatenated: overlapping elements
+  wound in opposite directions cancel, a rare known gap, see its comment); `parseSvgLayers`
+  keeps one shape per element plus its paint (CSS colour string or linear/radial gradient,
+  resolved to one shape-space affine matrix + stops; a gradient inherits what it doesn't set
+  through its `href` chain). `fill="none"` elements and the contents of
+  `<defs>`/`<clipPath>`/`<mask>`/`<symbol>`/`<pattern>`/`<marker>` are skipped.
+- **Clipping is geometry, not rendering:** `clip-path` (user-space `<clipPath>` of basic shapes
+  or `<use>` of one, with `clip-rule`) and the viewBox itself clip each element's shape with
+  `clipShape` (`src/shape/union.ts`) before it is returned, so a layer is still one filled
+  `Shape` and renderers need no clip support. Objects outside the viewBox (Noto keeps alternate
+  artwork there) are dropped. `objectBoundingBox` gradients use the unclipped element's bounds,
+  measured in its own user space. Group `opacity` is geometry too: a group whose content is
+  opaque has each member cut (`subtractShape`) by the later members it overlaps, so drawing
+  every layer at the group's opacity equals compositing the group first (renderers draw layers
+  one by one, instanced, and can't composite groups). Translucent content keeps the multiplied
+  opacity, an approximation where members overlap.
+- **Rendering stays out of the library:** colour strings are returned raw (no CSS colour parser
+  in the library) and the WebGL2 renderer lives in `demo/svg/renderer.ts`, not `src/`.
+- **Units:** 1 shape unit = the viewBox height (so `pixelsPerEm` = pixels per icon). The scale
+  goes through `emNormalizeShape(shape, viewBoxHeight)`, like a font's `unitsPerEm`, which also
+  collapses degenerate quadratics/cubics exactly like C++ `EdgeSegment::create`.
+- **Y-axis:** SVG is y-down; the parser flips to y-up while reading coordinates. That is a source
+  coordinate conversion, not the texture flip (which stays in exactly one place, the atlas blit).
+- **`fill-rule="evenodd"`:** that path's contours go through `orientContours` (port of
+  `Shape::orientContours`, what msdfgen's `-windingpreprocess` uses) so nonzero gives the same
+  fill. Do not thread an even-odd fill rule through sign correction instead: the generator's
+  contour combiner then sees same-direction holes and mangles their corners. Self-intersecting
+  even-odd paths are approximate, as in msdfgen without Skia.
+- **Verification:** TrueType goldens never contain cubics, so `test/svg/` is the only coverage of
+  the CUBIC paths. The reference build is core-only and can't read SVG, so the test serializes
+  the parsed shape to shapedesc and diffs `msdf -shapedesc` against `generateShapeMSDF` with
+  `union = false` live (same `1e-4` rule, same CI behavior as gate:m2b/m3 for a missing binary).
 
 ## Code style
 

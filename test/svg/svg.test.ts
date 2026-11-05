@@ -16,7 +16,8 @@ import { describe, it, expect } from "vitest";
 import { parseSvg, parseSvgLayers } from "../../src/svg/svg";
 import { type Contour } from "../../src/shape/contour";
 import { type SvgLayer } from "../../src/svg/svg";
-import { generateShapeMSDF, shapeBounds } from "../../src/msdf/shape-msdf";
+import { generateShapeMSDF, shapeBounds, type ShapeMSDF } from "../../src/msdf/shape-msdf";
+import { type Shape } from "../../src/shape/shape";
 import { CUBIC, LINEAR } from "../../src/shape/segments";
 import { parseShapeDesc, serializeShape } from "../utils/shapedesc";
 import { compareBitmaps, fl32FromBuffer } from "../utils/compare";
@@ -143,6 +144,30 @@ describe("parseSvgLayers: document structure", () => {
   });
 });
 
+describe("generateShapeMSDF: overlapping contours", () => {
+  // Two rounded rectangles overlapping inside one <path>. Unmerged, the generator
+  // leaves -Infinity texels along the overlap, drawn as a crack in the fill.
+  const overlapping = svg(
+    "M5 3h9a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3h-9a3 3 0 0 1-3-3v-9a3 3 0 0 1 3-3z" +
+      "M10 6h9a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3h-9a3 3 0 0 1-3-3v-9a3 3 0 0 1 3-3z",
+  );
+  const shape = (): Shape => parseSvgLayers(overlapping).layers[0]!.shape;
+  const nonFinite = (m: ShapeMSDF | null): number =>
+    m!.msdf.filter((v) => !Number.isFinite(v)).length;
+
+  it("merges them by default", () => {
+    const merged = shape();
+    expect(nonFinite(generateShapeMSDF(merged, 64, 8))).toBe(0);
+    expect(merged.contours).toHaveLength(1);
+  });
+
+  it("keeps them with union = false, as the reference does", () => {
+    const kept = shape();
+    expect(nonFinite(generateShapeMSDF(kept, 64, 8, false))).toBeGreaterThan(0);
+    expect(kept.contours).toHaveLength(2);
+  });
+});
+
 describe("generateShapeMSDF on SVG input — reference diff", () => {
   if (!existsSync(BINARY)) {
     if (process.env.CI) {
@@ -160,7 +185,7 @@ describe("generateShapeMSDF on SVG input — reference diff", () => {
     it(name, () => {
       const desc = serializeShape(parseSvg(src));
       const { shape } = parseShapeDesc(desc);
-      const r = generateShapeMSDF(shape, 32, 4)!;
+      const r = generateShapeMSDF(shape, 32, 4, false)!; // msdfgen without Skia
 
       const shapePath = resolve(tmp, `${name}.txt`);
       const outPath = resolve(tmp, `${name}.fl32`);

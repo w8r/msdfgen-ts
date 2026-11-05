@@ -22,7 +22,6 @@
 
 import { type Font } from "./font/font";
 import { emNormalizeShape } from "./shape/normalize";
-import { unionShape } from "./shape/union";
 import { generateShapeMSDF } from "./msdf/shape-msdf";
 import { type Shape } from "./shape/shape";
 import potpack from "potpack";
@@ -46,6 +45,8 @@ export interface AtlasOptions {
   pixelsPerEm?: number;
   /** MSDF distance range in texels (msdfgen `-pxrange`). Default 4. */
   pxrange?: number;
+  /** Also keep {@link Atlas.floatTexture}. Default false. */
+  float?: boolean;
 }
 
 /** Cached layout + metrics for one atlas-resident glyph. */
@@ -94,6 +95,7 @@ export class Atlas {
   private _width = 0;
   private _height = 0;
   private _pixels = new Uint8Array(0);
+  private _floats: Float32Array | null;
   /** Cached glyph + retained float MSDF (for repacking on new inserts), keyed
    *  by glyph index: codepoints sharing a glyph (every character missing from
    *  the font maps to .notdef) share one atlas cell. */
@@ -112,6 +114,7 @@ export class Atlas {
     this._font = font;
     this._pxPerEm = opts.pixelsPerEm ?? 40;
     this._pxrange = opts.pxrange ?? 4;
+    this._floats = opts.float ? new Float32Array(0) : null;
     this.pxrangeEm = this._pxrange / this._pxPerEm;
   }
 
@@ -126,6 +129,11 @@ export class Atlas {
   /** Packed atlas texture, flat RGBA8 bytes, row-major, y-down. */
   get texture(): Uint8Array {
     return this._pixels;
+  }
+  /** {@link Atlas.texture} as raw float RGB, not clamped to [0, 1], for zoom that
+   *  outruns 8 bits; `null` without the `float` option. */
+  get floatTexture(): Float32Array | null {
+    return this._floats;
   }
 
   /**
@@ -219,11 +227,8 @@ export class Atlas {
     return this._generate(shape, font.advance(glyphId) / unitsPerEm);
   }
 
-  /** Generates one entry from an em-unit shape: merges overlapping contours
-   *  (src/shape/union.ts), then runs the msdfgen pipeline. Does not cache or
-   *  pack. */
+  /** Generates one entry from an em-unit shape. Does not cache or pack. */
   private _generate(shape: Shape, advance: number): Entry {
-    unionShape(shape);
     const r = generateShapeMSDF(shape, this._pxPerEm, this._pxrange);
     // Empty outline (space, .notdef with no glyf): no atlas slot needed.
     const glyph: AtlasGlyph = {
@@ -327,6 +332,7 @@ export class Atlas {
     this._width = W;
     this._height = H;
     this._pixels = new Uint8Array(W * H * CHANNELS);
+    if (this._floats) this._floats = new Float32Array(W * H * 3);
     for (const box of boxes) {
       box.glyph.x = box.x;
       box.glyph.y = box.y;
@@ -343,6 +349,7 @@ export class Atlas {
     const dst = this._pixels;
     for (let sy = 0; sy < h; sy++) {
       const dstRow = ay + (h - 1 - sy); // y-up bitmap row -> y-down atlas row
+      this._floats?.set(msdf.subarray(sy * w * 3, (sy + 1) * w * 3), (dstRow * W + ax) * 3);
       for (let sx = 0; sx < w; sx++) {
         const s = (sy * w + sx) * 3;
         const d = (dstRow * W + (ax + sx)) * CHANNELS;

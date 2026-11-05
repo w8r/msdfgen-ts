@@ -26,11 +26,12 @@ Target: < 50 KB minified, zero runtime dependencies, no WASM.
 - SVG beyond fills: strokes, clip paths, masks, filters, `<use>`, `<text>`, nested `<svg>`,
   CSS beyond `.class` selectors, gradient spread/focal points. No DOM-based parsing in the
   library.
-- Skia itself. Overlapping contours ARE merged (`src/shape/union.ts`, run by `Atlas` on
-  glyphs and `shapes()` alike before `generateShapeMSDF` — msdfgen's `MSDFGEN_USE_SKIA` step
-  done without Skia; it leaves shapes without overlaps untouched). `generateShapeMSDF` itself
-  stays msdfgen-without-Skia (overlapping-contour combiner + scanline sign correction), so
-  the goldens and the SVG reference diff still apply to it.
+- Skia itself. Overlapping contours ARE merged (`src/shape/union.ts`, run by
+  `generateShapeMSDF` unless its `union` argument is `false`, so by `Atlas` on glyphs and
+  `shapes()` alike — msdfgen's `MSDFGEN_USE_SKIA` step done without Skia; it leaves shapes
+  without overlaps untouched). Below that the pipeline stays msdfgen-without-Skia (overlapping-contour combiner
+  and scanline sign correction): the goldens call `generateMSDF` directly, and the SVG
+  reference diff passes `union = false`.
 - Node canvas / DOM dependencies in the library itself (demo may use DOM)
 
 ## Ground truth: the C++ reference
@@ -74,6 +75,8 @@ distance normalization to range, fill rule).
   (see Working agreement).
 - **Atlas format:** plain MSDF, 3 channels. GPU upload is still `rgba8unorm` (WebGPU has
   no 3-channel sampled format) — alpha written as 255 and ignored by the shader.
+  The `float` option also keeps `Atlas.floatTexture`, the same cells as raw float RGB, for
+  renderers whose zoom outruns 8 bits, like `demo/svg`.
   Keep `generateMTSDF` out of scope; do not scaffold it.
 - **Lint/format:** oxlint + oxfmt. Pre-commit hook via `git config core.hooksPath .githooks`
   (plain shell script, no husky/lint-staged deps): runs `oxfmt --check` and `oxlint` on
@@ -117,7 +120,7 @@ src/
                        # flat numeric fields p0x..p3x etc. HOT.
     contour.ts  shape.ts
     normalize.ts       # em-normalization, Shape::normalize, orientContours (even-odd -> nonzero)
-    union.ts           # overlapping contours -> boundary of their nonzero fill (Atlas only)
+    union.ts           # overlapping contours -> boundary of their nonzero fill (generateShapeMSDF)
   msdf/
     edge-coloring.ts   # edgeColoringSimple (deterministic, same seed behavior as C++)
     distance.ts        # signed (pseudo-)distance per segment. HOTTEST code in the repo.
@@ -286,8 +289,8 @@ code in `msdf/` or the atlas.
   even-odd paths are approximate, as in msdfgen without Skia.
 - **Verification:** TrueType goldens never contain cubics, so `test/svg/` is the only coverage of
   the CUBIC paths. The reference build is core-only and can't read SVG, so the test serializes
-  the parsed shape to shapedesc and diffs `msdf -shapedesc` against `generateShapeMSDF` live
-  (same `1e-4` rule, same CI behavior as gate:m2b/m3 for a missing binary).
+  the parsed shape to shapedesc and diffs `msdf -shapedesc` against `generateShapeMSDF` with
+  `union = false` live (same `1e-4` rule, same CI behavior as gate:m2b/m3 for a missing binary).
 
 ## Code style
 

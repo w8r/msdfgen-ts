@@ -12,8 +12,7 @@
  * moves edges by up to size / 32768 px, so past either limit (see draw) a quad
  * filters the float32 MSDF itself: four texelFetches, full float precision.
  */
-import potpack from "potpack";
-import { generateShapeMSDF, parseSvgLayers } from "../../src/index";
+import { Atlas, parseSvgLayers } from "../../src/index";
 
 const MAX_STOPS = 8;
 const MAX_DRAWS = 128; // draw calls per frame with several SVGs, see SvgRenderer.draw
@@ -70,7 +69,7 @@ void main() {
 
 const FRAG = `#version 300 es
 precision highp float;
-uniform highp sampler2D uMsdf; // float32 RGB, rows y-up like the cells; texelFetch only
+uniform highp sampler2D uMsdf; // float32 RGB, the atlas's floatTexture; texelFetch only
 uniform highp sampler2D uMsdfHalf; // the same in float16, bilinear
 uniform vec2 uMsdfInv;         // 1 / their size
 in vec4 vT;
@@ -126,8 +125,8 @@ function rgba(css: string, opacity: number): number {
 
 /** Draws many instances of one or more SVGs (all their layers) with WebGL2. */
 export class SvgRenderer {
-  /** All layers' float MSDF cells, packed (RGB, rows y-up); set by {@link SvgRenderer.load}. */
-  msdf = { width: 0, height: 0, data: new Float32Array(0) };
+  /** All layers' float MSDF cells: `Atlas.floatTexture`, set by {@link SvgRenderer.load}. */
+  msdf = { width: 0, height: 0, data: new Float32Array(0) as Float32Array };
   /** viewBox width / height of each loaded SVG. */
   widths: number[] = [];
   /** Number of drawn layers (paths), all SVGs together. */
@@ -228,20 +227,13 @@ export class SvgRenderer {
   /** Parses `svgs` and generates their MSDF cells (`pixelsPerEm` texels per viewBox height). */
   load(svgs: string[], pixelsPerEm: number): void {
     const parsed = svgs.map(parseSvgLayers);
-    // One float MSDF cell per path, packed into one texture without quantization.
-    const cells = parsed.flatMap(({ layers }, svg) =>
-      layers.flatMap((layer) => {
-        const m = generateShapeMSDF(layer.shape, pixelsPerEm, pixelsPerEm / 8);
-        return m ? [{ svg, layer, m, w: m.w, h: m.h, x: 0, y: 0 }] : [];
-      }),
-    );
-    const { w: W, h: H } = potpack([...cells]); // a copy: potpack sorts in place, cells keep paint order
-    const texels = new Float32Array(W * H * 3);
-    for (const { m, x, y, w, h } of cells) {
-      for (let row = 0; row < h; row++) {
-        texels.set(m.msdf.subarray(row * w * 3, (row + 1) * w * 3), ((y + row) * W + x) * 3);
-      }
-    }
+    // One MSDF cell per path, packed into one atlas. Its float texture, not its bytes: the
+    // shader needs that precision at deep zoom (see the header).
+    const atlas = new Atlas(null, { pixelsPerEm, pxrange: pixelsPerEm / 8, float: true });
+    const layers = parsed.flatMap((p, svg) => p.layers.map((layer) => ({ svg, layer })));
+    const glyphs = atlas.shapes(layers.map((l, i) => [String(i), l.layer.shape] as const));
+    const cells = layers.flatMap((l, i) => (glyphs[i]!.w > 0 ? [{ ...l, m: glyphs[i]! }] : []));
+    const [W, H, texels] = [atlas.width, atlas.height, atlas.floatTexture!];
     // Template mesh: 4 vertices per layer (corner k at x = k & 1, y = k >> 1), cells in
     // SVG order, so each SVG's quads are one contiguous index range.
     const bytes = new ArrayBuffer(cells.length * 4 * STRIDE);
@@ -249,7 +241,7 @@ export class SvgRenderer {
     const u16 = new Uint16Array(bytes);
     const u32 = new Uint32Array(bytes);
     const indices = new Uint32Array(cells.length * 6);
-    cells.forEach(({ layer: l, m, x, y, w, h }, i) => {
+    cells.forEach(({ layer: l, m }, i) => {
       const grad = l.gradient;
       const stops = grad ? grad.stops.slice(0, MAX_STOPS) : [];
       const colors = grad
@@ -263,9 +255,9 @@ export class SvgRenderer {
         const sx = k & 1 ? m.planeRight : m.planeLeft;
         const sy = k >> 1 ? m.planeTop : m.planeBottom;
         const tx = (sx - m.planeLeft) * pixelsPerEm - 0.5; // MSDF texel coordinate
-        const ty = (sy - m.planeBottom) * pixelsPerEm - 0.5;
+        const ty = (m.planeTop - sy) * pixelsPerEm - 0.5; // the atlas is y-down
         f32.set([sx, sy, tx, ty, a * sx + c * sy + e, b * sx + d * sy + f, type, stops.length], v);
-        u16.set([x, y, w, h], (v + 8) * 2);
+        u16.set([m.x, m.y, m.w, m.h], (v + 8) * 2);
         u32.set(colors, v + 10);
         f32.set(offsets, v + 18);
       }
@@ -297,8 +289,10 @@ export class SvgRenderer {
     if (w === 0) return;
     const pixels = new ImageData(w, h);
     for (let i = 0; i < w * h; i++) {
-      const src = ((h - 1 - Math.floor(i / w)) * w + (i % w)) * 3; // rows are y-up
-      pixels.data.set([data[src]! * 255, data[src + 1]! * 255, data[src + 2]! * 255, 255], i * 4);
+      pixels.data.set(
+        [data[i * 3]! * 255, data[i * 3 + 1]! * 255, data[i * 3 + 2]! * 255, 255],
+        i * 4,
+      );
     }
     canvas.getContext("2d")!.putImageData(pixels, 0, 0);
   }

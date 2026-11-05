@@ -11,7 +11,7 @@
  * ambiguous (coincident curves, pieces that don't link up) also leaves the
  * shape as it was — never worse than no preprocessing.
  *
- * Runs on every glyph the Atlas generates, overlapping or not, so the
+ * Runs on every shape generateShapeMSDF sees, overlapping or not, so the
  * crossing search skips what can't matter: edge pairs whose bounds don't
  * overlap (sweep over sorted bounds), and the endpoint consecutive edges
  * share (see corner()). Module-scope scratch below is safe because the

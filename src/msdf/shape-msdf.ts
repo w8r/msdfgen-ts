@@ -1,15 +1,17 @@
 /**
  * The whole MSDF pipeline for one shape, from any source (font glyph, SVG):
- * normalize → colour → generate → sign-correct → error-correct, into a
- * bitmap cropped to the shape's bounds plus `pxrange` texels of padding.
+ * merge overlaps → normalize → colour → generate → sign-correct →
+ * error-correct, into a bitmap cropped to the shape's bounds plus `pxrange`
+ * texels of padding.
  *
- * Byte-for-byte the msdfgen `msdf -scanline` pipeline (see
- * test/msdf/msdf.test.ts); the bounds/cropping on top is original.
+ * Byte-for-byte the msdfgen `msdf -scanline` pipeline after the merge (see
+ * test/msdf/msdf.test.ts); the merge and the bounds/cropping are original.
  * msdfgen is MIT © Viktor Chlumský.
  */
 
 import { type Shape } from "../shape/shape";
 import { normalizeShape } from "../shape/normalize";
+import { unionShape } from "../shape/union";
 import { edgeColoringSimple } from "./edge-coloring";
 import { generateMSDF } from "./generate";
 import { distanceSignCorrection, msdfErrorCorrection } from "./error-correction";
@@ -38,19 +40,23 @@ export interface ShapeMSDF {
 
 /**
  * Generates the MSDF of `shape` at `pixelsPerUnit` texels per shape unit.
- * Mutates `shape` (normalized + edge-coloured). Returns `null` for a shape
- * with no contours.
+ * Mutates `shape` (overlaps merged, normalized + edge-coloured). Returns
+ * `null` for a shape with no contours.
  *
  * @param shape Closed contours, y-up, in the units `pixelsPerUnit` scales.
  * @param pixelsPerUnit Texels per shape unit (an atlas's `pixelsPerEm`).
  * @param pxrange Distance range in texels (msdfgen `-pxrange`).
+ * @param union Merge overlapping contours first (assumes em-sized units).
+ *   `false` matches msdfgen without Skia, which draws overlaps as cracks.
  * @returns The bitmap and its plane bounds, or `null` if `shape` is empty.
  */
 export function generateShapeMSDF(
   shape: Shape,
   pixelsPerUnit: number,
   pxrange: number,
+  union = true,
 ): ShapeMSDF | null {
+  if (union) unionShape(shape);
   if (shape.contours.length === 0) return null;
 
   const bounds = shapeBounds(shape);

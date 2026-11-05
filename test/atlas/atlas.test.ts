@@ -19,6 +19,7 @@ import { fileURLToPath } from "url";
 import { describe, it, expect } from "vitest";
 import { Font } from "../../src/font/font";
 import { Atlas, pixelFloatToByte, type AtlasGlyph } from "../../src/atlas-gen";
+import { parseSvg } from "../../src/svg/svg";
 import { emNormalizeShape, normalizeShape } from "../../src/shape/normalize";
 import { unionShape } from "../../src/shape/union";
 import { edgeColoringSimple } from "../../src/msdf/edge-coloring";
@@ -71,6 +72,42 @@ describe("Atlas", () => {
     expect(atlas.texture.length).toBe(atlas.width * atlas.height * 4);
     const base = (first.y * atlas.width + first.x) * 4;
     expect(atlas.texture[base + 3]).toBe(255);
+  });
+
+  it("floatTexture matches texture texel for texel, across repacks", () => {
+    const opts = { pixelsPerEm: 32, pxrange: 4, float: true };
+    const atlas = new Atlas(loadFont("Roboto.ttf"), opts);
+    const expectSameTexels = (): void => {
+      const { width: W, height: H, texture } = atlas;
+      const floatTexture = atlas.floatTexture!;
+      expect(floatTexture.length).toBe(W * H * 3);
+      for (let i = 0; i < W * H; i++) {
+        for (let c = 0; c < 3; c++) {
+          if (pixelFloatToByte(floatTexture[i * 3 + c]!) !== texture[i * 4 + c]) {
+            expect.fail(`texel ${i}, channel ${c}: float and byte textures differ`);
+          }
+        }
+      }
+    };
+    atlas.glyphs([0x52, 0x67]); // R, g: neither is symmetric, so this pins the y-flip
+    expectSameTexels();
+    atlas.glyphs([0x79]); // the repack moves every cell
+    expectSameTexels();
+  });
+
+  it("floatTexture is null without the float option", () => {
+    expect(new Atlas(null).floatTexture).toBeNull();
+  });
+
+  it("shapes() merges overlapping contours, with no font", () => {
+    const shape = parseSvg(
+      `<svg viewBox="0 0 24 24"><path d="M2 2H14V14H2ZM10 10H22V22H10Z"/></svg>`,
+    );
+    const atlas = new Atlas(null, { pixelsPerEm: 32, pxrange: 4, float: true });
+    const [icon] = atlas.shapes([["icon", shape]]);
+    expect(icon!.w).toBeGreaterThan(0);
+    expect(shape.contours).toHaveLength(1);
+    expect(atlas.floatTexture!.every(Number.isFinite)).toBe(true);
   });
 
   it("emits uniform pxrangeEm across glyphs (crop, not scale)", () => {

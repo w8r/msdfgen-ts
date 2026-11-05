@@ -23,9 +23,9 @@ Target: < 50 KB minified, zero runtime dependencies, no WASM.
 - Variable fonts (`gvar`, `fvar`)
 - Text shaping: ligatures, complex scripts, GSUB. Kerning = `kern` table only (format 0)
 - PNG output
-- SVG beyond fills: strokes, clip paths, masks, filters, `<use>`, `<text>`, nested `<svg>`,
-  CSS beyond `.class` selectors, gradient spread/focal points. No DOM-based parsing in the
-  library.
+- SVG beyond fills: strokes, masks, filters, blend modes, `<use>` outside `<clipPath>`,
+  `<text>`, nested `<svg>`, CSS beyond `.class` selectors, gradient spread/focal points. No
+  DOM-based parsing in the library. (Clip paths are in scope, as geometry: see "SVG input".)
 - Skia itself. Overlapping contours ARE merged (`src/shape/union.ts`, run by
   `generateShapeMSDF` unless its `union` argument is `false`, so by `Atlas` on glyphs and
   `shapes()` alike — msdfgen's `MSDFGEN_USE_SKIA` step done without Skia; it leaves shapes
@@ -120,7 +120,8 @@ src/
                        # flat numeric fields p0x..p3x etc. HOT.
     contour.ts  shape.ts
     normalize.ts       # em-normalization, Shape::normalize, orientContours (even-odd -> nonzero)
-    union.ts           # overlapping contours -> boundary of their nonzero fill (generateShapeMSDF)
+    union.ts           # boolean ops on nonzero fills: unionShape (overlaps, generateShapeMSDF),
+                       # clipShape (SVG clip paths + viewport)
   msdf/
     edge-coloring.ts   # edgeColoringSimple (deterministic, same seed behavior as C++)
     distance.ts        # signed (pseudo-)distance per segment. HOTTEST code in the repo.
@@ -134,7 +135,8 @@ demo/
 test/
   golden/              # committed fixtures from C++ msdfgen — READ ONLY for Claude
   parser/              # font parsing tests (metrics vs opentype.js, devDependency only)
-  svg/                 # SVG parser tests + live reference diff for cubic / even-odd shapes
+  svg/                 # SVG parser tests, Noto emoji regressions (svg/noto/), live reference
+                       # diff for cubic / even-odd shapes
   diff.test.ts         # golden bitmap comparison
   e2e.test.ts          # SSIM vs OffscreenCanvas rasterization
 tools/
@@ -273,8 +275,14 @@ code in `msdf/` or the atlas.
   `fill-opacity` and `opacity`, read in CSS precedence (inline `style` > `.class` rules from
   `<style>` > attribute). `parseSvg` unions everything into one nonzero shape; `parseSvgLayers`
   keeps one shape per element plus its paint (CSS colour string or linear/radial gradient,
-  resolved to one shape-space affine matrix + stops). `fill="none"` elements and the contents of
+  resolved to one shape-space affine matrix + stops; a gradient inherits what it doesn't set
+  through its `href` chain). `fill="none"` elements and the contents of
   `<defs>`/`<clipPath>`/`<mask>`/`<symbol>`/`<pattern>`/`<marker>` are skipped.
+- **Clipping is geometry, not rendering:** `clip-path` (user-space `<clipPath>` of basic shapes
+  or `<use>` of one, with `clip-rule`) and the viewBox itself clip each element's shape with
+  `clipShape` (`src/shape/union.ts`) before it is returned, so a layer is still one filled
+  `Shape` and renderers need no clip support. Objects outside the viewBox (Noto keeps alternate
+  artwork there) are dropped. `objectBoundingBox` gradients use the unclipped element's bounds.
 - **Rendering stays out of the library:** colour strings are returned raw (no CSS colour parser
   in the library) and the WebGL2 renderer lives in `demo/svg/renderer.ts`, not `src/`.
 - **Units:** 1 shape unit = the viewBox height (so `pixelsPerEm` = pixels per icon). The scale

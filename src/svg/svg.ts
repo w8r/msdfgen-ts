@@ -6,20 +6,26 @@
  * `<polyline>`); `transform` on any element, composed through `<g>`; `fill`,
  * `fill-rule`, `fill-opacity` (inherited) and `opacity` from attributes, CSS
  * class rules in `<style>` (`.name` selectors only) or inline `style`; linear/
- * radial gradient fills (`gradientUnits`, `gradientTransform`, stops via
- * `href`; pad only, focal point ignored); the root `viewBox` (or `width`/
- * `height`). `fill-rule="evenodd"` shapes are re-oriented so nonzero gives the
- * same fill (msdfgen's orientContours; self-intersecting even-odd paths are
- * approximate, as in msdfgen without Skia).
- * Not supported: strokes, clip paths, masks, filters, `<use>`, `<text>`,
- * nested `<svg>`. `<defs>`, `<clipPath>`, `<mask>`, `<symbol>`, `<pattern>`
- * and `<marker>` contents are not drawn.
+ * radial gradient fills (`gradientUnits`, `gradientTransform`; attributes and
+ * stops a gradient doesn't set come from the one its `href` links to; pad only,
+ * focal point ignored); `clip-path` on any element, composed through `<g>`
+ * (`<clipPath>` children: basic shapes, or `<use>` of one, with `clip-rule`;
+ * user space only), applied as geometry: each shape is intersected with its
+ * clip (clipShape); the root `viewBox` (or `width`/`height`), which also clips
+ * like a browser's viewport. `fill-rule="evenodd"` shapes are re-oriented so
+ * nonzero gives the same fill (msdfgen's orientContours; self-intersecting
+ * even-odd paths are approximate, as in msdfgen without Skia).
+ * Not supported: strokes, masks, filters, blend modes, `<use>` outside
+ * `<clipPath>`, `<text>`, nested `<svg>`, `clipPathUnits="objectBoundingBox"`
+ * (the clip is ignored). `<defs>`, `<clipPath>`, `<mask>`, `<symbol>`,
+ * `<pattern>` and `<marker>` contents are not drawn.
  */
 
 import { EdgeSegment, LINEAR, QUADRATIC, CUBIC, type SegmentType } from "../shape/segments";
 import { type Contour } from "../shape/contour";
 import { type Shape } from "../shape/shape";
 import { emNormalizeShape, orientContours } from "../shape/normalize";
+import { clipShape } from "../shape/union";
 import { shapeBounds } from "../msdf/shape-msdf";
 
 /** A gradient fill, ready for a shader. Colours are raw CSS strings. */
@@ -66,7 +72,8 @@ function _num(v: string | undefined, def: number): number {
 
 /**
  * Parses an SVG document into one filled {@link Shape}: y-up, origin at the
- * viewBox's bottom-left, 1 unit = the viewBox height. All paths are unioned.
+ * viewBox's bottom-left, 1 unit = the viewBox height, clipped to the viewBox.
+ * All paths are unioned.
  *
  * @param svg SVG source text.
  * @returns The shape, ready for `Atlas.shapes` or `generateShapeMSDF`.
@@ -78,7 +85,9 @@ export function parseSvg(svg: string): Shape {
 
 /**
  * Parses an SVG document into one {@link SvgLayer} per filled path, in paint
- * order (back to front), for drawing with real colours and gradients.
+ * order (back to front), for drawing with real colours and gradients. Each
+ * layer's shape is already clipped (clip paths, viewBox); a path clipped away
+ * entirely has no layer.
  *
  * @param svg SVG source text.
  * @returns The layers, plus the viewBox width (shape units; height is 1).
@@ -94,11 +103,28 @@ export function parseSvgLayers(svg: string): { layers: SvgLayer[]; width: number
   if (!(h > 0)) throw new Error("parseSvg: needs a viewBox or width/height");
   const toUser = [h, 0, 0, -h, x0, y0 + h]; // shape space → SVG user space
   const flip = [1, 0, 0, -1, -x0, y0 + h]; // user space → shape space, before ÷ h
+  // The viewport clips like a <clipPath> holding one rect: the viewBox, [0, vw] × [0, 1].
+  const vw = w / h;
+  const viewport: Contour[] = [];
+  if (w > 0) _parsePath(`M${x0} ${y0}h${w}v${h}h${-w}z`, flip, viewport);
+  emNormalizeShape({ contours: viewport, inverseYAxis: false }, h);
 
   const gradients = new Map<string, string[]>(); // id → [kind, attributes, body]
   const gradientRe = /<(linear|radial)Gradient\b([^>]*?)(?:\/>|>([\s\S]*?)<\/\1Gradient>)/g;
   for (const [, kind = "", attrs = "", body = ""] of svg.matchAll(gradientRe)) {
     gradients.set(_attr(attrs, "id") ?? "", [kind, attrs, body]);
+  }
+  // Clip paths: id → [attributes, body]; elements by id (for <use> inside them): [name, attributes].
+  const clipPaths = new Map<string, string[]>();
+  for (const [, attrs = "", body = ""] of svg.matchAll(
+    /<clipPath\b([^>]*?)(?:\/>|>([\s\S]*?)<\/clipPath>)/g,
+  )) {
+    clipPaths.set(_attr(attrs, "id") ?? "", [attrs, body]);
+  }
+  const byId = new Map<string, string[]>();
+  for (const [, name = "", attrs = ""] of svg.matchAll(_TAG)) {
+    const id = _attr(attrs, "id");
+    if (id !== undefined) byId.set(id, [name, attrs]);
   }
   // CSS class rules from <style> blocks (".a, .b { … }"), concatenated in source order.
   const classes = new Map<string, string>();
@@ -114,7 +140,14 @@ export function parseSvgLayers(svg: string): { layers: SvgLayer[]; width: number
   // Walk the tags in paint order, keeping each open element's inherited state.
   const layers: SvgLayer[] = [];
   const stack = [
-    { m: [1, 0, 0, 1, 0, 0], fill: "black", rule: "nonzero", fillOpacity: 1, opacity: 1 },
+    {
+      m: [1, 0, 0, 1, 0, 0],
+      fill: "black",
+      rule: "nonzero",
+      fillOpacity: 1,
+      opacity: 1,
+      clips: [] as Contour[][][], // every clip region on the way here, each in shape space
+    },
   ];
   let hidden = 0; // depth inside containers that are never drawn
   for (const [, close, name = "", attrs = "", selfClose] of svg.matchAll(
@@ -137,7 +170,14 @@ export function parseSvgLayers(svg: string): { layers: SvgLayer[]; width: number
       rule: prop("fill-rule") ?? parent.rule,
       fillOpacity: _num(prop("fill-opacity"), parent.fillOpacity),
       opacity: parent.opacity * _num(prop("opacity"), 1),
+      clips: parent.clips,
     };
+    // clip-path, in this element's user space: clips it and everything inside it. Missing
+    // clip paths and objectBoundingBox units are ignored.
+    const clip = clipPaths.get(_url(prop("clip-path")));
+    if (clip && _attr(clip[0]!, "clipPathUnits") !== "objectBoundingBox") {
+      state.clips = [...parent.clips, _clipRegion(clip, byId, classes, _mul(flip, state.m), h)];
+    }
     if (!selfClose) stack.push(state);
     const d = _outline(name, attrs);
     if (d === undefined || state.fill === "none") continue;
@@ -147,16 +187,71 @@ export function parseSvgLayers(svg: string): { layers: SvgLayer[]; width: number
     if (state.rule === "evenodd") orientContours(contours);
     const shape: Shape = { contours, inverseYAxis: false };
     emNormalizeShape(shape, h);
-    const ref = gradients.get(/url\(\s*['"]?#([^)'"\s]+)/.exec(state.fill)?.[1] ?? "");
+    const ref = gradients.get(_url(state.fill));
     const toLocal = _mul(_invert(state.m), toUser); // shape space → this element's user space
+    // Before clipping: objectBoundingBox gradients span the whole element.
+    const gradient = ref ? _gradient(ref, gradients, toLocal, shape) : null;
+    for (const region of state.clips) clipShape(shape, region);
+    // Then the viewport, unless the shape lies inside it (or entirely outside: dropped).
+    const b = shapeBounds(shape);
+    if (b.maxX <= 0 || b.minX >= vw || b.maxY <= 0 || b.minY >= 1) continue;
+    const out = b.minX < 0 || b.minY < 0 || b.maxX > vw || b.maxY > 1;
+    if (out && viewport.length > 0) clipShape(shape, [viewport]);
+    if (shape.contours.length === 0) continue;
     layers.push({
       shape,
       color: state.fill,
       opacity: state.opacity * state.fillOpacity,
-      gradient: ref ? _gradient(ref, gradients, toLocal, shape) : null,
+      gradient,
     });
   }
   return { layers, width: w / h };
+}
+
+/** Start tags (and self-closing ones): name, attributes. */
+const _TAG = /<([\w:-]+)\b([^>]*?)\/?>/g;
+
+/** The id in a `url(#id)` paint or clip reference ("" for none). */
+function _url(v: string | undefined): string {
+  return /url\(\s*['"]?#([^)'"\s]+)/.exec(v ?? "")?.[1] ?? "";
+}
+
+/**
+ * A `<clipPath>`'s region in shape space, for clipShape: one contour group per
+ * child shape (a basic shape, or a `<use>` of one), so overlapping children
+ * union whatever their orientation. `xf` maps the referencing element's user
+ * space to shape space before ÷ `h`.
+ */
+function _clipRegion(
+  [attrs = "", body = ""]: string[],
+  byId: Map<string, string[]>,
+  classes: Map<string, string>,
+  xf: number[],
+  h: number,
+): Contour[][] {
+  const groups: Contour[][] = [];
+  const m = _mul(xf, _transform(_attr(attrs, "transform") ?? ""));
+  for (const [, name = "", child = ""] of body.matchAll(_TAG)) {
+    let el = [name, child];
+    let cm = _mul(m, _transform(_attr(child, "transform") ?? ""));
+    if (name === "use") {
+      // <use>: its transform, then translate(x, y), then the target's own transform.
+      const target = byId.get(_attr(child, "(?:xlink:)?href")?.slice(1) ?? "");
+      if (!target) continue;
+      cm = _mul(cm, [1, 0, 0, 1, _num(_attr(child, "x"), 0), _num(_attr(child, "y"), 0)]);
+      cm = _mul(cm, _transform(_attr(target[1]!, "transform") ?? ""));
+      el = target;
+    }
+    const d = _outline(el[0]!, el[1]!);
+    if (d === undefined) continue;
+    const contours: Contour[] = [];
+    _parsePath(d, cm, contours);
+    const rule = [el[1]!, child, attrs].map((a) => _prop(a, "clip-rule", classes)).find(Boolean);
+    if (rule === "evenodd") orientContours(contours);
+    emNormalizeShape({ contours, inverseYAxis: false }, h);
+    groups.push(contours);
+  }
+  return groups;
 }
 
 /** A drawable element's outline as path data (basic shapes converted), or undefined. */
@@ -190,17 +285,28 @@ function _outline(name: string, attrs: string): string | undefined {
   }
 }
 
-/** Resolves one gradient element to a shape-space → gradient-space matrix + stops. */
+/**
+ * Resolves one gradient element to a shape-space → gradient-space matrix + stops.
+ * What it doesn't set (attributes, stops) comes from the gradient its `href`
+ * links to, and so on down the chain (Illustrator and Inkscape both do this).
+ */
 function _gradient(
-  [kind, attrs = "", body = ""]: string[],
+  def: string[],
   gradients: Map<string, string[]>,
   toLocal: number[],
   shape: Shape,
 ): SvgGradient {
-  const n = (name: string, def: number): number => _num(_attr(attrs, name), def);
+  const chain: string[][] = [];
+  for (let g = def as string[] | undefined; g && !chain.includes(g);) {
+    chain.push(g);
+    g = gradients.get(_attr(g[1] ?? "", "(?:xlink:)?href")?.slice(1) ?? "");
+  }
+  const attr = (name: string): string | undefined =>
+    chain.map((g) => _attr(g[1] ?? "", name)).find((v) => v !== undefined);
+  const n = (name: string, value: number): number => _num(attr(name), value);
   // Gradient → the element's user space: [bounding box ·] gradientTransform.
-  let m = _transform(_attr(attrs, "gradientTransform") ?? "");
-  if (_attr(attrs, "gradientUnits") !== "userSpaceOnUse") {
+  let m = _transform(attr("gradientTransform") ?? "");
+  if (attr("gradientUnits") !== "userSpaceOnUse") {
     // Unit square → the element's bounding box (exact unless the element is rotated).
     const b = shapeBounds(shape);
     const corners = [b.minX, b.minY, b.maxX, b.minY, b.minX, b.maxY, b.maxX, b.maxY];
@@ -215,7 +321,7 @@ function _gradient(
     m = _mul([Math.max(...xs) - lx, 0, 0, Math.max(...ys) - ly, lx, ly], m);
   }
   // Gradient space → normalized: linear p1→0, p2→1 along x; radial centre→0, r→1.
-  const radial = kind === "radial";
+  const radial = def[0] === "radial";
   const [x1, y1, dx, dy] = [
     n("x1", 0),
     n("y1", 0),
@@ -228,9 +334,7 @@ function _gradient(
     ? [1 / r, 0, 0, 1 / r, -cx / r, -cy / r]
     : [dx / len2, 0, dy / len2, 0, -(x1 * dx + y1 * dy) / len2, 0];
 
-  // Stops live here, or on the gradient this one links to (Inkscape style).
-  const href = _attr(attrs, "(?:xlink:)?href")?.slice(1) ?? "";
-  const stopSrc = /<stop\b/.test(body) ? body : (gradients.get(href)?.[2] ?? "");
+  const stopSrc = chain.map((g) => g[2] ?? "").find((b) => /<stop\b/.test(b)) ?? "";
   const stops = [...stopSrc.matchAll(/<stop\b[^>]*>/g)].map(([stop]) => ({
     offset: _num(_attr(stop, "offset"), 0),
     color: _prop(stop, "stop-color") ?? "black",

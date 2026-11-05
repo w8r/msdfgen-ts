@@ -1,6 +1,8 @@
 /**
- * SVG input: parser unit tests, plus a live diff against the reference binary
- * for the cubic / evenodd paths that TrueType goldens never exercise.
+ * SVG input: parser unit tests, regression tests on real Noto emoji (noto/,
+ * from googlefonts/noto-emoji 2D/svg at 99701e07, license in noto/LICENSE),
+ * plus a live diff against the reference binary for the cubic / evenodd paths
+ * that TrueType goldens never exercise.
  *
  * The reference can't read SVG (core-only build), so both sides consume the
  * same shapedesc: parseSvg → serializeShape → (C++ `msdf -shapedesc`) vs
@@ -15,10 +17,11 @@ import { execFileSync } from "child_process";
 import { describe, it, expect } from "vitest";
 import { parseSvg, parseSvgLayers } from "../../src/svg/svg";
 import { type Contour } from "../../src/shape/contour";
-import { type SvgLayer } from "../../src/svg/svg";
+import { type SvgGradient, type SvgLayer } from "../../src/svg/svg";
 import { generateShapeMSDF, shapeBounds, type ShapeMSDF } from "../../src/msdf/shape-msdf";
 import { type Shape } from "../../src/shape/shape";
-import { CUBIC, LINEAR } from "../../src/shape/segments";
+import { CUBIC, LINEAR, type SignedDistanceResult } from "../../src/shape/segments";
+import { Scanline, computeShapeScanline } from "../../src/shape/scanline";
 import { parseShapeDesc, serializeShape } from "../utils/shapedesc";
 import { compareBitmaps, fl32FromBuffer } from "../utils/compare";
 
@@ -26,8 +29,37 @@ const BINARY = resolve(
   dirname(fileURLToPath(import.meta.url)),
   "../../tools/msdfgen-ref/build/msdfgen",
 );
+const NOTO = resolve(dirname(fileURLToPath(import.meta.url)), "noto");
 const svg = (d: string, extra = ""): string =>
   `<svg viewBox="0 0 24 24"${extra}><path d="${d}"/></svg>`;
+
+/** Bounds of a shape, rounded to 1e-9 (shape units). */
+const box = (shape: Shape): number[] => {
+  const b = shapeBounds(shape);
+  return [b.minX, b.minY, b.maxX, b.maxY].map((v) => Math.round(v * 1e9) / 1e9);
+};
+
+/** Nonzero winding of `shape` at the centres of an n×n grid over [0, 1]², row-major. */
+function windings(shape: Shape, n: number): Int32Array {
+  const out = new Int32Array(n * n);
+  const line = new Scanline();
+  for (let j = 0; j < n; j++) {
+    computeShapeScanline(shape, (j + 0.5) / n, line);
+    for (let i = 0; i < n; i++) out[j * n + i] = line.sumIntersections((i + 0.5) / n);
+  }
+  return out;
+}
+
+/** Smallest distance from (x, y) to an edge of any of `shapes`. */
+function edgeDistance(shapes: Shape[], x: number, y: number): number {
+  const sd: SignedDistanceResult = { distance: 0, dot: 0, param: 0 };
+  let d = Infinity;
+  for (const e of shapes.flatMap((s) => s.contours.flat())) {
+    e.signedDistance(x, y, sd);
+    d = Math.min(d, Math.abs(sd.distance));
+  }
+  return d;
+}
 
 /** Hand-drawn test icons covering every path command family. */
 const ICONS: Record<string, string> = {
@@ -135,12 +167,189 @@ describe("parseSvgLayers: document structure", () => {
       <polygon points="0,8 2,8 2,10" style="font-family:'X Y';fill:#123"/>
     </svg>`);
     expect(layers.map((l) => l.color)).toEqual(["green", "blue", "#123"]);
-    const box = (i: number): number[] => {
-      const b = shapeBounds(layers[i]!.shape);
-      return [b.minX, b.minY, b.maxX, b.maxY].map((v) => Math.round(v * 1e9) / 1e9);
+    expect(box(layers[0]!.shape)).toEqual([0.5, 0.8, 0.7, 1]); // rect x 5..7, y 0..2 (y-up: 0.8..1)
+    expect(box(layers[1]!.shape)).toEqual([0.5, 0.4, 0.7, 0.6]); // circle centre (6, 5), r 1
+  });
+});
+
+describe("parseSvgLayers: clip paths and the viewport", () => {
+  const layers = (src: string): SvgLayer[] => parseSvgLayers(src).layers;
+
+  it("clips by clip-path from a style or attribute, through groups, in the element's user space", () => {
+    const ls = layers(`<svg viewBox="0 0 10 10">
+      <defs><rect id="r" width="4" height="10"/></defs>
+      <clipPath id="left"><use xlink:href="#r" x="1"/></clipPath>
+      <clipPath id="top"><rect width="10" height="5"/></clipPath>
+      <clipPath id="narrow"><rect width="3" height="10"/></clipPath>
+      <g style="clip-path: url(#left)">
+        <rect width="10" height="10"/>
+        <rect width="10" height="10" clip-path="url(#top)"/>
+      </g>
+      <rect transform="translate(2 0)" width="8" height="10" clip-path="url('#narrow')"/>
+      <rect width="10" height="10" clip-path="url(#missing)"/>
+    </svg>`);
+    expect(ls.map((l) => box(l.shape))).toEqual([
+      [0.1, 0, 0.5, 1], // <use> of a rect, translated by its x
+      [0.1, 0.5, 0.5, 1], // nested clips intersect (y-up: SVG's top half is 0.5..1)
+      [0.2, 0, 0.5, 1], // clip coordinates follow the element's own transform
+      [0, 0, 1, 1], // a missing clip path is ignored
+    ]);
+  });
+
+  it("unions clipPath children, honours clip-rule, and drops what is clipped away", () => {
+    const ls = layers(`<svg viewBox="0 0 10 10">
+      <clipPath id="two"><path d="M0 0V6H6V0Z"/><path d="M4 4H10V10H4Z"/></clipPath>
+      <clipPath id="ring" clip-rule="evenodd"><path d="M1 1H9V9H1ZM3 3H7V7H3Z"/></clipPath>
+      <clipPath id="empty"/>
+      <rect width="10" height="10" clip-path="url(#two)"/>
+      <rect width="10" height="10" clip-path="url(#ring)"/>
+      <rect width="10" height="10" clip-path="url(#empty)"/>
+      <rect x="20" width="10" height="10"/>
+    </svg>`);
+    expect(ls).toHaveLength(2); // the empty clip and the off-viewBox rect draw nothing
+    const n = 10; // grid centres at x, y = 0.5, 1.5, ... in SVG units
+    const at = (w: Int32Array, x: number, y: number): boolean => w[(n - 1 - y) * n + x] !== 0;
+    const two = windings(ls[0]!.shape, n);
+    expect([at(two, 5, 5), at(two, 1, 1), at(two, 8, 8), at(two, 8, 1)]).toEqual([
+      true, // where the children overlap, though they wind opposite ways
+      true,
+      true,
+      false,
+    ]);
+    const ring = windings(ls[1]!.shape, n);
+    expect([at(ring, 5, 5), at(ring, 2, 5), at(ring, 0, 5)]).toEqual([false, true, false]);
+  });
+
+  it("clips to the viewBox, leaving shapes inside it untouched", () => {
+    const ls = layers(`<svg viewBox="10 10 10 10">
+      <rect x="5" y="15" width="10" height="10"/>
+      <rect x="12" y="12" width="2" height="2"/>
+      <rect x="0" y="0" width="10" height="10"/>
+    </svg>`);
+    expect(ls.map((l) => box(l.shape))).toEqual([
+      [0, 0, 0.5, 0.5],
+      [0.2, 0.6, 0.4, 0.8],
+    ]);
+    expect(ls[1]!.shape.contours[0]!.map((e) => e.type)).toEqual([LINEAR, LINEAR, LINEAR, LINEAR]);
+  });
+
+  it("spans bounding-box gradients over the whole element, not its clipped part", () => {
+    const [layer] = layers(`<svg viewBox="0 0 10 10">
+      <linearGradient id="g"><stop offset="0"/><stop offset="1"/></linearGradient>
+      <clipPath id="c"><rect width="5" height="10"/></clipPath>
+      <rect width="10" height="10" fill="url(#g)" clip-path="url(#c)"/>
+    </svg>`);
+    expect(box(layer!.shape)).toEqual([0, 0, 0.5, 1]);
+    const [a = 0, , c = 0, , e = 0] = layer!.gradient!.matrix;
+    expect(a * 0.5 + c * 0.5 + e).toBeCloseTo(0.5, 12);
+  });
+});
+
+describe("parseSvgLayers: gradient href", () => {
+  it("inherits every attribute a gradient doesn't set down the href chain", () => {
+    const { layers } = parseSvgLayers(`<svg viewBox="0 0 30 10">
+      <linearGradient id="base" gradientUnits="userSpaceOnUse" x1="0" x2="10" gradientTransform="translate(5 0)">
+        <stop offset="0" stop-color="red"/><stop offset="1" stop-color="blue"/>
+      </linearGradient>
+      <linearGradient id="mid" href="#base" x2="20"/>
+      <linearGradient id="top" xlink:href="#mid" x1="5"/>
+      <radialGradient id="a" href="#b"/><radialGradient id="b" href="#a"/>
+      <rect width="30" height="10" fill="url(#top)"/>
+      <rect width="30" height="10" fill="url(#a)"/>
+    </svg>`);
+    // x1 = 5 (own), x2 = 20 (mid), user space and translate(5 0) (base): t = 0 at x = 10, 1 at 25.
+    const g = layers[0]!.gradient!;
+    const [a = 0, , c = 0, , e = 0] = g.matrix;
+    expect(a * 1.0 + c * 0.5 + e).toBeCloseTo(0, 12);
+    expect(a * 2.5 + c * 0.5 + e).toBeCloseTo(1, 12);
+    expect(g.stops.map((s) => s.color)).toEqual(["red", "blue"]);
+    expect(layers[1]!.gradient!.stops).toEqual([]); // a reference cycle ends the chain
+  });
+});
+
+describe("Noto emoji regressions", () => {
+  const noto = (u: string): string => readFileSync(resolve(NOTO, `emoji_u${u}.svg`), "utf8");
+  const ALL = ["1f4a9", "1f9b1", "1f44c", "1f633", "1f644"];
+
+  /**
+   * Layers drawn through a clip-path, each with the layer whose outline is that
+   * clip (the clipPath repeats an outline also drawn as a layer): the mouth
+   * behind the teeth, the eye whites behind the pupils, the hand behind its shading.
+   */
+  const CLIPPED: Record<string, [number, number][]> = {
+    "1f4a9": [[8, 7]],
+    "1f644": [
+      [4, 3],
+      [7, 6],
+    ],
+    "1f44c": [1, 2, 3, 4, 5, 6].map((i) => [i, 0]),
+  };
+  for (const [u, pairs] of Object.entries(CLIPPED)) {
+    it(`${u}: clipped layers fill exactly their own fill inside the clip`, () => {
+      const src = noto(u);
+      const clipped = parseSvgLayers(src).layers;
+      const unclipped = parseSvgLayers(src.replace(/clip-path:\s*url\([^)]*\);?/g, "")).layers;
+      expect(clipped).toHaveLength(unclipped.length);
+      const n = 160;
+      const errors: string[] = [];
+      for (const [i, j] of pairs) {
+        const [own, clip, got] = [unclipped[i]!.shape, clipped[j]!.shape, clipped[i]!.shape];
+        const [wOwn, wClip, wGot] = [windings(own, n), windings(clip, n), windings(got, n)];
+        for (let k = 0; k < n * n; k++) {
+          const [x, y] = [((k % n) + 0.5) / n, (Math.floor(k / n) + 0.5) / n];
+          const want = wOwn[k] !== 0 && wClip[k] !== 0;
+          if (Math.abs(wGot[k]!) > 1) errors.push(`layer ${i}: overlap at ${x},${y}`);
+          if (want !== (wGot[k] !== 0) && edgeDistance([own, clip], x, y) > 1e-4) {
+            errors.push(`layer ${i}: fill ${want ? "lost" : "added"} at ${x},${y}`);
+          }
+        }
+      }
+      expect(errors).toEqual([]);
+    });
+  }
+
+  it("1f9b1: only what is inside the viewBox is drawn", () => {
+    // The file keeps two more hairstyles and strips of curls beside the canvas.
+    const { layers } = parseSvgLayers(noto("1f9b1"));
+    expect(layers.map((l) => l.color)).toEqual(["black", "url(#a)", "#3F2720"]);
+  });
+
+  it("1f633: the right cheek's gradient (geometry via href) mirrors the left one's", () => {
+    const { layers } = parseSvgLayers(noto("1f633"));
+    const [left, right] = [layers[2]!.gradient!, layers[3]!.gradient!];
+    expect([left.radial, right.radial]).toEqual([true, true]);
+    const t = (g: SvgGradient, x: number, y: number): number => {
+      const [a = 0, b = 0, c = 0, d = 0, e = 0, f = 0] = g.matrix;
+      return Math.hypot(a * x + c * y + e, b * x + d * y + f);
     };
-    expect(box(0)).toEqual([0.5, 0.8, 0.7, 1]); // rect x 5..7, y 0..2 (y-up: 0.8..1)
-    expect(box(1)).toEqual([0.5, 0.4, 0.7, 0.6]); // circle centre (6, 5), r 1
+    // The file's numbers are mirror images to ~1e-6 SVG units; the bug put t near 164.
+    for (const [x, y] of [
+      [0.1, 0.3],
+      [0.3, 0.5],
+      [0.4, 0.2],
+      [0.2, 0.45],
+    ] as const) {
+      expect(t(right, 1 - x, y)).toBeCloseTo(t(left, x, y), 6);
+    }
+    expect(right.stops).toEqual(left.stops);
+  });
+
+  it("every layer lies in the viewBox and its MSDF has no cracks", () => {
+    for (const u of ALL) {
+      for (const [i, { shape }] of parseSvgLayers(noto(u)).layers.entries()) {
+        const [x0 = 0, y0 = 0, x1 = 0, y1 = 0] = box(shape);
+        expect([u, i, x0 >= 0 && y0 >= 0 && x1 <= 1 && y1 <= 1]).toEqual([u, i, true]);
+        // A smooth contour leaves one channel without edges (±Infinity, as in msdfgen),
+        // which the median ignores; a non-finite median would be a crack.
+        const { msdf } = generateShapeMSDF(shape, 64, 8)!;
+        let cracks = 0;
+        for (let k = 0; k < msdf.length; k += 3) {
+          const [r, g, b] = [msdf[k]!, msdf[k + 1]!, msdf[k + 2]!];
+          if (!Number.isFinite(Math.max(Math.min(r, g), Math.min(Math.max(r, g), b)))) cracks++;
+        }
+        expect([u, i, cracks]).toEqual([u, i, 0]);
+      }
+    }
   });
 });
 

@@ -1,24 +1,27 @@
 /**
- * Overlap removal: rewrites a shape as the boundary of its nonzero fill, so
- * overlapping contours (variable fonts, composite glyphs) no longer leave
- * holes where msdfgen's overlapping-contour combiner gets their interior
- * edges wrong. msdfgen itself does this step with Skia path ops
- * (MSDFGEN_USE_SKIA: resolveShapeGeometry); this file is original.
+ * Boolean ops on nonzero fills. unionShape removes overlaps: it rewrites a
+ * shape as the boundary of its nonzero fill, so overlapping contours
+ * (variable fonts, composite glyphs) no longer leave holes where msdfgen's
+ * overlapping-contour combiner gets their interior edges wrong. msdfgen
+ * itself does this step with Skia path ops (MSDFGEN_USE_SKIA:
+ * resolveShapeGeometry). clipShape intersects a shape with a clip region
+ * (SVG clip paths, the viewport). This file is original.
  *
  * Every edge is split where it crosses another, each piece is kept iff the
- * fill differs on its two sides, and the kept pieces are relinked into
- * contours. Shapes without overlaps are returned untouched, and anything
- * ambiguous (coincident curves, pieces that don't link up) also leaves the
- * shape as it was — never worse than no preprocessing.
+ * result's fill differs on its two sides, and the kept pieces are relinked
+ * into contours. Shapes the op doesn't change are returned untouched, and
+ * anything ambiguous (coincident curves, pieces that don't link up) also
+ * leaves the shape as it was — never worse than no preprocessing.
  *
- * Runs on every shape generateShapeMSDF sees, overlapping or not, so the
- * crossing search skips what can't matter: edge pairs whose bounds don't
- * overlap (sweep over sorted bounds), and the endpoint consecutive edges
- * share (see corner()). Module-scope scratch below is safe because the
+ * unionShape runs on every shape generateShapeMSDF sees, overlapping or not,
+ * so the crossing search skips what can't matter: edge pairs whose bounds
+ * don't overlap (sweep over sorted bounds), and the endpoint consecutive
+ * edges share (see corner()). Module-scope scratch below is safe because the
  * library is synchronous and single-threaded per worker.
  */
 
 import { EdgeSegment, type SegmentType } from "./segments";
+import { type Contour } from "./contour";
 import { type Shape } from "./shape";
 import { cross } from "../math/scalar";
 
@@ -267,13 +270,17 @@ const _pt = [0, 0];
 const _dir = [0, 0];
 const _xs = [0, 0, 0];
 const _dys = [0, 0, 0];
+/** clipFilled() scratch: one winding number per operand. */
+let _wind = new Int32Array(8);
 
 /**
  * Nonzero fill of `edges` at (x, y): the winding of their crossings with the
  * scanline at y, at or left of x. Same result as Scanline.filled after
  * computeShapeScanline, without building and sorting the whole scanline.
  * `bb` holds each edge's control-point bounds; an edge the scanline misses
- * by more than root-finding rounding can't cross it.
+ * by more than root-finding rounding can't cross it. The union's side test
+ * (one operand); kept apart from clipFilled and small so V8 inlines it into
+ * resolve, which unionShape runs on every glyph.
  */
 function filled(edges: EdgeSegment[], bb: Float64Array, x: number, y: number): boolean {
   let w = 0;
@@ -286,6 +293,29 @@ function filled(edges: EdgeSegment[], bb: Float64Array, x: number, y: number): b
 }
 
 /**
+ * The clip's side test: like filled(), but per operand (`op` holds each
+ * edge's), true where operand 0 is filled and at least one other operand is.
+ */
+function clipFilled(
+  edges: EdgeSegment[],
+  op: Int32Array,
+  operands: number,
+  bb: Float64Array,
+  x: number,
+  y: number,
+): boolean {
+  _wind.fill(0, 0, operands);
+  for (let i = 0; i < edges.length; i++) {
+    if (y < bb[4 * i + 1]! - 1e-9 || y > bb[4 * i + 3]! + 1e-9) continue;
+    const n = edges[i]!.scanlineIntersections(y, _xs, _dys);
+    for (let k = 0; k < n; k++) if (_xs[k]! <= x) _wind[op[i]!]! += _dys[k]!;
+  }
+  if (_wind[0] === 0) return false;
+  for (let k = 1; k < operands; k++) if (_wind[k] !== 0) return true;
+  return false;
+}
+
+/**
  * Replaces `shape`'s contours with the boundary of their union (nonzero
  * fill), in place. Leaves the shape untouched when it has no overlaps or
  * when they can't be resolved cleanly. Expects em-normalized geometry,
@@ -294,17 +324,56 @@ function filled(edges: EdgeSegment[], bb: Float64Array, x: number, y: number): b
  * @param shape Shape to resolve (mutated in place).
  */
 export function unionShape(shape: Shape): void {
-  const flat = shape.contours.flat();
+  const contours = resolve([shape.contours]);
+  if (contours) shape.contours = contours;
+}
+
+/**
+ * Clips `shape` in place to the union of the `clip` groups: what remains is
+ * the part of its nonzero fill that lies inside the nonzero fill of at least
+ * one group, as the boundary of that region (overlaps merged). Groups are
+ * unioned by fill, so their contours' orientations don't have to agree.
+ * Leaves the shape untouched when it already lies inside the clip, or when
+ * the intersection can't be resolved cleanly; an empty `clip` clips
+ * everything away. Expects em-normalized geometry, like unionShape. The
+ * clip's contours are only read.
+ *
+ * @param shape Shape to clip (mutated in place).
+ * @param clip Clip region: groups of closed contours, in `shape`'s space.
+ */
+export function clipShape(shape: Shape, clip: Contour[][]): void {
+  const contours = resolve([shape.contours, ...(clip.length > 0 ? clip : [[]])]);
+  if (contours) shape.contours = contours;
+}
+
+/**
+ * Boundary of the region filled per `filled()` (one group: the union) or
+ * `clipFilled()` (several: the clip), where operand k is the nonzero fill of
+ * `groups[k]`: new contours, or null when the boundary is `groups[0]`
+ * itself, or can't be resolved cleanly.
+ */
+function resolve(groups: Contour[][]): Contour[] | null {
+  const all = groups.flat();
+  const flat = all.flat();
   const edges = flat.map(cps);
   const n = edges.length;
-  // Per edge: control-point bounds [minX, minY, maxX, maxY], and the next
-  // edge of its contour.
+  const operands = groups.length;
+  const clip = operands > 1;
+  if (_wind.length < operands) _wind = new Int32Array(operands);
+  // Per edge: control-point bounds [minX, minY, maxX, maxY], the next edge
+  // of its contour, and its operand.
   const bb = new Float64Array(4 * n);
   const next = new Int32Array(n);
+  const op = new Int32Array(n);
   let e = 0;
-  for (const contour of shape.contours) {
-    for (let k = 0; k < contour.length; k++) next[e + k] = e + ((k + 1) % contour.length);
-    e += contour.length;
+  for (let g = 0; g < operands; g++) {
+    for (const contour of groups[g]!) {
+      for (let k = 0; k < contour.length; k++) {
+        next[e + k] = e + ((k + 1) % contour.length);
+        op[e + k] = g;
+      }
+      e += contour.length;
+    }
   }
   for (let i = 0; i < n; i++) {
     const p = edges[i]!;
@@ -346,7 +415,7 @@ export function unionShape(shape: Shape): void {
         corner(edges[i]!, edges[j]!);
         crossings(edges[i]!, 0, 1, edges[j]!, 0, 1, hits);
       }
-      if (_budget < 0 || _shapeBudget < 0) return; // coincident curves
+      if (_budget < 0 || _shapeBudget < 0) return null; // coincident curves
       for (let k = 0; k < hits.length; k += 2) {
         splits[i]!.push(hits[k]!);
         splits[j]!.push(hits[k + 1]!);
@@ -365,12 +434,13 @@ export function unionShape(shape: Shape): void {
   // Keep each piece whose two sides differ, oriented like most of the outline.
   // A contour that is neither split nor contested meets no other edge, so
   // the fill on each side of it is the same all the way round: one side
-  // test settles every one of its pieces.
+  // test settles every one of its pieces. Dropping a piece of operand 0, or
+  // keeping one of another operand, changes the boundary.
   let changed = false;
   const pieces: number[][] = [];
   const right: boolean[] = [];
   let first = 0;
-  for (const contour of shape.contours) {
+  for (const contour of all) {
     const end = first + contour.length;
     let solo = true;
     for (let i = first; i < end; i++) if (contested[i] || cuts[i]!.length > 2) solo = false;
@@ -390,15 +460,20 @@ export function unionShape(shape: Shape): void {
         if (!solo || !tested) {
           // Sample just off each side, closer than any near-tangent sliver (~chord²).
           const o = Math.min(1e-6, (chord * chord) / 64) / len;
-          r = filled(flat, bb, _pt[0]! + _dir[1]! * o, _pt[1]! - _dir[0]! * o);
-          l = filled(flat, bb, _pt[0]! - _dir[1]! * o, _pt[1]! + _dir[0]! * o);
+          const rx = _pt[0]! + _dir[1]! * o;
+          const ry = _pt[1]! - _dir[0]! * o;
+          const lx = _pt[0]! - _dir[1]! * o;
+          const ly = _pt[1]! + _dir[0]! * o;
+          r = clip ? clipFilled(flat, op, operands, bb, rx, ry) : filled(flat, bb, rx, ry);
+          l = clip ? clipFilled(flat, op, operands, bb, lx, ly) : filled(flat, bb, lx, ly);
           tested = true;
         }
         if (r === l) {
-          changed = true;
+          if (op[i] === 0) changed = true;
         } else {
           pieces.push(q);
           right.push(r);
+          if (op[i] !== 0) changed = true;
         }
       }
     }
@@ -417,7 +492,7 @@ export function unionShape(shape: Shape): void {
     if (dup) changed = true;
     else kept.push(q);
   }
-  if (!changed) return;
+  if (!changed) return null;
 
   // Relink pieces end-to-start into closed contours.
   const used = new Uint8Array(kept.length);
@@ -445,7 +520,7 @@ export function unionShape(shape: Shape): void {
           best = d;
         }
       }
-      if (nxt < 0) return; // a contour didn't close: leave the shape as it was
+      if (nxt < 0) return null; // a contour didn't close: leave the shape as it was
       used[nxt] = 1;
       kept[nxt]![0] = ex;
       kept[nxt]![1] = ey;
@@ -453,5 +528,5 @@ export function unionShape(shape: Shape): void {
     }
     contours.push(c.map(seg));
   }
-  shape.contours = contours;
+  return contours;
 }

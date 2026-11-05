@@ -1,6 +1,6 @@
 {
   "name": "msdfgen-ts",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Runtime MSDF font atlases for WebGL/WebGPU: a TypeScript port of msdfgen with a built-in TrueType parser. No WASM.",
   "keywords": [
     "atlas",

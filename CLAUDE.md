@@ -121,7 +121,7 @@ src/
     contour.ts  shape.ts
     normalize.ts       # em-normalization, Shape::normalize, orientContours (even-odd -> nonzero)
     union.ts           # boolean ops on nonzero fills: unionShape (overlaps, generateShapeMSDF),
-                       # clipShape (SVG clip paths + viewport)
+                       # clipShape (clip paths + viewport), subtractShape (group opacity)
   msdf/
     edge-coloring.ts   # edgeColoringSimple (deterministic, same seed behavior as C++)
     distance.ts        # signed (pseudo-)distance per segment. HOTTEST code in the repo.
@@ -273,7 +273,8 @@ code in `msdf/` or the atlas.
   the basic shapes, which are converted to path data first. One tag walker keeps each open
   element's inherited state: `transform` composed through `<g>`, plus `fill`, `fill-rule`,
   `fill-opacity` and `opacity`, read in CSS precedence (inline `style` > `.class` rules from
-  `<style>` > attribute). `parseSvg` unions everything into one nonzero shape; `parseSvgLayers`
+  `<style>` > attribute). `parseSvg` unions everything into one nonzero shape (concatenated: overlapping elements
+  wound in opposite directions cancel, a rare known gap, see its comment); `parseSvgLayers`
   keeps one shape per element plus its paint (CSS colour string or linear/radial gradient,
   resolved to one shape-space affine matrix + stops; a gradient inherits what it doesn't set
   through its `href` chain). `fill="none"` elements and the contents of
@@ -282,7 +283,12 @@ code in `msdf/` or the atlas.
   or `<use>` of one, with `clip-rule`) and the viewBox itself clip each element's shape with
   `clipShape` (`src/shape/union.ts`) before it is returned, so a layer is still one filled
   `Shape` and renderers need no clip support. Objects outside the viewBox (Noto keeps alternate
-  artwork there) are dropped. `objectBoundingBox` gradients use the unclipped element's bounds.
+  artwork there) are dropped. `objectBoundingBox` gradients use the unclipped element's bounds,
+  measured in its own user space. Group `opacity` is geometry too: a group whose content is
+  opaque has each member cut (`subtractShape`) by the later members it overlaps, so drawing
+  every layer at the group's opacity equals compositing the group first (renderers draw layers
+  one by one, instanced, and can't composite groups). Translucent content keeps the multiplied
+  opacity, an approximation where members overlap.
 - **Rendering stays out of the library:** colour strings are returned raw (no CSS colour parser
   in the library) and the WebGL2 renderer lives in `demo/svg/renderer.ts`, not `src/`.
 - **Units:** 1 shape unit = the viewBox height (so `pixelsPerEm` = pixels per icon). The scale

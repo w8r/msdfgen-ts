@@ -3,8 +3,9 @@
  * of their nonzero fill. The fill itself must not change, no point may stay
  * covered twice, and shapes without overlaps must be left untouched.
  *
- * clipShape (same file): a shape clipped to a region must fill exactly the
- * points both fill, again with no point covered twice.
+ * clipShape and subtractShape (same file): the result must fill exactly the
+ * points the boolean op says (both / the first but not the cut), again with
+ * no point covered twice.
  */
 
 import { readFileSync } from "fs";
@@ -13,7 +14,7 @@ import { fileURLToPath } from "url";
 import { describe, it, expect } from "vitest";
 import { Font } from "../../src/font/font";
 import { emNormalizeShape } from "../../src/shape/normalize";
-import { clipShape, unionShape } from "../../src/shape/union";
+import { clipShape, subtractShape, unionShape } from "../../src/shape/union";
 import { Scanline, computeShapeScanline } from "../../src/shape/scanline";
 import { CUBIC, EdgeSegment, LINEAR, type SignedDistanceResult } from "../../src/shape/segments";
 import { type Contour } from "../../src/shape/contour";
@@ -87,26 +88,39 @@ function circle(cx: number, cy: number, r: number, cw = false): EdgeSegment[] {
 }
 
 /**
- * Clips `subject` to `clip` and returns where the result's fill differs from
- * "subject's fill and at least one clip group's fill" (away from any edge),
- * or holds a point twice.
+ * Combines `subject` with the `others` groups (clip: inside one of them,
+ * subtract: outside all of them, union: or inside one of them) and returns
+ * where the result's fill differs from what that op means (away from any
+ * edge), or holds a point twice.
  */
-function clipErrors(subject: Shape, clip: Contour[][], label: string): string[] {
+function opErrors(
+  subject: Shape,
+  others: Contour[][],
+  op: "clip" | "subtract",
+  label: string,
+): string[] {
   const expected = windings(subject);
-  const groups = clip.map((g) => windings({ contours: g, inverseYAxis: false }));
-  const edges = [...subject.contours, ...clip.flat()];
-  clipShape(subject, clip);
+  const groups = others.map((g) => windings({ contours: g, inverseYAxis: false }));
+  const edges = [...subject.contours, ...others.flat()];
+  if (op === "clip") clipShape(subject, others);
+  else subtractShape(subject, others);
   const after = windings(subject);
   const errors: string[] = [];
   for (let k = 0; k < after.length; k++) {
     const [x, y] = gridPoint(k);
     if (Math.abs(after[k]!) > 1) errors.push(`${label}: overlap left at ${x},${y}`);
-    const want = expected[k] !== 0 && groups.some((w) => w[k] !== 0);
+    const [a, b] = [expected[k] !== 0, groups.some((w) => w[k] !== 0)];
+    const want = op === "clip" ? a && b : a && !b;
     if (want !== (after[k] !== 0) && edgeDistance(edges, x, y) > 1e-4) {
       errors.push(`${label}: fill ${want ? "lost" : "added"} at ${x},${y}`);
     }
   }
   return errors;
+}
+
+/** opErrors for clipShape. */
+function clipErrors(subject: Shape, clip: Contour[][], label: string): string[] {
+  return opErrors(subject, clip, "clip", label);
 }
 
 /** Closed polygon contour through the points [x0, y0, x1, y1, ...]. */
@@ -216,6 +230,42 @@ describe("clipShape", () => {
         errors.push(...clipErrors(emShape(font, gid), [[circle(0.3, 0.35, 0.3)]], label));
         const square = polygon(0.25, 0.1, 0.65, 0.1, 0.65, 0.5, 0.25, 0.5);
         errors.push(...clipErrors(emShape(font, gid), [[square]], label));
+      }
+      expect(errors).toEqual([]);
+    });
+  }
+});
+
+describe("subtractShape", () => {
+  // Overlapping subject contours; other groups a clockwise circle and a
+  // counter-clockwise square that overlap (one nonzero fill would cancel them).
+  const subject = (): Shape => ({
+    contours: [polygon(0, 0, 0.6, 0, 0.6, 0.6, 0, 0.6), circle(0.6, 0.6, 0.35)],
+    inverseYAxis: false,
+  });
+  const others = [[circle(0.3, 0.3, 0.3, true)], [polygon(0.4, 0.4, 1, 0.4, 1, 1, 0.4, 1)]];
+
+  it("subtract keeps exactly the fill outside every cut group", () => {
+    expect(opErrors(subject(), others, "subtract", "subtract")).toEqual([]);
+  });
+
+  it("leaves shapes nothing overlaps untouched", () => {
+    const s: Shape = { contours: [circle(0.5, 0.5, 0.2)], inverseYAxis: false };
+    const contours = s.contours;
+    subtractShape(s, [[polygon(2, 0, 3, 0, 3, 1, 2, 1)]]);
+    subtractShape(s, []);
+    expect(s.contours).toBe(contours);
+  });
+
+  for (const file of ["Roboto.ttf", "PTSerif-Regular.ttf"]) {
+    it(`subtracts a circle from every glyph (${file})`, () => {
+      const buf = readFileSync(resolve(FONTS_DIR, file));
+      const font = new Font(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
+      const errors: string[] = [];
+      for (let cp = 0x21; cp <= 0xff; cp++) {
+        const gid = font.glyphId(cp);
+        const label = `U+${cp.toString(16)}`;
+        errors.push(...opErrors(emShape(font, gid), [[circle(0.3, 0.35, 0.3)]], "subtract", label));
       }
       expect(errors).toEqual([]);
     });

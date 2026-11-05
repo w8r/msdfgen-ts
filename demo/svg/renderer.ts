@@ -123,6 +123,31 @@ function rgba(css: string, opacity: number): number {
   return (r | (g << 8) | (b << 16) | (Math.round(a * opacity) << 24)) >>> 0;
 }
 
+/**
+ * Fits a gradient's stops (packed RGBA8 colours, offsets; edited in place) to at most
+ * `max`: the end stops always stay, and the interior stop whose removal changes the ramp
+ * least goes first. The ramp is piecewise linear, so removing stop i changes it most at
+ * stop i itself: that difference is its cost.
+ */
+function fitStops(colors: number[], offsets: number[], max: number): void {
+  const ch = (c: number, k: number): number => (c >>> (8 * k)) & 255;
+  while (colors.length > max) {
+    let [best, cost] = [1, Infinity];
+    for (let i = 1; i < colors.length - 1; i++) {
+      const span = offsets[i + 1]! - offsets[i - 1]!;
+      const t = span > 0 ? (offsets[i]! - offsets[i - 1]!) / span : 0;
+      let e = 0;
+      for (let k = 0; k < 4; k++) {
+        const [a, b] = [ch(colors[i - 1]!, k), ch(colors[i + 1]!, k)];
+        e = Math.max(e, Math.abs(a + t * (b - a) - ch(colors[i]!, k)));
+      }
+      if (e < cost) [best, cost] = [i, e];
+    }
+    colors.splice(best, 1);
+    offsets.splice(best, 1);
+  }
+}
+
 /** Draws many instances of one or more SVGs (all their layers) with WebGL2. */
 export class SvgRenderer {
   /** All layers' float MSDF cells: `Atlas.floatTexture`, set by {@link SvgRenderer.load}. */
@@ -243,11 +268,12 @@ export class SvgRenderer {
     const indices = new Uint32Array(cells.length * 6);
     cells.forEach(({ layer: l, m }, i) => {
       const grad = l.gradient;
-      const stops = grad ? grad.stops.slice(0, MAX_STOPS) : [];
+      const stops = grad?.stops ?? [];
       const colors = grad
         ? stops.map((s) => rgba(s.color, s.opacity * l.opacity))
         : [rgba(l.color, l.opacity)];
       const offsets = stops.map((s) => s.offset);
+      if (grad) fitStops(colors, offsets, MAX_STOPS); // the shader holds MAX_STOPS
       const type = grad ? (grad.radial ? 2 : 1) : 0;
       const [a = 0, b = 0, c = 0, d = 0, e = 0, f = 0] = grad?.matrix ?? [];
       for (let k = 0; k < 4; k++) {
@@ -256,7 +282,10 @@ export class SvgRenderer {
         const sy = k >> 1 ? m.planeTop : m.planeBottom;
         const tx = (sx - m.planeLeft) * pixelsPerEm - 0.5; // MSDF texel coordinate
         const ty = (m.planeTop - sy) * pixelsPerEm - 0.5; // the atlas is y-down
-        f32.set([sx, sy, tx, ty, a * sx + c * sy + e, b * sx + d * sy + f, type, stops.length], v);
+        f32.set(
+          [sx, sy, tx, ty, a * sx + c * sy + e, b * sx + d * sy + f, type, offsets.length],
+          v,
+        );
         u16.set([m.x, m.y, m.w, m.h], (v + 8) * 2);
         u32.set(colors, v + 10);
         f32.set(offsets, v + 18);

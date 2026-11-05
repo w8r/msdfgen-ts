@@ -5,7 +5,8 @@
  * overlapping-contour combiner gets their interior edges wrong. msdfgen
  * itself does this step with Skia path ops (MSDFGEN_USE_SKIA:
  * resolveShapeGeometry). clipShape intersects a shape with a clip region
- * (SVG clip paths, the viewport). This file is original.
+ * (SVG clip paths, the viewport), and subtractShape cuts other shapes out of
+ * one (SVG group opacity). This file is original.
  *
  * Every edge is split where it crosses another, each piece is kept iff the
  * result's fill differs on its two sides, and the kept pieces are relinked
@@ -270,8 +271,14 @@ const _pt = [0, 0];
 const _dir = [0, 0];
 const _xs = [0, 0, 0];
 const _dys = [0, 0, 0];
-/** clipFilled() scratch: one winding number per operand. */
+/** multiFilled() scratch: one winding number per operand. */
 let _wind = new Int32Array(8);
+
+/** How resolve() combines operand 0 with the rest (the rest are always unioned). */
+const UNION = 0; // one operand only: its own nonzero fill
+const CLIP = 1; // operand 0, and any other
+const SUBTRACT = 2; // operand 0, and none of the others
+type Mode = typeof UNION | typeof CLIP | typeof SUBTRACT;
 
 /**
  * Nonzero fill of `edges` at (x, y): the winding of their crossings with the
@@ -279,7 +286,7 @@ let _wind = new Int32Array(8);
  * computeShapeScanline, without building and sorting the whole scanline.
  * `bb` holds each edge's control-point bounds; an edge the scanline misses
  * by more than root-finding rounding can't cross it. The union's side test
- * (one operand); kept apart from clipFilled and small so V8 inlines it into
+ * (one operand); kept apart from multiFilled and small so V8 inlines it into
  * resolve, which unionShape runs on every glyph.
  */
 function filled(edges: EdgeSegment[], bb: Float64Array, x: number, y: number): boolean {
@@ -293,13 +300,14 @@ function filled(edges: EdgeSegment[], bb: Float64Array, x: number, y: number): b
 }
 
 /**
- * The clip's side test: like filled(), but per operand (`op` holds each
- * edge's), true where operand 0 is filled and at least one other operand is.
+ * The side test with several operands: like filled(), but one winding per
+ * operand (`op` holds each edge's), combined per `mode` (CLIP or SUBTRACT).
  */
-function clipFilled(
+function multiFilled(
   edges: EdgeSegment[],
   op: Int32Array,
   operands: number,
+  mode: Mode,
   bb: Float64Array,
   x: number,
   y: number,
@@ -310,9 +318,9 @@ function clipFilled(
     const n = edges[i]!.scanlineIntersections(y, _xs, _dys);
     for (let k = 0; k < n; k++) if (_xs[k]! <= x) _wind[op[i]!]! += _dys[k]!;
   }
-  if (_wind[0] === 0) return false;
-  for (let k = 1; k < operands; k++) if (_wind[k] !== 0) return true;
-  return false;
+  let rest = false;
+  for (let k = 1; k < operands && !rest; k++) rest = _wind[k] !== 0;
+  return _wind[0] !== 0 && (mode === CLIP ? rest : !rest);
 }
 
 /**
@@ -342,23 +350,39 @@ export function unionShape(shape: Shape): void {
  * @param clip Clip region: groups of closed contours, in `shape`'s space.
  */
 export function clipShape(shape: Shape, clip: Contour[][]): void {
-  const contours = resolve([shape.contours, ...(clip.length > 0 ? clip : [[]])]);
+  const contours = resolve([shape.contours, ...(clip.length > 0 ? clip : [[]])], CLIP);
+  if (contours) shape.contours = contours;
+}
+
+/**
+ * Cuts the union of the `cut` groups out of `shape`, in place: what remains
+ * is the part of its nonzero fill outside every group's nonzero fill, as the
+ * boundary of that region (overlaps merged). Leaves the shape untouched when
+ * that boundary is its own, or when the difference can't be resolved cleanly. Expects em-normalized geometry, like unionShape. The
+ * cut's contours are only read.
+ *
+ * @param shape Shape to cut (mutated in place).
+ * @param cut Region to remove: groups of closed contours, in `shape`'s space.
+ */
+export function subtractShape(shape: Shape, cut: Contour[][]): void {
+  if (cut.length === 0) return;
+  const contours = resolve([shape.contours, ...cut], SUBTRACT);
   if (contours) shape.contours = contours;
 }
 
 /**
  * Boundary of the region filled per `filled()` (one group: the union) or
- * `clipFilled()` (several: the clip), where operand k is the nonzero fill of
- * `groups[k]`: new contours, or null when the boundary is `groups[0]`
- * itself, or can't be resolved cleanly.
+ * `multiFilled()` (several, combined per `mode`), where operand k is the
+ * nonzero fill of `groups[k]`: new contours, or null when the boundary is
+ * `groups[0]` itself, or can't be resolved cleanly.
  */
-function resolve(groups: Contour[][]): Contour[] | null {
+function resolve(groups: Contour[][], mode: Mode = UNION): Contour[] | null {
   const all = groups.flat();
   const flat = all.flat();
   const edges = flat.map(cps);
   const n = edges.length;
   const operands = groups.length;
-  const clip = operands > 1;
+  const multi = operands > 1;
   if (_wind.length < operands) _wind = new Int32Array(operands);
   // Per edge: control-point bounds [minX, minY, maxX, maxY], the next edge
   // of its contour, and its operand.
@@ -464,8 +488,8 @@ function resolve(groups: Contour[][]): Contour[] | null {
           const ry = _pt[1]! - _dir[0]! * o;
           const lx = _pt[0]! - _dir[1]! * o;
           const ly = _pt[1]! + _dir[0]! * o;
-          r = clip ? clipFilled(flat, op, operands, bb, rx, ry) : filled(flat, bb, rx, ry);
-          l = clip ? clipFilled(flat, op, operands, bb, lx, ly) : filled(flat, bb, lx, ly);
+          r = multi ? multiFilled(flat, op, operands, mode, bb, rx, ry) : filled(flat, bb, rx, ry);
+          l = multi ? multiFilled(flat, op, operands, mode, bb, lx, ly) : filled(flat, bb, lx, ly);
           tested = true;
         }
         if (r === l) {

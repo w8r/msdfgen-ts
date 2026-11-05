@@ -159,8 +159,10 @@ function frame(now: number): void {
   lastFrame = now;
   updateCamera(dt);
   if (!paused) time += dt;
-  canvas.width = Math.round(canvas.clientWidth * dpr);
-  canvas.height = Math.round(canvas.clientHeight * dpr);
+  // Assigning a size resets the drawing buffer, even to the same value: only on a resize.
+  const [w, h] = [Math.round(canvas.clientWidth * dpr), Math.round(canvas.clientHeight * dpr)];
+  if (canvas.width !== w) canvas.width = w;
+  if (canvas.height !== h) canvas.height = h;
   gl.viewport(0, 0, canvas.width, canvas.height);
   gl.clearColor(0.06, 0.07, 0.09, 1);
   gl.clear(gl.COLOR_BUFFER_BIT);

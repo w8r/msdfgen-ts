@@ -5,7 +5,9 @@
  * shapes (`<rect>` incl. rounded, `<circle>`, `<ellipse>`, `<polygon>`,
  * `<polyline>`); `transform` on any element, composed through `<g>`; `fill`,
  * `fill-rule`, `fill-opacity` (inherited) and `opacity` from attributes, CSS
- * class rules in `<style>` (`.name` selectors only) or inline `style`; linear/
+ * class rules in `<style>` (`.name` selectors only, later rules win) or inline
+ * `style`; group `opacity` applied to the group's composite (exact when its
+ * content is opaque, see parseSvgLayers); percentage lengths; linear/
  * radial gradient fills (`gradientUnits`, `gradientTransform`; attributes and
  * stops a gradient doesn't set come from the one its `href` links to; pad only,
  * focal point ignored); `clip-path` on any element, composed through `<g>`
@@ -25,7 +27,7 @@ import { EdgeSegment, LINEAR, QUADRATIC, CUBIC, type SegmentType } from "../shap
 import { type Contour } from "../shape/contour";
 import { type Shape } from "../shape/shape";
 import { emNormalizeShape, orientContours } from "../shape/normalize";
-import { clipShape } from "../shape/union";
+import { clipShape, subtractShape } from "../shape/union";
 import { shapeBounds } from "../msdf/shape-msdf";
 
 /** A gradient fill, ready for a shader. Colours are raw CSS strings. */
@@ -53,21 +55,38 @@ function _attr(tag: string, name: string): string | undefined {
   return new RegExp(`\\s${name}\\s*=\\s*(["'])([\\s\\S]*?)\\1`).exec(tag)?.[2];
 }
 
+/** `.class` rules from `<style>` blocks, in source order: [class name, declarations]. */
+type Rules = [string, string][];
+
 /**
  * Reads presentation property `name` of one tag, in CSS precedence: inline
- * `style`, then the rules for its `class`es, then the attribute. Within CSS,
- * the last declaration wins.
+ * `style`, then the `rules` for its `class`es, then the attribute. Within CSS,
+ * the last declaration wins: `.class` selectors are equally specific, so that
+ * is stylesheet order, whatever the order of the names in `class`.
  */
-function _prop(tag: string, name: string, classes?: Map<string, string>): string | undefined {
+function _prop(tag: string, name: string, rules?: Rules): string | undefined {
   const re = new RegExp(`(?:^|;)\\s*${name}\\s*:\\s*([^;]+)`, "g");
   const last = (css: string): string | undefined => [...css.matchAll(re)].pop()?.[1]?.trim();
-  const rules = (_attr(tag, "class") ?? "").split(/\s+/).map((c) => classes?.get(c) ?? "");
-  return last(_attr(tag, "style") ?? "") ?? last(rules.join(";")) ?? _attr(tag, name);
+  const cls = _attr(tag, "class");
+  let css = "";
+  if (cls && rules) {
+    const mine = new Set(cls.split(/\s+/));
+    css = rules
+      .filter(([c]) => mine.has(c))
+      .map(([, decls]) => decls)
+      .join(";");
+  }
+  return last(_attr(tag, "style") ?? "") ?? last(css) ?? _attr(tag, name);
 }
 
 /** Parses a number or percentage (`50%` → 0.5); `def` when absent. */
 function _num(v: string | undefined, def: number): number {
   return v === undefined ? def : parseFloat(v) / (v.trim().endsWith("%") ? 100 : 1);
+}
+
+/** Parses a length; a percentage is of `ref` (its viewport dimension). 0 when absent. */
+function _len(v: string | undefined, ref: number): number {
+  return v === undefined ? 0 : parseFloat(v) * (v.trim().endsWith("%") ? ref / 100 : 1);
 }
 
 /**
@@ -79,6 +98,12 @@ function _num(v: string | undefined, def: number): number {
  * @returns The shape, ready for `Atlas.shapes` or `generateShapeMSDF`.
  */
 export function parseSvg(svg: string): Shape {
+  // Known gap (rare): the elements' contours are concatenated into one nonzero fill, so two
+  // overlapping elements wound in opposite directions cancel where they overlap (a hole
+  // where both are drawn). Unioning each element's fill separately fixes that, but layers
+  // usually share curved edges (a clipped shape and its clip outline, repeated corners),
+  // which the boolean ops in shape/union.ts can't resolve: they spend their subdivision
+  // budget (2.5-6.6 ms per Noto emoji), give up, and return this same concatenation.
   const contours = parseSvgLayers(svg).layers.flatMap((l) => l.shape.contours);
   return { contours, inverseYAxis: false };
 }
@@ -87,7 +112,12 @@ export function parseSvg(svg: string): Shape {
  * Parses an SVG document into one {@link SvgLayer} per filled path, in paint
  * order (back to front), for drawing with real colours and gradients. Each
  * layer's shape is already clipped (clip paths, viewBox); a path clipped away
- * entirely has no layer.
+ * entirely has no layer. A group's `opacity` applies to its composite, which
+ * layers drawn one by one can't do directly; when everything in the group is
+ * opaque, each member is cut down to the part no later member covers, so
+ * drawing the members with the group's opacity is exact. A group holding
+ * translucent content keeps that opacity multiplied into its members, an
+ * approximation where they overlap.
  *
  * @param svg SVG source text.
  * @returns The layers, plus the viewBox width (shape units; height is 1).
@@ -101,6 +131,7 @@ export function parseSvgLayers(svg: string): { layers: SvgLayer[]; width: number
     .map(parseFloat);
   const [x0 = 0, y0 = 0, w = NaN, h = NaN] = box;
   if (!(h > 0)) throw new Error("parseSvg: needs a viewBox or width/height");
+  const vp = [w, h]; // what percentage lengths refer to
   const toUser = [h, 0, 0, -h, x0, y0 + h]; // shape space → SVG user space
   const flip = [1, 0, 0, -1, -x0, y0 + h]; // user space → shape space, before ÷ h
   // The viewport clips like a <clipPath> holding one rect: the viewBox, [0, vw] × [0, 1].
@@ -126,19 +157,22 @@ export function parseSvgLayers(svg: string): { layers: SvgLayer[]; width: number
     const id = _attr(attrs, "id");
     if (id !== undefined) byId.set(id, [name, attrs]);
   }
-  // CSS class rules from <style> blocks (".a, .b { … }"), concatenated in source order.
-  const classes = new Map<string, string>();
+  // CSS class rules from <style> blocks (".a, .b { … }"), in source order.
+  const rules: Rules = [];
   for (const [, css = ""] of svg.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/g)) {
     for (const [, selectors = "", decls = ""] of css.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
       for (const sel of selectors.split(",")) {
         const name = /^\s*\.([\w-]+)\s*$/.exec(sel)?.[1];
-        if (name) classes.set(name, `${classes.get(name) ?? ""};${decls}`);
+        if (name) rules.push([name, decls]);
       }
     }
   }
 
   // Walk the tags in paint order, keeping each open element's inherited state.
   const layers: SvgLayer[] = [];
+  // Containers with opacity < 1: their layers (indices), the enclosing such group, and
+  // whether anything inside is translucent (then the group can't be made exact).
+  const groups: { members: number[]; parent: number; translucent: boolean }[] = [];
   const stack = [
     {
       m: [1, 0, 0, 1, 0, 0],
@@ -147,6 +181,7 @@ export function parseSvgLayers(svg: string): { layers: SvgLayer[]; width: number
       fillOpacity: 1,
       opacity: 1,
       clips: [] as Contour[][][], // every clip region on the way here, each in shape space
+      group: -1, // innermost container with opacity < 1, in `groups`
     },
   ];
   let hidden = 0; // depth inside containers that are never drawn
@@ -163,23 +198,28 @@ export function parseSvgLayers(svg: string): { layers: SvgLayer[]; width: number
       continue;
     }
     const parent = stack[stack.length - 1]!;
-    const prop = (key: string): string | undefined => _prop(attrs, key, classes);
+    const prop = (key: string): string | undefined => _prop(attrs, key, rules);
+    const own = _num(prop("opacity"), 1);
+    const d = _outline(name, attrs, vp);
     const state = {
       m: _mul(parent.m, _transform(_attr(attrs, "transform") ?? "")),
       fill: prop("fill") ?? parent.fill,
       rule: prop("fill-rule") ?? parent.rule,
       fillOpacity: _num(prop("fill-opacity"), parent.fillOpacity),
-      opacity: parent.opacity * _num(prop("opacity"), 1),
+      opacity: parent.opacity * own,
       clips: parent.clips,
+      group: parent.group,
     };
+    if (d === undefined && own < 1 && !selfClose) {
+      state.group = groups.push({ members: [], parent: parent.group, translucent: false }) - 1;
+    }
     // clip-path, in this element's user space: clips it and everything inside it. Missing
     // clip paths and objectBoundingBox units are ignored.
     const clip = clipPaths.get(_url(prop("clip-path")));
     if (clip && _attr(clip[0]!, "clipPathUnits") !== "objectBoundingBox") {
-      state.clips = [...parent.clips, _clipRegion(clip, byId, classes, _mul(flip, state.m), h)];
+      state.clips = [...parent.clips, _clipRegion(clip, byId, rules, _mul(flip, state.m), vp)];
     }
     if (!selfClose) stack.push(state);
-    const d = _outline(name, attrs);
     if (d === undefined || state.fill === "none") continue;
 
     const contours: Contour[] = [];
@@ -189,8 +229,8 @@ export function parseSvgLayers(svg: string): { layers: SvgLayer[]; width: number
     emNormalizeShape(shape, h);
     const ref = gradients.get(_url(state.fill));
     const toLocal = _mul(_invert(state.m), toUser); // shape space → this element's user space
-    // Before clipping: objectBoundingBox gradients span the whole element.
-    const gradient = ref ? _gradient(ref, gradients, toLocal, shape) : null;
+    // From the unclipped outline: objectBoundingBox gradients span the whole element.
+    const gradient = ref ? _gradient(ref, gradients, rules, toLocal, d, vp) : null;
     for (const region of state.clips) clipShape(shape, region);
     // Then the viewport, unless the shape lies inside it (or entirely outside: dropped).
     const b = shapeBounds(shape);
@@ -198,6 +238,14 @@ export function parseSvgLayers(svg: string): { layers: SvgLayer[]; width: number
     const out = b.minX < 0 || b.minY < 0 || b.maxX > vw || b.maxY > 1;
     if (out && viewport.length > 0) clipShape(shape, [viewport]);
     if (shape.contours.length === 0) continue;
+    if (state.group >= 0) {
+      const g = groups[state.group]!;
+      g.members.push(layers.length);
+      const clear = gradient ? gradient.stops.some((s) => s.opacity < 1) : false;
+      if (own < 1 || state.fillOpacity < 1 || clear) g.translucent = true;
+      // To the groups around it, this group's composite is translucent content.
+      for (let k = g.parent; k >= 0; k = groups[k]!.parent) groups[k]!.translucent = true;
+    }
     layers.push({
       shape,
       color: state.fill,
@@ -205,7 +253,25 @@ export function parseSvgLayers(svg: string): { layers: SvgLayer[]; width: number
       gradient,
     });
   }
-  return { layers, width: w / h };
+
+  // Opaque groups: the composite shows each point's topmost member, so cut every member
+  // by the later ones (originals, as they are cut after it) whose bounds overlap its own.
+  for (const g of groups) {
+    if (g.translucent || g.members.length < 2) continue;
+    const bounds = g.members.map((k) => shapeBounds(layers[k]!.shape));
+    for (let i = 0; i < g.members.length - 1; i++) {
+      const a = bounds[i]!;
+      const cut: Contour[][] = [];
+      for (let j = i + 1; j < g.members.length; j++) {
+        const o = bounds[j]!;
+        if (o.minX < a.maxX && a.minX < o.maxX && o.minY < a.maxY && a.minY < o.maxY) {
+          cut.push(layers[g.members[j]!]!.shape.contours);
+        }
+      }
+      subtractShape(layers[g.members[i]!]!.shape, cut);
+    }
+  }
+  return { layers: layers.filter((l) => l.shape.contours.length > 0), width: w / h };
 }
 
 /** Start tags (and self-closing ones): name, attributes. */
@@ -225,10 +291,11 @@ function _url(v: string | undefined): string {
 function _clipRegion(
   [attrs = "", body = ""]: string[],
   byId: Map<string, string[]>,
-  classes: Map<string, string>,
+  rules: Rules,
   xf: number[],
-  h: number,
+  vp: number[],
 ): Contour[][] {
+  const [vw = 0, vh = 1] = vp;
   const groups: Contour[][] = [];
   const m = _mul(xf, _transform(_attr(attrs, "transform") ?? ""));
   for (const [, name = "", child = ""] of body.matchAll(_TAG)) {
@@ -238,26 +305,31 @@ function _clipRegion(
       // <use>: its transform, then translate(x, y), then the target's own transform.
       const target = byId.get(_attr(child, "(?:xlink:)?href")?.slice(1) ?? "");
       if (!target) continue;
-      cm = _mul(cm, [1, 0, 0, 1, _num(_attr(child, "x"), 0), _num(_attr(child, "y"), 0)]);
+      cm = _mul(cm, [1, 0, 0, 1, _len(_attr(child, "x"), vw), _len(_attr(child, "y"), vh)]);
       cm = _mul(cm, _transform(_attr(target[1]!, "transform") ?? ""));
       el = target;
     }
-    const d = _outline(el[0]!, el[1]!);
+    const d = _outline(el[0]!, el[1]!, vp);
     if (d === undefined) continue;
     const contours: Contour[] = [];
     _parsePath(d, cm, contours);
-    const rule = [el[1]!, child, attrs].map((a) => _prop(a, "clip-rule", classes)).find(Boolean);
+    const rule = [el[1]!, child, attrs].map((a) => _prop(a, "clip-rule", rules)).find(Boolean);
     if (rule === "evenodd") orientContours(contours);
-    emNormalizeShape({ contours, inverseYAxis: false }, h);
+    emNormalizeShape({ contours, inverseYAxis: false }, vh);
     groups.push(contours);
   }
   return groups;
 }
 
-/** A drawable element's outline as path data (basic shapes converted), or undefined. */
-function _outline(name: string, attrs: string): string | undefined {
-  const n = (key: string): number => _num(_attr(attrs, key), 0);
-  const [x, y, w, h, cx, cy] = [n("x"), n("y"), n("width"), n("height"), n("cx"), n("cy")];
+/**
+ * A drawable element's outline as path data (basic shapes converted), or
+ * undefined. Percentages are of the viewport `vp` (width, height): x of its
+ * width, y of its height, `r` of their root mean square, as in SVG.
+ */
+function _outline(name: string, attrs: string, [vw = 0, vh = 0]: number[]): string | undefined {
+  const n = (key: string, ref: number): number => _len(_attr(attrs, key), ref);
+  const [x, y, w, h] = [n("x", vw), n("y", vh), n("width", vw), n("height", vh)];
+  const [cx, cy, diag] = [n("cx", vw), n("cy", vh), Math.hypot(vw, vh) / Math.SQRT2];
   switch (name) {
     case "path":
       return _attr(attrs, "d") ?? "";
@@ -266,14 +338,16 @@ function _outline(name: string, attrs: string): string | undefined {
       return `M${_attr(attrs, "points") ?? "0 0"}`;
     case "circle":
     case "ellipse": {
-      const [rx, ry] = name === "circle" ? [n("r"), n("r")] : [n("rx"), n("ry")];
+      const [rx, ry] =
+        name === "circle" ? [n("r", diag), n("r", diag)] : [n("rx", vw), n("ry", vh)];
       const arc = `A${rx} ${ry} 0 1 0`;
       return `M${cx - rx} ${cy}${arc} ${cx + rx} ${cy}${arc} ${cx - rx} ${cy}Z`;
     }
     case "rect": {
       // A missing rx/ry copies the other; both clamp to half the size. 0 radius arcs are skipped.
-      const rx = Math.min(_num(_attr(attrs, "rx") ?? _attr(attrs, "ry"), 0), w / 2);
-      const ry = Math.min(_num(_attr(attrs, "ry") ?? _attr(attrs, "rx"), 0), h / 2);
+      const [ax, ay] = [_attr(attrs, "rx"), _attr(attrs, "ry")];
+      const rx = Math.min(ax === undefined ? _len(ay, vh) : _len(ax, vw), w / 2);
+      const ry = Math.min(ay === undefined ? _len(ax, vw) : _len(ay, vh), h / 2);
       const arc = `A${rx} ${ry} 0 0 1`;
       return (
         `M${x + rx} ${y}H${x + w - rx}${arc} ${x + w} ${y + ry}V${y + h - ry}` +
@@ -289,12 +363,16 @@ function _outline(name: string, attrs: string): string | undefined {
  * Resolves one gradient element to a shape-space → gradient-space matrix + stops.
  * What it doesn't set (attributes, stops) comes from the gradient its `href`
  * links to, and so on down the chain (Illustrator and Inkscape both do this).
+ * `d` is the element's outline in its own user space (`toLocal`'s target), for
+ * objectBoundingBox units; `vp` the viewport, for userSpaceOnUse percentages.
  */
 function _gradient(
   def: string[],
   gradients: Map<string, string[]>,
+  rules: Rules,
   toLocal: number[],
-  shape: Shape,
+  d: string,
+  [vw = 0, vh = 0]: number[],
 ): SvgGradient {
   const chain: string[][] = [];
   for (let g = def as string[] | undefined; g && !chain.includes(g);) {
@@ -303,32 +381,28 @@ function _gradient(
   }
   const attr = (name: string): string | undefined =>
     chain.map((g) => _attr(g[1] ?? "", name)).find((v) => v !== undefined);
-  const n = (name: string, value: number): number => _num(attr(name), value);
+  const user = attr("gradientUnits") === "userSpaceOnUse";
+  // A coordinate, or its default (all percentages): a percentage is of the viewport in user
+  // space (x of its width, y of its height, r of their root mean square), else of the box.
+  const n = (name: string, value: string, ref: number): number => {
+    const v = attr(name) ?? value;
+    return parseFloat(v) * (v.trim().endsWith("%") ? (user ? ref : 1) / 100 : 1);
+  };
   // Gradient → the element's user space: [bounding box ·] gradientTransform.
   let m = _transform(attr("gradientTransform") ?? "");
-  if (attr("gradientUnits") !== "userSpaceOnUse") {
-    // Unit square → the element's bounding box (exact unless the element is rotated).
-    const b = shapeBounds(shape);
-    const corners = [b.minX, b.minY, b.maxX, b.minY, b.minX, b.maxY, b.maxX, b.maxY];
-    const xs: number[] = [];
-    const ys: number[] = [];
-    for (let k = 0; k < 8; k += 2) {
-      const [px, py] = _apply(toLocal, corners[k]!, corners[k + 1]!);
-      xs.push(px);
-      ys.push(py);
-    }
-    const [lx, ly] = [Math.min(...xs), Math.min(...ys)];
-    m = _mul([Math.max(...xs) - lx, 0, 0, Math.max(...ys) - ly, lx, ly], m);
+  if (!user) {
+    // Unit square → the element's bounding box, measured in its own user space.
+    const local: Contour[] = [];
+    _parsePath(d, [1, 0, 0, 1, 0, 0], local);
+    const b = shapeBounds({ contours: local, inverseYAxis: false });
+    m = _mul([b.maxX - b.minX, 0, 0, b.maxY - b.minY, b.minX, b.minY], m);
   }
   // Gradient space → normalized: linear p1→0, p2→1 along x; radial centre→0, r→1.
   const radial = def[0] === "radial";
-  const [x1, y1, dx, dy] = [
-    n("x1", 0),
-    n("y1", 0),
-    n("x2", 1) - n("x1", 0),
-    n("y2", 0) - n("y1", 0),
-  ];
-  const [cx, cy, r] = [n("cx", 0.5), n("cy", 0.5), n("r", 0.5)];
+  const [x1, y1] = [n("x1", "0%", vw), n("y1", "0%", vh)];
+  const [dx, dy] = [n("x2", "100%", vw) - x1, n("y2", "0%", vh) - y1];
+  const diag = Math.hypot(vw, vh) / Math.SQRT2;
+  const [cx, cy, r] = [n("cx", "50%", vw), n("cy", "50%", vh), n("r", "50%", diag)];
   const len2 = dx * dx + dy * dy || 1;
   const norm = radial
     ? [1 / r, 0, 0, 1 / r, -cx / r, -cy / r]
@@ -337,8 +411,8 @@ function _gradient(
   const stopSrc = chain.map((g) => g[2] ?? "").find((b) => /<stop\b/.test(b)) ?? "";
   const stops = [...stopSrc.matchAll(/<stop\b[^>]*>/g)].map(([stop]) => ({
     offset: _num(_attr(stop, "offset"), 0),
-    color: _prop(stop, "stop-color") ?? "black",
-    opacity: _num(_prop(stop, "stop-opacity"), 1),
+    color: _prop(stop, "stop-color", rules) ?? "black",
+    opacity: _num(_prop(stop, "stop-opacity", rules), 1),
   }));
   return { radial, matrix: _mul(norm, _mul(_invert(m), toLocal)), stops };
 }

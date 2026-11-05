@@ -267,6 +267,119 @@ describe("parseSvgLayers: gradient href", () => {
   });
 });
 
+/** Gradient parameter t of `g` at shape-space point (x, y), before clamping. */
+function gradT(g: SvgGradient, x: number, y: number): number {
+  const [a = 0, b = 0, c = 0, d = 0, e = 0, f = 0] = g.matrix;
+  const [gx, gy] = [a * x + c * y + e, b * x + d * y + f];
+  return g.radial ? Math.hypot(gx, gy) : gx;
+}
+
+/** Whether `shape` is filled (nonzero) at shape-space point (x, y). */
+function filledAt(shape: Shape, x: number, y: number): boolean {
+  const line = new Scanline();
+  computeShapeScanline(shape, y, line);
+  return line.sumIntersections(x) !== 0;
+}
+
+describe("parseSvgLayers: CSS class rules", () => {
+  it("applies class rules in stylesheet order, whatever the order of the class names", () => {
+    const { layers } = parseSvgLayers(`<svg viewBox="0 0 10 10">
+      <style>.a { fill: red } .b { fill: blue }</style>
+      <rect class="b a" width="5" height="5"/>
+      <rect class="a b" width="5" height="5"/>
+    </svg>`);
+    expect(layers.map((l) => l.color)).toEqual(["blue", "blue"]);
+  });
+
+  it("applies class rules to gradient stops", () => {
+    const [layer] = parseSvgLayers(`<svg viewBox="0 0 10 10">
+      <style>.s { stop-color: red; stop-opacity: .25 }</style>
+      <linearGradient id="g"><stop class="s" offset="0"/><stop offset="1" stop-color="blue"/></linearGradient>
+      <rect width="10" height="10" fill="url(#g)"/>
+    </svg>`).layers;
+    expect(layer!.gradient!.stops.map((s) => [s.color, s.opacity])).toEqual([
+      ["red", 0.25],
+      ["blue", 1],
+    ]);
+  });
+});
+
+describe("parseSvgLayers: group opacity", () => {
+  // Two overlapping squares; (0.5, 0.5) lies in both, (0.2, 0.8) only in the first.
+  const pair = (group: string, extra = ""): SvgLayer[] =>
+    parseSvgLayers(`<svg viewBox="0 0 10 10"><g ${group}>
+      <rect width="6" height="6"${extra}/><rect x="4" y="4" width="6" height="6" fill="red"/>
+    </g></svg>`).layers;
+
+  it("draws an opaque group's members without overlap, each at the group's opacity", () => {
+    const [back, front] = pair('opacity=".5"');
+    expect([back!.opacity, front!.opacity]).toEqual([0.5, 0.5]);
+    expect(filledAt(back!.shape, 0.5, 0.5)).toBe(false); // cut away under the front square
+    expect(filledAt(back!.shape, 0.2, 0.8)).toBe(true);
+    expect(filledAt(front!.shape, 0.5, 0.5)).toBe(true);
+  });
+
+  it("leaves translucent content and ungrouped opacity as it is", () => {
+    const keeps = (layers: SvgLayer[]): boolean => filledAt(layers[0]!.shape, 0.5, 0.5);
+    expect(keeps(pair('opacity=".5"', ' fill-opacity=".5"'))).toBe(true); // can't be exact
+    expect(keeps(pair('opacity=".5"', ' opacity=".5"'))).toBe(true);
+    expect(keeps(pair(""))).toBe(true); // no group opacity: overlap is just paint order
+    const nested = parseSvgLayers(`<svg viewBox="0 0 10 10"><g opacity=".5">
+      <rect width="6" height="6"/><g opacity=".5"><rect x="4" y="4" width="6" height="6"/></g>
+    </g></svg>`).layers;
+    expect(keeps(nested)).toBe(true);
+  });
+});
+
+describe("parseSvgLayers: percentages and gradient units", () => {
+  it("resolves percentage lengths against the viewport", () => {
+    const { layers } = parseSvgLayers(`<svg viewBox="0 0 24 12">
+      <rect width="100%" height="100%"/>
+      <rect x="25%" y="50%" width="50%" height="25%" rx="10%"/>
+    </svg>`);
+    expect(box(layers[0]!.shape)).toEqual([0, 0, 2, 1]);
+    expect(box(layers[1]!.shape)).toEqual([0.5, 0.25, 1.5, 0.5]);
+    // r: a percentage of sqrt((w² + h²) / 2); 30 × 40 → 35.355…, so 20% ≈ 7.07 of 40.
+    const [circle] = parseSvgLayers(
+      `<svg viewBox="0 0 30 40"><circle cx="50%" cy="50%" r="20%"/></svg>`,
+    ).layers;
+    const b = shapeBounds(circle!.shape);
+    expect((b.maxY - b.minY) / 2).toBeCloseTo((0.2 * Math.sqrt(1250)) / 40, 3);
+  });
+
+  it("resolves userSpaceOnUse percentages and defaults against the viewport", () => {
+    const { layers } = parseSvgLayers(`<svg viewBox="0 0 20 10">
+      <linearGradient id="d" gradientUnits="userSpaceOnUse"/>
+      <linearGradient id="p" gradientUnits="userSpaceOnUse" x1="25%" x2="50%"/>
+      <rect width="20" height="10" fill="url(#d)"/>
+      <rect width="20" height="10" fill="url(#p)"/>
+    </svg>`);
+    // Shape x = user x / 10. Default x2 = 100% of the width (20), not 1.
+    expect(gradT(layers[0]!.gradient!, 0, 0.5)).toBeCloseTo(0, 12);
+    expect(gradT(layers[0]!.gradient!, 2, 0.5)).toBeCloseTo(1, 12);
+    expect(gradT(layers[1]!.gradient!, 0.5, 0.5)).toBeCloseTo(0, 12);
+    expect(gradT(layers[1]!.gradient!, 1, 0.5)).toBeCloseTo(1, 12);
+  });
+
+  it("measures a rotated element's bounding box in its own user space", () => {
+    // A 10×10 square rotated 45° about its centre: the gradient runs from its own
+    // left edge (t = 0) to its right edge (t = 1), not across its rotated extent.
+    const [layer] = parseSvgLayers(`<svg viewBox="0 0 20 20">
+      <linearGradient id="g"><stop offset="0"/><stop offset="1"/></linearGradient>
+      <rect x="5" y="5" width="10" height="10" transform="rotate(45 10 10)" fill="url(#g)"/>
+    </svg>`).layers;
+    // Local (x, y) → user space → shape space (÷ 20, y flipped).
+    const at = (x: number, y: number): number => {
+      const [c, s] = [Math.SQRT1_2, Math.SQRT1_2];
+      const [ux, uy] = [10 + c * (x - 10) - s * (y - 10), 10 + s * (x - 10) + c * (y - 10)];
+      return gradT(layer!.gradient!, ux / 20, 1 - uy / 20);
+    };
+    expect(at(5, 10)).toBeCloseTo(0, 9);
+    expect(at(15, 10)).toBeCloseTo(1, 9);
+    expect(at(10, 5)).toBeCloseTo(0.5, 9);
+  });
+});
+
 describe("Noto emoji regressions", () => {
   const noto = (u: string): string => readFileSync(resolve(NOTO, `emoji_u${u}.svg`), "utf8");
   const ALL = ["1f4a9", "1f9b1", "1f44c", "1f633", "1f644"];

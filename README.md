@@ -6,7 +6,7 @@ Crisp text at any size for WebGL and WebGPU. Load a TrueType font, get a multi-c
 
 - TypeScript port of [msdfgen](https://github.com/Chlumsky/msdfgen) that matches the C++ output to 1e-4 per texel
 - Built-in TrueType parser with kerning
-- 14 KB gzipped, no WASM, one tiny dependency ([potpack](https://github.com/mapbox/potpack))
+- 16 KB gzipped, no WASM, one tiny dependency ([potpack](https://github.com/mapbox/potpack))
 
 ## Install
 
@@ -30,12 +30,7 @@ const { glyphs } = atlas.layout("Hello, world!");
 ```ts
 for (const { glyph: g, penX, penY } of glyphs) {
   const quad = [penX + g.planeLeft, penY + g.planeBottom, penX + g.planeRight, penY + g.planeTop]; // y-up
-  const uv = [
-    (g.x + 0.5) / atlas.width,
-    (g.y + 0.5) / atlas.height,
-    (g.w - 1) / atlas.width,
-    (g.h - 1) / atlas.height,
-  ]; // x, y, w, h
+  const uv = [g.x / atlas.width, g.y / atlas.height, g.w / atlas.width, g.h / atlas.height]; // x, y, w, h
 }
 ```
 

@@ -20,6 +20,7 @@ import { describe, it, expect } from "vitest";
 import { Font } from "../../src/font/font";
 import { Atlas, pixelFloatToByte, type AtlasGlyph } from "../../src/atlas-gen";
 import { emNormalizeShape, normalizeShape } from "../../src/shape/normalize";
+import { unionShape } from "../../src/shape/union";
 import { edgeColoringSimple } from "../../src/msdf/edge-coloring";
 import { generateMSDF } from "../../src/msdf/generate";
 import { distanceSignCorrection, msdfErrorCorrection } from "../../src/msdf/error-correction";
@@ -173,6 +174,7 @@ describe("Atlas", () => {
 
       const shape = font.shape(gid);
       emNormalizeShape(shape, font.metrics.unitsPerEm);
+      unionShape(shape);
       normalizeShape(shape);
       edgeColoringSimple(shape, 3.0, 0n);
       const tx = -g.planeLeft;
@@ -250,6 +252,7 @@ describe("Atlas", () => {
         // (see Atlas.glyph()).
         const shape = font.shape(font.glyphId(cp));
         emNormalizeShape(shape, font.metrics.unitsPerEm);
+        unionShape(shape);
         normalizeShape(shape);
         edgeColoringSimple(shape, 3.0, 0n);
         const tx = -g.planeLeft;

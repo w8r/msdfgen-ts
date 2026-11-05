@@ -115,8 +115,6 @@ interface Tier {
   glyphs: LaidOutGlyph[];
   widthEm: number;
   heightEm: number;
-  halfTexelU: number;
-  halfTexelV: number;
   /** Wall-clock time spent generating + packing this tier's atlas (ms). */
   genMs: number;
   /** Which path built this tier — surfaced in the readout for QA. */
@@ -136,8 +134,6 @@ function buildTier(font: Font, pixelsPerEm: number): Tier {
     glyphs,
     widthEm,
     heightEm,
-    halfTexelU: 0.5 / atlas.width,
-    halfTexelV: 0.5 / atlas.height,
     genMs,
     regenMode: "sync",
   };
@@ -168,8 +164,6 @@ function tierFromBuilt(msg: BuiltResponse): Tier {
     glyphs,
     widthEm: msg.widthEm,
     heightEm: msg.heightEm,
-    halfTexelU: 0.5 / msg.width,
-    halfTexelV: 0.5 / msg.height,
     genMs: msg.genMs,
     regenMode: "worker",
   };
@@ -469,10 +463,10 @@ async function main(): Promise<void> {
       instanceData[base + 1] = cellTop;
       instanceData[base + 2] = cellWidthPx;
       instanceData[base + 3] = cellHeightPx;
-      instanceData[base + 4] = glyph.x / tier.atlas.width + tier.halfTexelU;
-      instanceData[base + 5] = glyph.y / tier.atlas.height + tier.halfTexelV;
-      instanceData[base + 6] = glyph.w / tier.atlas.width - 2 * tier.halfTexelU;
-      instanceData[base + 7] = glyph.h / tier.atlas.height - 2 * tier.halfTexelV;
+      instanceData[base + 4] = glyph.x / tier.atlas.width;
+      instanceData[base + 5] = glyph.y / tier.atlas.height;
+      instanceData[base + 6] = glyph.w / tier.atlas.width;
+      instanceData[base + 7] = glyph.h / tier.atlas.height;
     }
     gl.bindBuffer(gl.ARRAY_BUFFER, instanceBuffer);
     gl.bufferSubData(gl.ARRAY_BUFFER, 0, instanceData, 0, tier.glyphs.length * FLOATS_PER_INSTANCE);

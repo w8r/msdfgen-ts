@@ -261,10 +261,10 @@ export class MSDFText extends Mesh {
       const x1 = (penX + g.planeRight + ox) * fontSize;
       const y0 = (penY + g.planeBottom + oy) * fontSize;
       const y1 = (penY + g.planeTop + oy) * fontSize;
-      const u0 = (g.x + 0.5) / W;
-      const u1 = (g.x + g.w - 0.5) / W;
-      const vTop = (g.y + 0.5) / H;
-      const vBottom = (g.y + g.h - 0.5) / H;
+      const u0 = g.x / W;
+      const u1 = (g.x + g.w) / W;
+      const vTop = g.y / H;
+      const vBottom = (g.y + g.h) / H;
       // Corners: bottom-left, bottom-right, top-left, top-right.
       pos.set([x0, y0, 0, x1, y0, 0, x0, y1, 0, x1, y1, 0], i * 12);
       uv.set([u0, vBottom, u1, vBottom, u0, vTop, u1, vTop], i * 8);

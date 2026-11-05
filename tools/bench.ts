@@ -7,10 +7,10 @@
  * Two independent checks:
  *
  * (1) Timing — measures the full uncached per-glyph pipeline through the
- *     PUBLIC `Atlas` API (shape parse -> normalize -> colour -> generate ->
+ *     PUBLIC `Atlas` API (shape parse -> union -> normalize -> colour -> generate ->
  *     sign-correct -> error-correct -> quantise -> pack), the real cost a
  *     consumer pays adding one new glyph. A fresh `Atlas` per iteration
- *     guarantees "uncached" (Atlas caches by codepoint internally).
+ *     guarantees "uncached" (Atlas caches by glyph index internally).
  *
  * (2) Allocation — isolates just the per-pixel/per-edge hot loop
  *     (`generateMSDF` + `distanceSignCorrection` + `msdfErrorCorrection`,

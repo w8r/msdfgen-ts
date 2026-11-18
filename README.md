@@ -6,7 +6,7 @@ Crisp text at any size for WebGL and WebGPU. Load a TrueType font, get a multi-c
 
 - TypeScript port of [msdfgen](https://github.com/Chlumsky/msdfgen) that matches the C++ output to 1e-4 per texel
 - Built-in TrueType parser with kerning
-- 16 KB gzipped, no WASM, one tiny dependency ([potpack](https://github.com/mapbox/potpack))
+- 20 KB gzipped, no WASM, one tiny dependency ([potpack](https://github.com/mapbox/potpack))
 
 ## Install
 
@@ -54,11 +54,34 @@ Enable alpha blending (glyph quads overlap), use linear texture filtering, and m
 - **Preload a character range:** `atlas.glyphs(codepoints)` generates any iterable of codepoints in one batch, e.g. all of Latin and Cyrillic up front.
 - **Icon fonts:** `atlas.glyphsByIndex(ids)` addresses glyphs by index, for glyphs with no codepoint. `font.numGlyphs` gives the count.
 - **Adding glyphs repacks the atlas.** Glyph objects are updated in place, so keep the objects you got and re-read `x`/`y` after adding more; don't copy them into variables.
+- **Deep zoom:** `new Atlas(font, { float: true })` also fills `atlas.floatTexture` with the same cells as raw float RGB, unclamped, for zoom levels that outrun 8 bits.
 - **Off the main thread:** `msdfgen-ts/worker` runs the same build in a Web Worker. See [`src/atlas-worker.ts`](src/atlas-worker.ts) for the message protocol.
+
+### SVG
+
+The same atlas takes SVG icons. Parse each SVG into a shape, then add the shapes under keys of your choice:
+
+```ts
+import { Atlas, parseSvg } from "msdfgen-ts";
+
+const { shape, width } = parseSvg(svgText);
+const atlas = new Atlas(null, { pixelsPerEm: 64, pxrange: 8 }); // null: no font
+const [heart] = atlas.shapes([["heart", shape]]);
+```
+
+- **Units:** 1 shape unit is the viewBox height, y-up, origin at the viewBox's bottom-left. `pixelsPerEm` is texels per icon height, and `atlas.pxrangeEm × iconHeightPx` is the shader's `screenPxRange`.
+- **Placement:** the cell's `planeLeft`/`planeBottom`/`planeRight`/`planeTop` are relative to the viewBox, and `width` is the viewBox width (height is 1), so an icon lands where its viewBox puts it.
+- **Fonts and icons together:** pass a font instead of `null` and call both `glyphs()` and `shapes()`; they share one texture.
+- **Without an atlas:** `generateShapeMSDF(shape, pixelsPerUnit, pxrange)` returns one float bitmap and its plane bounds.
+- **Colour:** `parseSvgLayers(svgText)` returns `{ layers, width }`, one shape per filled path with its colour or gradient, back to front. Add every layer with `shapes()` (keys like `` `${name}:${i}` ``) and draw them in order. [demo/svg/renderer.ts](demo/svg/renderer.ts) is a small WebGL2 renderer for it.
+- **Bundle size:** only what you import ships. A font-only app doesn't carry the SVG parser, and an SVG-only app doesn't carry the TrueType parser.
+
+The complete setup, colour layers included, is in [demo/hello-svg/main.ts](demo/hello-svg/main.ts).
 
 ## Limitations
 
 - TrueType (`glyf`) outlines only. No CFF/OTF, no variable fonts.
+- SVG: fills only (paths and basic shapes, transforms, `.class` CSS, solid / linear / radial gradient fills, clip paths, group opacity, percentage lengths, clipped to the viewBox). No strokes, masks, filters, blend modes, `<use>` (outside clip paths) or `<text>`.
 - No text shaping (ligatures, complex scripts). Kerning comes from the `kern` table only.
 - Generation takes about 2–10 ms per glyph at 48 px/em, depending on complexity. Build atlases up front or in the worker, not per frame.
 
@@ -66,7 +89,7 @@ Enable alpha blending (glyph quads overlap), use linear texture filtering, and m
 
 ```sh
 npm install
-npm run dev:hello-webgpu  # also: dev:hello-webgl, dev:webgpu-zoom, dev:webgl-zoom, dev:lucide, dev:bench
+npm run dev:hello-webgpu  # also: dev:hello-webgl, dev:hello-svg, dev:webgpu-zoom, dev:webgl-zoom, dev:lucide, dev:svg, dev:svg-bounce, dev:bench
 ```
 
 ## Framework examples

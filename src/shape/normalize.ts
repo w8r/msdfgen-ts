@@ -13,7 +13,7 @@
 import { type Contour } from "./contour";
 import { EdgeSegment, QUADRATIC, CUBIC, LINEAR } from "./segments";
 import { type Shape } from "./shape";
-import { cross, dot, sign } from "../math/scalar";
+import { cross, dot, mix, sign } from "../math/scalar";
 
 // ── em-normalization ────────────────────────────────────────────────────────
 
@@ -22,7 +22,8 @@ import { cross, dot, sign } from "../math/scalar";
  * units to the normalised em-square coordinate system used by msdfgen.
  *
  * This is the **single named em-normalisation step** (FONT_SCALING_EM_NORMALIZED).
- * No other file may perform this division by unitsPerEm.
+ * No other file may perform this division by unitsPerEm. SVG input goes
+ * through here too, with the viewBox height as its "unitsPerEm".
  *
  * @param shape Shape in raw font units (mutated in-place).
  * @param unitsPerEm Design units per em (from Font.metrics.unitsPerEm).
@@ -55,6 +56,21 @@ export function emNormalizeShape(shape: Shape, unitsPerEm: number): void {
         const d12y = seg.p2y - seg.p1y;
         if (cross(d01x, d01y, d12x, d12y) === 0) {
           contour[i] = new EdgeSegment(LINEAR, seg.p0x, seg.p0y, seg.p2x, seg.p2y, 0, 0, 0, 0);
+        }
+      } else if (seg.type === CUBIC) {
+        // Degenerate CUBIC (SVG input only — TrueType has no cubics), same
+        // C++ EdgeSegment::create: collinear → LINEAR, elevated quadratic → QUADRATIC.
+        const d12x = seg.p2x - seg.p1x;
+        const d12y = seg.p2y - seg.p1y;
+        const qx = 1.5 * seg.p1x - 0.5 * seg.p0x;
+        const qy = 1.5 * seg.p1y - 0.5 * seg.p0y;
+        if (
+          cross(seg.p1x - seg.p0x, seg.p1y - seg.p0y, d12x, d12y) === 0 &&
+          cross(d12x, d12y, seg.p3x - seg.p2x, seg.p3y - seg.p2y) === 0
+        ) {
+          contour[i] = new EdgeSegment(LINEAR, seg.p0x, seg.p0y, seg.p3x, seg.p3y, 0, 0, 0, 0);
+        } else if (qx === 1.5 * seg.p2x - 0.5 * seg.p3x && qy === 1.5 * seg.p2y - 0.5 * seg.p3y) {
+          contour[i] = new EdgeSegment(QUADRATIC, seg.p0x, seg.p0y, qx, qy, seg.p3x, seg.p3y, 0, 0);
         }
       }
     }
@@ -467,6 +483,74 @@ export function normalizeShape(shape: Shape): void {
           deconvergeEdge(contour, i, 0, axisY, -axisX);
         }
       }
+    }
+  }
+}
+
+// ── Shape::orientContours() ──────────────────────────────────────────────────
+
+/** Scratch buffers for `orientContours`. */
+const _ocX: number[] = [0, 0, 0];
+const _ocDy: number[] = [0, 0, 0];
+const _ocPt: number[] = [0, 0];
+
+/**
+ * Reverses contours so the nonzero fill of the result equals the even-odd
+ * fill of the input (holes wound against their parent). Used for SVG
+ * `fill-rule="evenodd"` paths, so the rest of the pipeline stays nonzero.
+ * port of core/Shape.cpp: Shape::orientContours
+ *
+ * @param contours Contours of one even-odd path (mutated in place).
+ */
+export function orientContours(contours: Contour[]): void {
+  // An irrational number to minimize chance of intersecting a corner or other point of interest.
+  const ratio = 0.5 * (Math.sqrt(5) - 1);
+  const orientations = contours.map(() => 0);
+  const hits: { x: number; dy: number; c: number }[] = [];
+  for (let i = 0; i < contours.length; i++) {
+    const contour = contours[i]!;
+    if (orientations[i] || contour.length === 0) continue;
+    // Find a Y that crosses the contour.
+    const y0 = contour[0]!.p0y;
+    let y1 = y0;
+    for (let e = 0; e < contour.length && y0 === y1; e++) y1 = contour[e]!.endY();
+    for (let e = 0; e < contour.length && y0 === y1; e++) {
+      contour[e]!.point(ratio, _ocPt); // in case all endpoints are in a horizontal line
+      y1 = _ocPt[1]!;
+    }
+    const y = mix(y0, y1, ratio);
+    // Scanline through the whole shape at Y.
+    for (let j = 0; j < contours.length; j++) {
+      for (const edge of contours[j]!) {
+        const n = edge.scanlineIntersections(y, _ocX, _ocDy);
+        for (let k = 0; k < n; k++) hits.push({ x: _ocX[k]!, dy: _ocDy[k]!, c: j });
+      }
+    }
+    hits.sort((a, b) => sign(a.x - b.x));
+    // Disqualify multiple intersections.
+    for (let j = 1; j < hits.length; j++) {
+      if (hits[j]!.x === hits[j - 1]!.x) hits[j]!.dy = hits[j - 1]!.dy = 0;
+    }
+    // Inspect scanline and deduce orientations of intersected contours.
+    for (let j = 0; j < hits.length; j++) {
+      const hit = hits[j]!;
+      if (hit.dy) orientations[hit.c]! += 2 * ((j & 1) ^ (hit.dy > 0 ? 1 : 0)) - 1;
+    }
+    hits.length = 0;
+  }
+  // Reverse contours that have the opposite orientation.
+  // port of core/Contour.cpp: Contour::reverse + EdgeSegment::reverse
+  for (let i = 0; i < contours.length; i++) {
+    if (orientations[i]! >= 0) continue;
+    const contour = contours[i]!.reverse();
+    for (let e = 0; e < contour.length; e++) {
+      const s = contour[e]!;
+      contour[e] =
+        s.type === LINEAR
+          ? new EdgeSegment(LINEAR, s.p1x, s.p1y, s.p0x, s.p0y, 0, 0, 0, 0)
+          : s.type === QUADRATIC
+            ? new EdgeSegment(QUADRATIC, s.p2x, s.p2y, s.p1x, s.p1y, s.p0x, s.p0y, 0, 0)
+            : new EdgeSegment(CUBIC, s.p3x, s.p3y, s.p2x, s.p2y, s.p1x, s.p1y, s.p0x, s.p0y);
     }
   }
 }

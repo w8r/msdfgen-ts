@@ -32,6 +32,7 @@ export default defineConfig({
       input: {
         index: resolve(__dirname, "demo/index.html"),
         helloWebgl: resolve(__dirname, "demo/hello-webgl/index.html"),
+        helloSvg: resolve(__dirname, "demo/hello-svg/index.html"),
         helloWebgpu: resolve(__dirname, "demo/hello-webgpu/index.html"),
         canvas: resolve(__dirname, "demo/canvas/index.html"),
         webgpu: resolve(__dirname, "demo/webgpu/index.html"),
@@ -40,6 +41,8 @@ export default defineConfig({
         webglZoom: resolve(__dirname, "demo/webgl-zoom/index.html"),
         debug: resolve(__dirname, "demo/debug/index.html"),
         lucide: resolve(__dirname, "demo/lucide/index.html"),
+        svg: resolve(__dirname, "demo/svg/index.html"),
+        svgBounce: resolve(__dirname, "demo/svg-bounce/index.html"),
         bench: resolve(__dirname, "demo/bench/index.html"),
         three: resolve(__dirname, "demo/three/index.html"),
         r3f: resolve(__dirname, "demo/r3f/index.html"),

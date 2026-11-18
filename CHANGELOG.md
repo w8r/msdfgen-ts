@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.0
+
+- **SVG input:** `parseSvg(svg)` returns `{ shape, width }`, one merged shape for single-colour icons. `parseSvgLayers(svg)` returns `{ layers, width }`, one shape per filled path with its colour or gradient, for colour icons. Supported: paths and basic shapes, transforms, `.class` CSS, solid/linear/radial gradient fills, even-odd fills, clip paths, group opacity, clipping to the viewBox. No strokes, masks, filters, `<use>` outside clip paths, or `<text>`. No DOM.
+- **`Atlas.shapes(entries)`:** packs any shape under a key of your choice, in the same texture as glyphs. `new Atlas(null, opts)` makes an atlas without a font.
+- **`generateShapeMSDF(shape, pixelsPerUnit, pxrange)`:** one shape's float MSDF and plane bounds, without an atlas.
+- **`float` option:** `atlas.floatTexture` holds the same cells as unclamped float RGB, for deep zoom.
+- **Tree-shakeable:** a font-only app doesn't bundle the SVG parser, and an SVG-only app doesn't bundle the TrueType parser.
+- **Demos:** `hello-svg` (minimal colour-SVG example), `svg` (import any SVG, gradients), `svg-bounce` (10,000 instances in one draw call).
+
+## 0.1.1
+
+- Overlapping contours are merged before generation, fixing cracks where glyph parts overlap; glyph quads no longer stretch their UVs.
+
 ## 0.1.0
 
 First release.

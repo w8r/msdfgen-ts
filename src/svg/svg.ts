@@ -92,20 +92,22 @@ function _len(v: string | undefined, ref: number): number {
 /**
  * Parses an SVG document into one filled {@link Shape}: y-up, origin at the
  * viewBox's bottom-left, 1 unit = the viewBox height, clipped to the viewBox.
- * All paths are unioned.
+ * All paths are unioned. The single-colour twin of {@link parseSvgLayers}.
  *
  * @param svg SVG source text.
- * @returns The shape, ready for `Atlas.shapes` or `generateShapeMSDF`.
+ * @returns The shape, ready for `Atlas.shapes` or `generateShapeMSDF`, plus
+ *   the viewBox width (shape units; height is 1) for placing the icon.
  */
-export function parseSvg(svg: string): Shape {
+export function parseSvg(svg: string): { shape: Shape; width: number } {
   // Known gap (rare): the elements' contours are concatenated into one nonzero fill, so two
   // overlapping elements wound in opposite directions cancel where they overlap (a hole
   // where both are drawn). Unioning each element's fill separately fixes that, but layers
   // usually share curved edges (a clipped shape and its clip outline, repeated corners),
   // which the boolean ops in shape/union.ts can't resolve: they spend their subdivision
   // budget (2.5-6.6 ms per Noto emoji), give up, and return this same concatenation.
-  const contours = parseSvgLayers(svg).layers.flatMap((l) => l.shape.contours);
-  return { contours, inverseYAxis: false };
+  const { layers, width } = parseSvgLayers(svg);
+  const contours = layers.flatMap((l) => l.shape.contours);
+  return { shape: { contours, inverseYAxis: false }, width };
 }
 
 /**

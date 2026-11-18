@@ -78,7 +78,9 @@ const ICONS: Record<string, string> = {
 
 describe("parseSvg", () => {
   it("normalizes to viewBox-height units, y-up, closing open subpaths", () => {
-    const { contours } = parseSvg(`<svg viewBox="0 0 10 10"><path d="M0 0H10V10H0"/></svg>`);
+    const { shape, width } = parseSvg(`<svg viewBox="0 0 20 10"><path d="M0 0H10V10H0"/></svg>`);
+    expect(width).toBe(2);
+    const { contours } = shape;
     expect(contours).toHaveLength(1);
     const c = contours[0]!;
     expect(c.map((s) => s.type)).toEqual([LINEAR, LINEAR, LINEAR, LINEAR]);
@@ -87,32 +89,34 @@ describe("parseSvg", () => {
   });
 
   it("handles relative commands, implicit lineto and compact arc flags", () => {
-    const a = parseSvg(svg("m1 1 2 0 0 2z")).contours[0]!;
-    const b = parseSvg(svg("M1 1L3 1L3 3Z")).contours[0]!;
+    const a = parseSvg(svg("m1 1 2 0 0 2z")).shape.contours[0]!;
+    const b = parseSvg(svg("M1 1L3 1L3 3Z")).shape.contours[0]!;
     expect(a).toEqual(b);
-    const arc = parseSvg(svg("M0 0a1 1 0 011 1z")).contours[0]!;
+    const arc = parseSvg(svg("M0 0a1 1 0 011 1z")).shape.contours[0]!;
     expect(arc[0]!.type).toBe(CUBIC);
     expect([arc[0]!.p3x * 24, 24 - arc[0]!.p3y * 24]).toEqual([1, 1]);
   });
 
   it("approximates arcs with cubics whose points lie on the circle", () => {
-    const [c] = parseSvg(svg("M2 12a10 10 0 1 0 20 0a10 10 0 1 0-20 0z")).contours;
+    const [c] = parseSvg(svg("M2 12a10 10 0 1 0 20 0a10 10 0 1 0-20 0z")).shape.contours;
     for (const s of c!) {
       expect(Math.hypot(s.p3x - 0.5, s.p3y - 0.5)).toBeCloseTo(10 / 24, 12);
     }
   });
 
   it("skips fill='none' paths", () => {
-    expect(parseSvg(svg("M0 0H1V1Z", ' fill="none"')).contours).toHaveLength(0);
+    expect(parseSvg(svg("M0 0H1V1Z", ' fill="none"')).shape.contours).toHaveLength(0);
   });
 
   it("orients even-odd holes against their outer contour, nonzero paths untouched", () => {
     // Shoelace area over segment endpoints: sign = winding direction.
     const area = (c: Contour): number =>
       c.reduce((a, s) => a + s.p0x * s.endY() - s.endX() * s.p0y, 0);
-    const [outer, hole] = parseSvg(ICONS.ring!).contours.map(area);
+    const [outer, hole] = parseSvg(ICONS.ring!).shape.contours.map(area);
     expect(Math.sign(outer!)).toBe(-Math.sign(hole!));
-    const plain = parseSvg(ICONS.ring!.replace(' fill-rule="evenodd"', "")).contours.map(area);
+    const plain = parseSvg(ICONS.ring!.replace(' fill-rule="evenodd"', "")).shape.contours.map(
+      area,
+    );
     expect(Math.sign(plain[0]!)).toBe(Math.sign(plain[1]!));
   });
 });
@@ -505,7 +509,7 @@ describe("generateShapeMSDF on SVG input — reference diff", () => {
   const tmp = mkdtempSync(resolve(tmpdir(), "msdfgen-ts-svg-"));
   for (const [name, src] of Object.entries(ICONS)) {
     it(name, () => {
-      const desc = serializeShape(parseSvg(src));
+      const desc = serializeShape(parseSvg(src).shape);
       const { shape } = parseShapeDesc(desc);
       const r = generateShapeMSDF(shape, 32, 4, false)!; // msdfgen without Skia
 

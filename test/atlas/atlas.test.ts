@@ -100,7 +100,7 @@ describe("Atlas", () => {
   });
 
   it("shapes() merges overlapping contours, with no font", () => {
-    const shape = parseSvg(
+    const { shape } = parseSvg(
       `<svg viewBox="0 0 24 24"><path d="M2 2H14V14H2ZM10 10H22V22H10Z"/></svg>`,
     );
     const atlas = new Atlas(null, { pixelsPerEm: 32, pxrange: 4, float: true });

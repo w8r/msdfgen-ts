@@ -32,6 +32,7 @@ export default defineConfig({
       input: {
         index: resolve(__dirname, "demo/index.html"),
         helloWebgl: resolve(__dirname, "demo/hello-webgl/index.html"),
+        helloSvg: resolve(__dirname, "demo/hello-svg/index.html"),
         helloWebgpu: resolve(__dirname, "demo/hello-webgpu/index.html"),
         canvas: resolve(__dirname, "demo/canvas/index.html"),
         webgpu: resolve(__dirname, "demo/webgpu/index.html"),

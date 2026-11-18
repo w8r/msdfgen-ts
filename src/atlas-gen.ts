@@ -41,7 +41,8 @@ export function pixelFloatToByte(x: number): number {
 
 /** Options for constructing an {@link Atlas}. */
 export interface AtlasOptions {
-  /** Uniform texel-per-em generation scale. Default 40. */
+  /** Uniform texel-per-em generation scale. For `parseSvg` shapes, 1 em is the
+   *  viewBox height, so this is texels per icon height. Default 40. */
   pixelsPerEm?: number;
   /** MSDF distance range in texels (msdfgen `-pxrange`). Default 4. */
   pxrange?: number;

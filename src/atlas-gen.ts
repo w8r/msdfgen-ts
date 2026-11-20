@@ -21,6 +21,8 @@
  */
 
 import { type Font } from "./font/font";
+import { PROP_HIDDEN, run } from "./font/glyph-run";
+import { shapeText } from "./font/shaper";
 import { emNormalizeShape } from "./shape/normalize";
 import { generateShapeMSDF } from "./msdf/shape-msdf";
 import { type Shape } from "./shape/shape";
@@ -28,6 +30,20 @@ import potpack from "potpack";
 
 /** Bytes per atlas texel (RGBA8; MSDF only uses 3 channels — alpha = 255). */
 const CHANNELS = 4;
+
+/** What a default-ignorable character (soft hyphen, ZWJ, …) lays out as:
+ *  nothing drawn, no advance — HarfBuzz hides them. */
+const HIDDEN: AtlasGlyph = {
+  x: 0,
+  y: 0,
+  w: 0,
+  h: 0,
+  advance: 0,
+  planeLeft: 0,
+  planeBottom: 0,
+  planeRight: 0,
+  planeTop: 0,
+};
 
 /** One cached atlas entry: layout + retained float MSDF (for repacking). */
 type Entry = { glyph: AtlasGlyph; msdf: Float32Array | null };
@@ -101,6 +117,8 @@ export class Atlas {
    *  by glyph index: codepoints sharing a glyph (every character missing from
    *  the font maps to .notdef) share one atlas cell. */
   private readonly _cache = new Map<number, Entry>();
+  /** {@link Atlas._cache}'s glyphs again, indexed by glyph id (the layout hot path). */
+  private readonly _byGid: (AtlasGlyph | undefined)[] = [];
   /** Same shape as {@link Atlas._cache}, keyed by caller-chosen string — see
    *  {@link Atlas.shapes}. */
   private readonly _cacheByKey = new Map<string, Entry>();
@@ -175,6 +193,7 @@ export class Atlas {
       }
       const entry = this._generateForGlyphId(gid);
       this._cache.set(gid, entry);
+      this._byGid[gid] = entry.glyph;
       result.push(entry.glyph);
       added++;
     }
@@ -247,31 +266,44 @@ export class Atlas {
   }
 
   /**
-   * Lays out `text` left-to-right on a single line, applying kerning.
+   * Lays out `text` left-to-right on a single line, kerned the way Chrome
+   * kerns it (see src/font/shaper.ts: script runs, GPOS or the `kern` table).
    * Generates any missing glyphs and packs the atlas **once** for the
-   * whole run. Baseline is y=0 (`penY` on every result is 0); each `penX`
-   * is the pen position in em. `text` must not contain `\n` — use
+   * whole run. Baseline is y=0 (`penY` is the glyph's GPOS y offset, almost
+   * always 0); each `penX` is the glyph's drawing origin in em. One entry
+   * per codepoint (no ligatures). `text` must not contain `\n` — use
    * {@link Atlas.layoutMultiline} for multi-line input.
    */
   layout(text: string): { glyphs: LaidOutGlyph[]; widthEm: number } {
-    const codepoints: number[] = [];
-    for (const ch of text) codepoints.push(ch.codePointAt(0)!);
-    this.glyphs(codepoints); // one potpack for the whole string
-
-    const laid: LaidOutGlyph[] = [];
     const font = this._requireFont();
-    const upe = font.metrics.unitsPerEm;
-    let penX = 0;
-    let prevGid = -1;
-    for (const cp of codepoints) {
-      const gid = font.glyphId(cp);
-      if (prevGid >= 0) penX += font.kerning(prevGid, gid) / upe;
-      const glyph = this._cache.get(gid)!.glyph;
-      laid.push({ glyph, penX, penY: 0 });
-      penX += glyph.advance;
-      prevGid = gid;
+    const n = shapeText(font, text);
+    const gid = run._gid;
+    const gp = run._gp;
+    let added = 0;
+    const byGid = this._byGid;
+    for (let i = 0; i < n; i++) {
+      const g = gid[i]!;
+      if (gp[i]! & PROP_HIDDEN || byGid[g]) continue;
+      const entry = this._generateForGlyphId(g);
+      this._cache.set(g, entry);
+      byGid[g] = entry.glyph;
+      added++;
     }
-    return { glyphs: laid, widthEm: penX };
+    if (added > 0) this._repack(); // one potpack for the whole string
+
+    // Generation never touches the shared run buffer: read the positions now.
+    const xa = run._xa;
+    const xo = run._xo;
+    const yo = run._yo;
+    const upe = font.metrics.unitsPerEm;
+    const laid: LaidOutGlyph[] = [];
+    let pen = 0;
+    for (let i = 0; i < n; i++) {
+      const glyph = gp[i]! & PROP_HIDDEN ? HIDDEN : byGid[gid[i]!]!;
+      laid.push({ glyph, penX: (pen + xo[i]!) / upe, penY: yo[i]! / upe });
+      pen += xa[i]!;
+    }
+    return { glyphs: laid, widthEm: pen / upe };
   }
 
   /**
@@ -300,7 +332,8 @@ export class Atlas {
     for (let i = 0; i < lines.length; i++) {
       const { glyphs: lineGlyphs, widthEm: lineWidthEm } = this.layout(lines[i]!);
       const penY = -i * lineHeightEm;
-      for (const g of lineGlyphs) glyphs.push({ glyph: g.glyph, penX: g.penX, penY });
+      for (const g of lineGlyphs)
+        glyphs.push({ glyph: g.glyph, penX: g.penX, penY: penY + g.penY });
       if (lineWidthEm > widthEm) widthEm = lineWidthEm;
     }
     return { glyphs, widthEm, heightEm: lines.length * lineHeightEm };

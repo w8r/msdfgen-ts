@@ -6,11 +6,12 @@
  * natively rasterized by a real browser (`OffscreenCanvas.fillText`).
  *
  * Both sides draw each character at the SAME pen position (computed once
- * by `Atlas.layout`, our own hmtx-advance + kern-table layout) — this
+ * by `Atlas.layout`, our own layout, kerned like Chrome) — this
  * isolates "does msdfgen-ts's reconstruction look like the font's real
  * outline, rasterized" from "does msdfgen-ts's text layout match the
  * browser's own OpenType shaping", which is a different, already-covered
- * concern (test/parser/metrics.test.ts, test/parser/outline.test.ts).
+ * concern (test/parser/metrics.test.ts, test/parser/outline.test.ts,
+ * test/layout/kerning.test.ts).
  *
  * Per CLAUDE.md's Stack decision ("WebGPU e2e runs via ... headless
  * Chromium ... otherwise the test is skipped locally with a loud warning

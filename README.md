@@ -5,8 +5,8 @@ Crisp text at any size for WebGL and WebGPU. Load a TrueType font, get a multi-c
 **[Live demos](https://w8r.github.io/msdfgen-ts/)** · minimal examples: [WebGPU](demo/hello-webgpu/main.ts), [WebGL2](demo/hello-webgl/main.ts)
 
 - TypeScript port of [msdfgen](https://github.com/Chlumsky/msdfgen) that matches the C++ output to 1e-4 per texel
-- Built-in TrueType parser with kerning
-- 20 KB gzipped, no WASM, one tiny dependency ([potpack](https://github.com/mapbox/potpack))
+- Built-in TrueType parser, with kerning that matches Chrome's (GPOS and `kern`)
+- 30 KB gzipped, no WASM, one tiny dependency ([potpack](https://github.com/mapbox/potpack))
 
 ## Install
 
@@ -82,7 +82,7 @@ The complete setup, colour layers included, is in [demo/hello-svg/main.ts](demo/
 
 - TrueType (`glyf`) outlines only. No CFF/OTF, no variable fonts.
 - SVG: fills only (paths and basic shapes, transforms, `.class` CSS, solid / linear / radial gradient fills, clip paths, group opacity, percentage lengths, clipped to the viewBox). No strokes, masks, filters, blend modes, `<use>` (outside clip paths) or `<text>`.
-- No text shaping (ligatures, complex scripts). Kerning comes from the `kern` table only.
+- Text layout is kerning only: no ligatures or other glyph substitution (GSUB), no complex scripts, no mark positioning. Kerning (GPOS or the `kern` table, per script run) matches Chrome's.
 - Generation takes about 2–10 ms per glyph at 48 px/em, depending on complexity. Build atlases up front or in the worker, not per frame.
 
 ## Demos

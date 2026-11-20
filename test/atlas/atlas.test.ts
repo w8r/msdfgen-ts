@@ -139,11 +139,14 @@ describe("Atlas", () => {
     const { glyphs, widthEm } = atlas.layout("AV");
     expect(glyphs).toHaveLength(2);
     expect(glyphs[0]!.penX).toBe(0);
-    // Absent kerning (Roboto uses GPOS, not `kern`), widthEm should equal
-    // the sum of advances exactly.
+    // Roboto kerns "AV" through GPOS (−87 units, the value Chrome applies —
+    // test/layout/kerning.test.ts): the pen advances by A's advance plus the
+    // kern, and the width is the sum of advances plus the kern.
+    const kernEm = font.kerning(font.glyphId(0x41), font.glyphId(0x56)) / font.metrics.unitsPerEm;
+    expect(kernEm).toBeCloseTo(-87 / 2048, 10);
     const sumAdvances = glyphs[0]!.glyph.advance + glyphs[1]!.glyph.advance;
-    expect(widthEm).toBeCloseTo(sumAdvances, 10);
-    expect(glyphs[1]!.penX).toBeCloseTo(glyphs[0]!.glyph.advance, 10);
+    expect(widthEm).toBeCloseTo(sumAdvances + kernEm, 10);
+    expect(glyphs[1]!.penX).toBeCloseTo(glyphs[0]!.glyph.advance + kernEm, 10);
   });
 
   // ── glyphByIndex / glyphsByIndex — raw-glyph-ID addressing for icon

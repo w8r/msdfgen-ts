@@ -25,7 +25,8 @@ const ICU_CODES =
   "PalmSindWaraAfakJurcMrooNshuShrdSoraTakrTangWoleHluwKhojTirhAghbMahjAhomHatrModiMultPaucSiddAdlm" +
   "BhksMarcNewaOsgeHanbJamoZsyeGonmSoyoZanbDogrGongMakaMedfRohgSogdSogoElymHmnpNandWchoChrsDiakKits" +
   "YeziCpmnOugrTnsaTotoVithKawiNagmAranGaraGukhKraiOnaoSunuTodrTutgBerfSidtTayoTols";
-const SCRIPT_COUNT = ICU_CODES.length / 4;
+/** Number of ICU script codes (script codes are `0 … SCRIPT_COUNT - 1`). */
+export const SCRIPT_COUNT = ICU_CODES.length / 4;
 
 /** `USCRIPT_COMMON` */
 export const COMMON = 0;
@@ -35,8 +36,13 @@ const LATIN = 25;
 const CYRILLIC = 8;
 const GREEK = 14;
 
-/** ISO 15924 code of an ICU script code. */
-function iso(code: number): string {
+/**
+ * ISO 15924 code of an ICU script code.
+ *
+ * @param code ICU script code (as {@link itemize} returns).
+ * @returns The 4-letter code, e.g. "Latn".
+ */
+export function iso(code: number): string {
   return ICU_CODES.substring(code * 4, code * 4 + 4);
 }
 

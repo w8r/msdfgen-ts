@@ -324,11 +324,19 @@ ours to 1/16 font unit (Chrome's layout unit is 1/64 px; the test uses 1 px = 1 
 
 - **What is ported:** Blink's `ScriptRunIterator` (`src/font/script.ts`: script runs, paired
   brackets, Script_Extensions; script data from the JS engine's `\p{Script=…}` regexes, none
-  bundled) and, per run, HarfBuzz's default shaper restricted to positioning
+  bundled) and, per run, HarfBuzz's shaping restricted to positioning
   (`src/font/shaper.ts`): one glyph per codepoint, `hmtx` advances, GPOS default features
   (`kern`, `dist`, …: lookup types 1, 2, 7, 8, 9) or, when the script has no GPOS `kern`, the
   legacy `kern` table (half of each value on each glyph, as HarfBuzz does), mark zeroing,
   default ignorables hidden and skipped, HarfBuzz's fallback for missing space characters.
+  HarfBuzz picks a shaper per run (`hb_ot_shaper_categorize`, from the script and the GSUB
+  script the font settles on); only its two positioning fields are ported: when marks are
+  zeroed, and whether the legacy `kern` table applies at all (the Universal Shaping Engine
+  never applies it — e.g. a run of digits and U+202F resolves to Mongolian).
+- **Test browser:** Playwright's full Chromium (`channel: "chromium"`), never the default
+  headless shell: on Linux the shell rounds every advance to a whole pixel. Chrome on Linux
+  also measures 1000-unit fonts ~1/800 px short per glyph at the test's size, so the test's
+  lines stay short (24 characters) to keep that drift inside the tolerance.
 - **Observed, not derived:** Chrome does not kern across ZWNJ (HarfBuzz alone would). It is
   modelled in the shaper and pinned by the test; do not "fix" it towards HarfBuzz.
 - **DOM, not canvas:** the target is Chrome's DOM text. Chrome's canvas 2D shapes word by word,

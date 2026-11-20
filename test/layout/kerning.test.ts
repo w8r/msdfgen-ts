@@ -23,7 +23,8 @@
  * (2) Offline: a handful of Chrome-measured values for the behaviours (1)
  *     covers, runnable without a browser.
  *
- * Browser: Playwright's Chromium, else the installed Google Chrome; without
+ * Browser: Playwright's full Chromium (not its headless shell, which rounds
+ * advances to whole pixels on Linux), else the installed Google Chrome; without
  * either, (1) is skipped with a loud warning (and fails under CI).
  */
 import { describe, expect, it } from "vitest";
@@ -44,8 +45,14 @@ const FONTS = [
 ];
 /** Font units; Chrome positions are multiples of 1/64. */
 const POSITION_TOLERANCE = 1 / 16;
-/** Characters per DOM line (consecutive lines overlap by one, so no pair is lost). */
-const LINE_LENGTH = 96;
+/**
+ * Characters per DOM line (consecutive lines overlap by one, so no pair is lost).
+ * Short, because Chrome on Linux measures each advance of a 1000-unit font
+ * ~1/800 px short at this size (Skia's FreeType metrics, a fixed-point scale;
+ * macOS and 2048-unit fonts are exact): over 24 characters that stays under
+ * 0.05 px, inside POSITION_TOLERANCE, where 96 drifted 5/64 px past it.
+ */
+const LINE_LENGTH = 24;
 
 const RANGES: [number, number][] = [
   [0x20, 0x7e],
@@ -86,6 +93,8 @@ const EXTRA = [
   "A‌V T‌o",
   "T A A V",
   "x x V A T A V A 1 T Y A Y A Y A",
+  "12\u202f345,67", // U+202F alone sets the run's script (Mongolian)
+  "\u00ab\u202fTo\u202f\u00bb ,\u202f.",
 ];
 
 function loadFont(file: string): { font: Font; bytes: Buffer } {
@@ -182,10 +191,17 @@ async function chromeCarets(
   return result;
 }
 
-/** Playwright's Chromium, else Google Chrome, else null (loud; fails under CI). */
+/**
+ * Playwright's full Chromium, else Google Chrome, else null (loud; fails under CI).
+ *
+ * Not `chromium.launch()`'s default headless shell: on Linux it lays text out
+ * without subpixel positioning, rounding every glyph advance to a whole pixel
+ * (Roboto's U+205F is 4/18 em = 455.11 units; the shell says 455, full
+ * Chromium 455.125). That is the screen's pixel grid, not the font's layout.
+ */
 async function launchOrSkip(): Promise<Browser | null> {
   try {
-    return await chromium.launch();
+    return await chromium.launch({ channel: "chromium" });
   } catch {
     try {
       return await chromium.launch({ channel: "chrome" });
@@ -205,6 +221,8 @@ describe("kerning: parity with Chrome (live)", () => {
   it("every corpus pair, mixed scripts and edge cases land where Chrome puts them", async () => {
     const browser = await launchOrSkip();
     if (!browser) return;
+    // Every font is checked before failing, so one run reports all of them.
+    const failures: string[] = [];
     try {
       for (const file of FONTS) {
         const { font, bytes } = loadFont(file);
@@ -225,8 +243,8 @@ describe("kerning: parity with Chrome (live)", () => {
           if (ok) texts.push(text);
         }
         const chrome = await chromeCarets(browser, bytes, upem, texts);
-        const failures: string[] = [];
         let compared = 0;
+        let differ = 0;
         texts.forEach((text, t) => {
           const chars = [...text];
           const ours = ourCarets(font, text);
@@ -237,7 +255,7 @@ describe("kerning: parity with Chrome (live)", () => {
             if (i < chars.length && /\p{Grapheme_Extend}/u.test(chars[i]!)) continue;
             compared++;
             const d = ours[i]! - theirs[i]!;
-            if (Math.abs(d) > POSITION_TOLERANCE && failures.length < 10) {
+            if (Math.abs(d) > POSITION_TOLERANCE && differ++ < 10) {
               const at = JSON.stringify(chars.slice(Math.max(0, i - 2), i + 1).join(""));
               failures.push(
                 `${file} line ${t} char ${i} ${at}: ours ${ours[i]} vs Chrome ${theirs[i]}`,
@@ -245,12 +263,13 @@ describe("kerning: parity with Chrome (live)", () => {
             }
           }
         });
-        expect(failures, `${failures.length} positions differ from Chrome`).toEqual([]);
-        expect(compared).toBeGreaterThan(sym.length * sym.length);
+        if (differ > 10) failures.push(`${file}: ${differ - 10} more positions differ`);
+        expect(compared, file).toBeGreaterThan(sym.length * sym.length);
       }
     } finally {
       await browser.close();
     }
+    expect(failures, "positions differ from Chrome").toEqual([]);
   }, 180_000);
 });
 
@@ -285,6 +304,17 @@ describe("kerning: Chrome-measured behaviours (offline)", () => {
     const { glyphs, widthEm } = atlas.layout("AV");
     expect(glyphs[1]!.penX * 2048).toBeCloseTo(1542 - 102, 9);
     expect(widthEm * 2048).toBeCloseTo(2925, 9);
+  });
+
+  it("skips the legacy kern table where HarfBuzz's run shaper does (Arvo)", () => {
+    // U+202F's Script_Extensions are Latin, Mongolian, Phags-pa: with no letter
+    // to settle it the run is Mongolian, which HarfBuzz shapes with the Universal
+    // Shaping Engine (Arvo has no GSUB script sending it back to the default
+    // shaper), and that shaper never applies `kern` (comma + U+202F is −236 there).
+    expect(ourCarets(arvo, ",\u202f")).toEqual([0, 569, 793]);
+    expect(ourCarets(arvo, "x,\u202f")).toEqual([0, 1090, 1541, 1647]); // Latin run: kerned
+    // PT Serif's GSUB lists `latn`, so the same run keeps the default shaper.
+    expect(ourCarets(ptSerif, ",\u202f")).toEqual([0, 243, 364.5]);
   });
 
   it("never kerns across a script change; Common characters join their neighbours' run", () => {

@@ -8,7 +8,9 @@ import { parseGlyph, parseGlyphRaw, type RawGlyph } from "./tables/glyf";
 import { KernTable } from "./tables/kern";
 import { Gdef } from "./tables/gdef";
 import { Gpos } from "./tables/gpos";
+import { scriptListTags } from "./tables/otl";
 import { pairKerning } from "./shaper";
+import { SCRIPT_COUNT } from "./script";
 import { type TableMap, parseSfnt } from "./sfnt";
 import { type Shape } from "../shape/shape";
 
@@ -59,6 +61,10 @@ export class Font {
   private _gdef: Gdef | null;
   private _gpos: Gpos | null;
   private _kern: KernTable | null;
+  /** GSUB's script tags (HarfBuzz picks its shaper from them), or null without GSUB. */
+  private _gsubScripts: Uint32Array | null;
+  /** HarfBuzz shaper flags per ICU script code, -1 = not chosen yet (see shaper.ts). */
+  private _shapers: Int8Array | null;
   /** See {@link Font._advances}. */
   private _advanceTable: Uint16Array | null;
   /** Memoized {@link Font.kerning} results, keyed by glyph pair. */
@@ -106,6 +112,8 @@ export class Font {
     this._gdef = null;
     this._gpos = null;
     this._kern = null;
+    this._gsubScripts = null;
+    this._shapers = null;
     this._advanceTable = null;
     this._pairCache = new Map();
 
@@ -192,7 +200,7 @@ export class Font {
     return k;
   }
 
-  /** Parses GDEF, GPOS and kern on first use (keeps `new Font` cheap). */
+  /** Parses GDEF, GPOS, kern and GSUB's script list on first use (keeps `new Font` cheap). */
   private _loadLayout(): void {
     if (this._layoutLoaded) return;
     this._layoutLoaded = true;
@@ -200,9 +208,24 @@ export class Font {
     const gdef = this._tables.get("GDEF");
     const gpos = this._tables.get("GPOS");
     const kern = this._tables.get("kern");
+    const gsub = this._tables.get("GSUB");
     if (gdef) this._gdef = new Gdef(buffer, gdef.offset, this.numGlyphs);
     if (gpos) this._gpos = new Gpos(buffer, gpos.offset, this._gdef);
     if (kern) this._kern = new KernTable(buffer, kern.offset);
+    if (gsub) this._gsubScripts = scriptListTags(new DataView(buffer), gsub.offset);
+  }
+
+  /** @internal GSUB's script tags, or null when the font has no GSUB. */
+  _gsubScriptTags(): Uint32Array | null {
+    this._loadLayout();
+    return this._gsubScripts;
+  }
+
+  /** @internal Per-script shaper flags cache (see shaper.ts: shaperOf), -1 = unset. */
+  _shaperCache(): Int8Array {
+    let c = this._shapers;
+    if (!c) c = this._shapers = new Int8Array(SCRIPT_COUNT).fill(-1);
+    return c;
   }
 
   /** @internal Advance widths by glyph id (dense copy of `hmtx` for layout). */

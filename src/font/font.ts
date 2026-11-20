@@ -5,9 +5,20 @@ import { type HMetric, parseHmtx } from "./tables/hmtx";
 import { parseLoca } from "./tables/loca";
 import { parseMaxp } from "./tables/maxp";
 import { parseGlyph, parseGlyphRaw, type RawGlyph } from "./tables/glyf";
-import { type KernMap, parseKern } from "./tables/kern";
+import { KernTable } from "./tables/kern";
+import { Gdef } from "./tables/gdef";
+import { Gpos } from "./tables/gpos";
+import { scriptListTags } from "./tables/otl";
+import { pairKerning } from "./shaper";
+import { SCRIPT_COUNT } from "./script";
 import { type TableMap, parseSfnt } from "./sfnt";
 import { type Shape } from "../shape/shape";
+
+/** Codepoints below this get their cmap lookup cached (Latin, Greek, Cyrillic, …). */
+const CMAP_CACHE = 0x800;
+
+/** Entries {@link Font.kerning} memoizes before starting over. */
+const PAIR_CACHE = 1 << 16;
 
 /** Font-level metrics exposed from `head` and `hhea`. */
 export interface FontMetrics {
@@ -43,8 +54,21 @@ export class Font {
   private _loca: number[];
   /** @type {CmapLookup} */
   private _cmap: CmapLookup;
-  /** @type {KernMap} */
-  private _kern: KernMap;
+  /** Glyph ids of codepoints below {@link CMAP_CACHE}, +1 (0 = not looked up yet). */
+  private _cmapCache: Uint16Array | null;
+  /** Layout tables (GDEF, GPOS, kern), parsed on first use: see {@link Font._loadLayout}. */
+  private _layoutLoaded: boolean;
+  private _gdef: Gdef | null;
+  private _gpos: Gpos | null;
+  private _kern: KernTable | null;
+  /** GSUB's script tags (HarfBuzz picks its shaper from them), or null without GSUB. */
+  private _gsubScripts: Uint32Array | null;
+  /** HarfBuzz shaper flags per ICU script code, -1 = not chosen yet (see shaper.ts). */
+  private _shapers: Int8Array | null;
+  /** See {@link Font._advances}. */
+  private _advanceTable: Uint16Array | null;
+  /** Memoized {@link Font.kerning} results, keyed by glyph pair. */
+  private _pairCache: Map<number, number>;
 
   /** Font-level metrics (unitsPerEm, ascender, descender, lineGap). */
   readonly metrics: FontMetrics;
@@ -83,9 +107,15 @@ export class Font {
     this._loca = parseLoca(buffer, locaRec.offset, maxp.numGlyphs, this._head.indexToLocFormat);
     this._cmap = parseCmap(buffer, cmapRec.offset);
 
-    // kern is optional
-    const kernRec = this._tables.get("kern");
-    this._kern = kernRec ? parseKern(buffer, kernRec.offset) : () => 0;
+    this._cmapCache = null;
+    this._layoutLoaded = false;
+    this._gdef = null;
+    this._gpos = null;
+    this._kern = null;
+    this._gsubScripts = null;
+    this._shapers = null;
+    this._advanceTable = null;
+    this._pairCache = new Map();
 
     this.metrics = {
       unitsPerEm: this._head.unitsPerEm,
@@ -102,7 +132,12 @@ export class Font {
    * @param codepoint Unicode scalar value.
    */
   glyphId(codepoint: number): number {
-    return this._cmap(codepoint);
+    if (codepoint >= CMAP_CACHE || codepoint < 0) return this._cmap(codepoint);
+    let cache = this._cmapCache;
+    if (!cache) cache = this._cmapCache = new Uint16Array(CMAP_CACHE);
+    let g = cache[codepoint]!;
+    if (!g) cache[codepoint] = g = this._cmap(codepoint) + 1;
+    return g - 1;
   }
 
   /**
@@ -137,14 +172,90 @@ export class Font {
   }
 
   /**
-   * Kerning adjustment between two glyphs in font units.
-   * Returns 0 if the font has no kern table or the pair is not listed.
+   * Kerning between two glyphs in font units: how much positioning the pair
+   * on its own changes its total advance (GPOS `kern` and other default
+   * positioning features, else the legacy `kern` table, as Chrome applies
+   * them). Pairwise only — {@link Atlas.layout} kerns whole runs, which also
+   * accounts for script runs and contextual kerning.
    *
    * @param leftGlyphId Left glyph index.
    * @param rightGlyphId Right glyph index.
+   * @returns Advance adjustment in font units, 0 for an unkerned pair.
    */
   kerning(leftGlyphId: number, rightGlyphId: number): number {
-    return this._kern(leftGlyphId, rightGlyphId);
+    // A small-integer key (fast Map lookups) for ids below 2^15, the usual case.
+    const key =
+      leftGlyphId < 0x8000 && rightGlyphId < 0x8000
+        ? (leftGlyphId << 15) | rightGlyphId
+        : -1 - (leftGlyphId * 0x10000 + rightGlyphId);
+    const k = this._pairCache.get(key);
+    return k !== undefined ? k : this._kerningMiss(key, leftGlyphId, rightGlyphId);
+  }
+
+  /** {@link Font.kerning}'s cache miss, kept out of line so the hit path stays small. */
+  private _kerningMiss(key: number, left: number, right: number): number {
+    const k = pairKerning(this, left, right);
+    if (this._pairCache.size >= PAIR_CACHE) this._pairCache.clear();
+    this._pairCache.set(key, k);
+    return k;
+  }
+
+  /** Parses GDEF, GPOS, kern and GSUB's script list on first use (keeps `new Font` cheap). */
+  private _loadLayout(): void {
+    if (this._layoutLoaded) return;
+    this._layoutLoaded = true;
+    const buffer = this._buffer;
+    const gdef = this._tables.get("GDEF");
+    const gpos = this._tables.get("GPOS");
+    const kern = this._tables.get("kern");
+    const gsub = this._tables.get("GSUB");
+    if (gdef) this._gdef = new Gdef(buffer, gdef.offset, this.numGlyphs);
+    if (gpos) this._gpos = new Gpos(buffer, gpos.offset, this._gdef);
+    if (kern) this._kern = new KernTable(buffer, kern.offset);
+    if (gsub) this._gsubScripts = scriptListTags(new DataView(buffer), gsub.offset);
+  }
+
+  /** @internal GSUB's script tags, or null when the font has no GSUB. */
+  _gsubScriptTags(): Uint32Array | null {
+    this._loadLayout();
+    return this._gsubScripts;
+  }
+
+  /** @internal Per-script shaper flags cache (see shaper.ts: shaperOf), -1 = unset. */
+  _shaperCache(): Int8Array {
+    let c = this._shapers;
+    if (!c) c = this._shapers = new Int8Array(SCRIPT_COUNT).fill(-1);
+    return c;
+  }
+
+  /** @internal Advance widths by glyph id (dense copy of `hmtx` for layout). */
+  _advances(): Uint16Array {
+    let a = this._advanceTable;
+    if (!a) {
+      const n = this._hmtx.length;
+      a = new Uint16Array(n);
+      for (let g = 0; g < n; g++) a[g] = this._hmtx[g]!.advanceWidth;
+      this._advanceTable = a;
+    }
+    return a;
+  }
+
+  /** @internal GDEF glyph props per glyph, or null (classes are then synthesized). */
+  _glyphProps(): Uint16Array | null {
+    this._loadLayout();
+    return this._gdef ? this._gdef._props : null;
+  }
+
+  /** @internal The GPOS table, or null. */
+  _gposTable(): Gpos | null {
+    this._loadLayout();
+    return this._gpos;
+  }
+
+  /** @internal The legacy kern table, or null. */
+  _kernTable(): KernTable | null {
+    this._loadLayout();
+    return this._kern;
   }
 
   /**

@@ -21,7 +21,8 @@ Target: < 50 KB minified, zero runtime dependencies, no WASM.
 
 - CFF/OTF (cubic charstrings) — v2
 - Variable fonts (`gvar`, `fvar`)
-- Text shaping: ligatures, complex scripts, GSUB. Kerning = `kern` table only (format 0)
+- Text shaping beyond kerning: ligatures / GSUB, complex scripts, mark attachment (GPOS
+  types 3-6), language systems. Kerning itself is in scope and must match Chrome (see "Kerning")
 - PNG output
 - SVG beyond fills: strokes, masks, filters, blend modes, `<use>` outside `<clipPath>`,
   `<text>`, nested `<svg>`, CSS beyond `.class` selectors, gradient spread/focal points. No
@@ -111,7 +112,14 @@ src/
       cmap.ts          # formats 4 and 12 only
       head.ts  maxp.ts  hhea.ts  hmtx.ts  loca.ts
       glyf.ts          # simple + composite glyphs -> Shape (quadratic segments)
-      kern.ts          # format 0 horizontal kerning
+      kern.ts          # legacy kern table (format 0), applied HarfBuzz-style
+      otl.ts           # Coverage / ClassDef, decoded to dense per-glyph arrays
+      gdef.ts          # glyph classes + mark glyph sets (GPOS lookup flags)
+      gpos.ts          # GPOS: script/feature/lookup selection, SinglePos, PairPos,
+                       # (chained) context positioning — HarfBuzz port
+    script.ts          # Blink's ScriptRunIterator: script runs (kerning never crosses one)
+    shaper.ts          # text -> positioned glyphs (shapeText), HarfBuzz default shaper minus GSUB
+    glyph-run.ts       # the shared glyph buffer (hb_buffer_t as typed arrays)
     font.ts            # public Font class: glyphId(codepoint), shape(glyphId), metrics
   svg/
     svg.ts             # parseSvg -> Shape; parseSvgLayers -> per-element shape + fill/gradient
@@ -137,6 +145,7 @@ test/
   parser/              # font parsing tests (metrics vs opentype.js, devDependency only)
   svg/                 # SVG parser tests, Noto emoji regressions (svg/noto/), live reference
                        # diff for cubic / even-odd shapes
+  layout/              # kerning parity with Chrome (live, every corpus pair) + offline values
   diff.test.ts         # golden bitmap comparison
   e2e.test.ts          # SSIM vs OffscreenCanvas rasterization
 tools/
@@ -305,6 +314,41 @@ code in `msdf/` or the atlas.
   the CUBIC paths. The reference build is core-only and can't read SVG, so the test serializes
   the parsed shape to shapedesc and diffs `msdf -shapedesc` against `generateShapeMSDF` with
   `union = false` live (same `1e-4` rule, same CI behavior as gate:m2b/m3 for a missing binary).
+
+## Kerning
+
+`Atlas.layout` positions text exactly where Chrome does: **Chrome is the oracle for layout**
+(as the C++ binary is for bitmaps). `test/layout/kerning.test.ts` lays out every ordered pair
+of each corpus font's characters in Chrome's DOM and requires every caret position to match
+ours to 1/16 font unit (Chrome's layout unit is 1/64 px; the test uses 1 px = 1 font unit).
+
+- **What is ported:** Blink's `ScriptRunIterator` (`src/font/script.ts`: script runs, paired
+  brackets, Script_Extensions; script data from the JS engine's `\p{Script=…}` regexes, none
+  bundled) and, per run, HarfBuzz's shaping restricted to positioning
+  (`src/font/shaper.ts`): one glyph per codepoint, `hmtx` advances, GPOS default features
+  (`kern`, `dist`, …: lookup types 1, 2, 7, 8, 9) or, when the script has no GPOS `kern`, the
+  legacy `kern` table (half of each value on each glyph, as HarfBuzz does), mark zeroing,
+  default ignorables hidden and skipped, HarfBuzz's fallback for missing space characters.
+  HarfBuzz picks a shaper per run (`hb_ot_shaper_categorize`, from the script and the GSUB
+  script the font settles on); only its two positioning fields are ported: when marks are
+  zeroed, and whether the legacy `kern` table applies at all (the Universal Shaping Engine
+  never applies it — e.g. a run of digits and U+202F resolves to Mongolian).
+- **Test browser:** Playwright's full Chromium (`channel: "chromium"`), never the default
+  headless shell: on Linux the shell rounds every advance to a whole pixel. Chrome on Linux
+  also measures 1000-unit fonts ~1/800 px short per glyph at the test's size, so the test's
+  lines stay short (24 characters) to keep that drift inside the tolerance.
+- **Observed, not derived:** Chrome does not kern across ZWNJ (HarfBuzz alone would). It is
+  modelled in the shaper and pinned by the test; do not "fix" it towards HarfBuzz.
+- **DOM, not canvas:** the target is Chrome's DOM text. Chrome's canvas 2D shapes word by word,
+  so `fillText`/`measureText` never kern across a space (and do kern across ZWNJ). Never use
+  canvas text as the kerning reference.
+- **Not ported (by design for now):** GSUB (ligatures, `locl`), mark/cursive attachment,
+  language systems other than the script default (Chrome's `lang` can select `locl` / per-language
+  lookups: the test pins `lang="en"`), device tables (zero at the default instance we render),
+  Blink's font fallback (characters missing from the font draw `.notdef`).
+- **Perf:** layout is a hot path too: no per-glyph allocation beyond the returned objects;
+  coverage / class tables decoded once to dense arrays; plain pair-kerning lookups take
+  `_kernLookup`'s inlined loop. `tools/bench-layout.ts` measures it; keep it no slower.
 
 ## Code style
 

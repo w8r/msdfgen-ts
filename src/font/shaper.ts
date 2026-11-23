@@ -31,7 +31,7 @@ export function isDefaultIgnorable(cp: number): boolean {
       case 0x17:
         return cp >= 0x17b4 && cp <= 0x17b5;
       case 0x18:
-        return cp >= 0x180b && cp <= 0x180e;
+        return cp >= 0x180b && cp <= 0x180f;
       case 0x20:
         return (
           (cp >= 0x200b && cp <= 0x200f) ||

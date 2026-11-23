@@ -33,7 +33,8 @@ import { resolve } from "path";
 import { chromium, type Browser } from "playwright";
 import { Atlas, Font } from "../../src/index";
 import { shapeText } from "../../src/font/shaper";
-import { run } from "../../src/font/glyph-run";
+import { reserveRun, run } from "../../src/font/glyph-run";
+import { KernTable } from "../../src/font/tables/kern";
 
 const FONTS_DIR = resolve(__dirname, "../fonts");
 const FONTS = [
@@ -329,6 +330,41 @@ describe("kerning: Chrome-measured behaviours (offline)", () => {
     expect(ourCarets(roboto, "A­V")).toEqual([0, 1249, 1249, 2553]);
     expect(ourCarets(roboto, "A​V")).toEqual([0, 1249, 1249, 2553]);
     expect(ourCarets(roboto, "A‌V")).toEqual([0, 1336, 1336, 2640]);
+    // U+180F is Mongolian: hidden, but it splits the script run, so no kern either.
+    expect(ourCarets(roboto, "A\u180fV")).toEqual([0, 1336, 1336, 2640]);
+  });
+
+  it("chains cross-stream kern-table offsets down the run and honours the reset marker", () => {
+    // No corpus font has a cross-stream subtable: one OT format-0 subtable,
+    // pairs (1,2) = 20 and (3,4) = -0x8000 (reset), coverage horizontal|cross.
+    const pairs = [
+      [1, 2, 20],
+      [3, 4, -0x8000],
+    ];
+    const dv = new DataView(new ArrayBuffer(4 + 14 + 6 * pairs.length));
+    dv.setUint16(2, 1); // nTables
+    dv.setUint16(6, 14 + 6 * pairs.length); // subtable length
+    dv.setUint8(9, 0x05); // format 0, coverage horizontal | crossStream
+    dv.setUint16(10, pairs.length);
+    pairs.forEach(([l, r, v], k) => {
+      dv.setUint16(18 + 6 * k, l!);
+      dv.setUint16(20 + 6 * k, r!);
+      dv.setInt16(22 + 6 * k, v!);
+    });
+    const kern = new KernTable(dv.buffer, 0);
+    const yOffsets = (gids: number[]): number[] => {
+      reserveRun(gids.length);
+      gids.forEach((g, i) => {
+        run._gid[i] = g;
+        run._gp[i] = 0;
+        run._xa[i] = run._xo[i] = run._yo[i] = 0;
+      });
+      kern._apply(0, gids.length);
+      return Array.from(run._yo.subarray(0, gids.length));
+    };
+    expect(yOffsets([1, 2, 5])).toEqual([0, 20, 20]); // the shift carries on
+    expect(yOffsets([1, 2, 3, 4, 5])).toEqual([0, 20, 20, 0, 0]); // reset cuts the chain
+    expect(yOffsets([3, 4, 5])).toEqual([0, 0, 0]); // a reset alone shifts nothing
   });
 
   it("draws spaces the font lacks as its space glyph, HarfBuzz widths, kerned as a space", () => {

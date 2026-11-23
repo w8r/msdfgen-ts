@@ -1,5 +1,8 @@
 import { nextGlyph, PROP_MARK, run } from "../glyph-run";
 
+/** Per glyph: 1 where a cross-stream reset cut the attachment chain (module scratch, grown once). */
+let _cut = new Uint8Array(64);
+
 /**
  * The legacy `kern` table, applied the way HarfBuzz does when a font has no
  * GPOS kerning for the run's script: every format-0 horizontal subtable in
@@ -98,8 +101,16 @@ export class KernTable {
     const xa = run._xa;
     const xo = run._xo;
     const yo = run._yo;
+    let chained = false; // KerxTable::apply: seenCrossStream
+    let attached = false; // HB_BUFFER_SCRATCH_FLAG_HAS_GPOS_ATTACHMENT
     for (let s = 0; s < this._pairs.length; s++) {
       const cross = this._cross[s]!;
+      if (cross && !chained) {
+        // The first cross-stream subtable chains every glyph to the one before it.
+        chained = true;
+        if (_cut.length < end) _cut = new Uint8Array(end * 2);
+        _cut.fill(0, start, end);
+      }
       for (let i = start; i < end;) {
         const j = nextGlyph(i, end, PROP_MARK, null); // LookupFlag::IgnoreMarks
         if (j < 0) {
@@ -109,7 +120,14 @@ export class KernTable {
         const kern = this._get(s, gid[i]!, gid[j]!);
         if (kern) {
           if (cross) {
-            yo[j] = kern;
+            if (kern === -0x8000) {
+              // hb-kern.hh: the reset marker detaches the glyph from the chain.
+              _cut[j] = 1;
+              yo[j] = 0;
+            } else {
+              yo[j] = kern;
+              attached = true;
+            }
           } else {
             const half = kern / 2;
             xa[i] = xa[i]! + half;
@@ -120,5 +138,9 @@ export class KernTable {
         i = j;
       }
     }
+    // port of GPOS.hh: position_finish_offsets / propagate_attachment_offsets
+    // (cursive chain, forward direction): each chained glyph adds the y offset
+    // of the glyph before it, so a cross-stream shift carries on down the run.
+    if (attached) for (let i = start + 1; i < end; i++) if (!_cut[i]) yo[i] = yo[i]! + yo[i - 1]!;
   }
 }

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.3.0
 
 - **Kerning matches Chrome:** `Atlas.layout()` and `Font.kerning()` now read GPOS (pair, single and contextual positioning, with GDEF lookup flags), not only the legacy `kern` table, so fonts such as Roboto and Noto Sans are kerned. Text is split into script runs the way Chrome splits it, and kerning never crosses a run. Default-ignorable characters are hidden, and space characters a font lacks fall back to its space glyph, as in HarfBuzz. A test lays out every character pair of the test fonts in Chrome and checks that every glyph lands in the same place.
 - **Faster layout:** `Atlas.layout()` is 14–45% faster on the test fonts despite the extra work, and fonts with a large `kern` table load about 90× faster (the table is no longer copied into a map).

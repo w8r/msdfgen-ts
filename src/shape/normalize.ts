@@ -539,18 +539,71 @@ export function orientContours(contours: Contour[]): void {
     hits.length = 0;
   }
   // Reverse contours that have the opposite orientation.
-  // port of core/Contour.cpp: Contour::reverse + EdgeSegment::reverse
   for (let i = 0; i < contours.length; i++) {
-    if (orientations[i]! >= 0) continue;
-    const contour = contours[i]!.reverse();
-    for (let e = 0; e < contour.length; e++) {
-      const s = contour[e]!;
-      contour[e] =
-        s.type === LINEAR
-          ? new EdgeSegment(LINEAR, s.p1x, s.p1y, s.p0x, s.p0y, 0, 0, 0, 0)
-          : s.type === QUADRATIC
-            ? new EdgeSegment(QUADRATIC, s.p2x, s.p2y, s.p1x, s.p1y, s.p0x, s.p0y, 0, 0)
-            : new EdgeSegment(CUBIC, s.p3x, s.p3y, s.p2x, s.p2y, s.p1x, s.p1y, s.p0x, s.p0y);
+    if (orientations[i]! < 0) reverseContour(contours[i]!);
+  }
+}
+
+/**
+ * Reverses a contour in place: the same outline, wound the other way.
+ * port of core/Contour.cpp: Contour::reverse + EdgeSegment::reverse
+ *
+ * @param contour The contour to reverse (mutated in place).
+ */
+function reverseContour(contour: Contour): void {
+  contour.reverse();
+  for (let e = 0; e < contour.length; e++) {
+    const s = contour[e]!;
+    contour[e] =
+      s.type === LINEAR
+        ? new EdgeSegment(LINEAR, s.p1x, s.p1y, s.p0x, s.p0y, 0, 0, 0, 0)
+        : s.type === QUADRATIC
+          ? new EdgeSegment(QUADRATIC, s.p2x, s.p2y, s.p1x, s.p1y, s.p0x, s.p0y, 0, 0)
+          : new EdgeSegment(CUBIC, s.p3x, s.p3y, s.p2x, s.p2y, s.p1x, s.p1y, s.p0x, s.p0y);
+  }
+}
+
+/** Scratch point for `contourArea`. */
+const _caPt: number[] = [0, 0];
+
+/**
+ * Signed area of a closed contour, positive when it runs counter-clockwise (y-up). Curves are
+ * sampled four times per segment: enough for the sign and the rough size, which is all
+ * `alignWinding` uses.
+ */
+function contourArea(contour: Contour): number {
+  let area = 0;
+  let x0 = contour[0]!.p0x;
+  let y0 = contour[0]!.p0y;
+  for (const seg of contour) {
+    for (let k = 1; k <= 4; k++) {
+      seg.point(k / 4, _caPt);
+      const x1 = _caPt[0]!;
+      const y1 = _caPt[1]!;
+      area += x0 * y1 - x1 * y0;
+      x0 = x1;
+      y0 = y1;
     }
   }
+  return area / 2;
+}
+
+/**
+ * Winds the outer contours of one nonzero fill clockwise (y-up), as TrueType outlines and
+ * `orientContours` leave them, by reversing all of `contours` when its largest contour runs
+ * counter-clockwise. Holes keep their direction against the outer contours, so the fill does
+ * not change. What changes is that fills drawn in opposite directions no longer cancel out
+ * where they overlap once their contours are concatenated into one nonzero shape. The largest
+ * contour decides: a path that winds its own outer contours in both directions stays as it is.
+ *
+ * @param contours Contours of one nonzero fill (mutated in place).
+ */
+export function alignWinding(contours: Contour[]): void {
+  let largest = 0;
+  for (const contour of contours) {
+    if (contour.length === 0) continue;
+    const area = contourArea(contour);
+    if (Math.abs(area) > Math.abs(largest)) largest = area;
+  }
+  if (largest > 0) contours.forEach(reverseContour);
 }

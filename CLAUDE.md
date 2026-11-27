@@ -127,7 +127,8 @@ src/
     segments.ts        # EdgeSegment: single class, type tag LINEAR|QUADRATIC|CUBIC,
                        # flat numeric fields p0x..p3x etc. HOT.
     contour.ts  shape.ts
-    normalize.ts       # em-normalization, Shape::normalize, orientContours (even-odd -> nonzero)
+    normalize.ts       # em-normalization, Shape::normalize, orientContours (even-odd -> nonzero),
+                       # alignWinding (nonzero fills wound the same way, for parseSvg's merge)
     union.ts           # boolean ops on nonzero fills: unionShape (overlaps, generateShapeMSDF),
                        # clipShape (clip paths + viewport), subtractShape (group opacity)
   msdf/
@@ -282,8 +283,10 @@ code in `msdf/` or the atlas.
   the basic shapes, which are converted to path data first. One tag walker keeps each open
   element's inherited state: `transform` composed through `<g>`, plus `fill`, `fill-rule`,
   `fill-opacity` and `opacity`, read in CSS precedence (inline `style` > `.class` rules from
-  `<style>` > attribute). `parseSvg` unions everything into one nonzero shape (concatenated: overlapping elements
-  wound in opposite directions cancel, a rare known gap, see its comment); `parseSvgLayers`
+  `<style>` > attribute). `parseSvg` unions everything into one nonzero shape (concatenated, each
+  element wound the same way first by `alignWinding`, its largest contour deciding, so overlapping
+  elements add up instead of cancelling; a path that mixes directions among its own outer contours
+  is the remaining rare gap); `parseSvgLayers`
   keeps one shape per element plus its paint (CSS colour string or linear/radial gradient,
   resolved to one shape-space affine matrix + stops; a gradient inherits what it doesn't set
   through its `href` chain). `fill="none"` elements and the contents of

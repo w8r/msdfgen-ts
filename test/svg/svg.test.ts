@@ -119,6 +119,21 @@ describe("parseSvg", () => {
     );
     expect(Math.sign(plain[0]!)).toBe(Math.sign(plain[1]!));
   });
+
+  it("unions overlapping paths wound in opposite directions instead of cancelling them out", () => {
+    // Two squares drawn against each other (clockwise, then counter-clockwise on screen),
+    // overlapping in x 10..14, y 6..14 (SVG units).
+    const { shape } = parseSvg(
+      `<svg viewBox="0 0 24 24"><path d="M2 2h12v12h-12z"/><path d="M22 6h-12v12h12z"/></svg>`,
+    );
+    const n = 24;
+    const w = windings(shape, n); // one cell per SVG unit, rows y-up
+    const at = (x: number, y: number): number => w[(n - 1 - y) * n + x]!;
+    expect(at(12, 10)).not.toBe(0); // inside both squares
+    expect(at(5, 5)).not.toBe(0); // inside the first only
+    expect(at(18, 15)).not.toBe(0); // inside the second only
+    expect(at(20, 3)).toBe(0); // inside neither
+  });
 });
 
 describe("parseSvgLayers", () => {

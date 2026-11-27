@@ -26,7 +26,7 @@
 import { EdgeSegment, LINEAR, QUADRATIC, CUBIC, type SegmentType } from "../shape/segments";
 import { type Contour } from "../shape/contour";
 import { type Shape } from "../shape/shape";
-import { emNormalizeShape, orientContours } from "../shape/normalize";
+import { alignWinding, emNormalizeShape, orientContours } from "../shape/normalize";
 import { clipShape, subtractShape } from "../shape/union";
 import { shapeBounds } from "../msdf/shape-msdf";
 
@@ -99,14 +99,18 @@ function _len(v: string | undefined, ref: number): number {
  *   the viewBox width (shape units; height is 1) for placing the icon.
  */
 export function parseSvg(svg: string): { shape: Shape; width: number } {
-  // Known gap (rare): the elements' contours are concatenated into one nonzero fill, so two
-  // overlapping elements wound in opposite directions cancel where they overlap (a hole
-  // where both are drawn). Unioning each element's fill separately fixes that, but layers
-  // usually share curved edges (a clipped shape and its clip outline, repeated corners),
-  // which the boolean ops in shape/union.ts can't resolve: they spend their subdivision
-  // budget (2.5-6.6 ms per Noto emoji), give up, and return this same concatenation.
+  // The elements' contours are concatenated into one nonzero fill, which only unions
+  // overlapping elements if they wind the same way: opposite windings cancel where they
+  // overlap (a hole where both are drawn). So each element is wound the same way first.
+  // Unioning each element's fill separately would be exact too, but layers usually share
+  // curved edges (a clipped shape and its clip outline, repeated corners), which the
+  // boolean ops in shape/union.ts can't resolve: they spend their subdivision budget
+  // (2.5-6.6 ms per Noto emoji), give up, and return this same concatenation.
   const { layers, width } = parseSvgLayers(svg);
-  const contours = layers.flatMap((l) => l.shape.contours);
+  const contours = layers.flatMap((l) => {
+    alignWinding(l.shape.contours);
+    return l.shape.contours;
+  });
   return { shape: { contours, inverseYAxis: false }, width };
 }
 

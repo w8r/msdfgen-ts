@@ -539,18 +539,91 @@ export function orientContours(contours: Contour[]): void {
     hits.length = 0;
   }
   // Reverse contours that have the opposite orientation.
-  // port of core/Contour.cpp: Contour::reverse + EdgeSegment::reverse
   for (let i = 0; i < contours.length; i++) {
-    if (orientations[i]! >= 0) continue;
-    const contour = contours[i]!.reverse();
-    for (let e = 0; e < contour.length; e++) {
-      const s = contour[e]!;
-      contour[e] =
-        s.type === LINEAR
-          ? new EdgeSegment(LINEAR, s.p1x, s.p1y, s.p0x, s.p0y, 0, 0, 0, 0)
-          : s.type === QUADRATIC
-            ? new EdgeSegment(QUADRATIC, s.p2x, s.p2y, s.p1x, s.p1y, s.p0x, s.p0y, 0, 0)
-            : new EdgeSegment(CUBIC, s.p3x, s.p3y, s.p2x, s.p2y, s.p1x, s.p1y, s.p0x, s.p0y);
+    if (orientations[i]! < 0) reverseContour(contours[i]!);
+  }
+}
+
+/**
+ * Reverses a contour in place: the same outline, wound the other way.
+ * port of core/Contour.cpp: Contour::reverse + EdgeSegment::reverse
+ *
+ * @param contour The contour to reverse (mutated in place).
+ */
+function reverseContour(contour: Contour): void {
+  contour.reverse();
+  for (let e = 0; e < contour.length; e++) {
+    const s = contour[e]!;
+    contour[e] =
+      s.type === LINEAR
+        ? new EdgeSegment(LINEAR, s.p1x, s.p1y, s.p0x, s.p0y, 0, 0, 0, 0)
+        : s.type === QUADRATIC
+          ? new EdgeSegment(QUADRATIC, s.p2x, s.p2y, s.p1x, s.p1y, s.p0x, s.p0y, 0, 0)
+          : new EdgeSegment(CUBIC, s.p3x, s.p3y, s.p2x, s.p2y, s.p1x, s.p1y, s.p0x, s.p0y);
+  }
+}
+
+/** Scratch point for `contourArea`. */
+const _caPt: number[] = [0, 0];
+
+/** Three-point Gauss-Legendre rule on [0, 1]: exact up to degree 5, and the integrand of a cubic is degree 4. */
+const GAUSS_T = [0.5 - Math.sqrt(0.6) / 2, 0.5, 0.5 + Math.sqrt(0.6) / 2];
+const GAUSS_W = [5 / 18, 8 / 18, 5 / 18];
+
+/**
+ * Signed area of a closed contour, positive when it runs counter-clockwise (y-up): the integral
+ * of (x dy - y dx) / 2 along it (Green's theorem), exact for linear, quadratic and cubic segments.
+ */
+function contourArea(contour: Contour): number {
+  let area = 0;
+  for (const seg of contour) {
+    if (seg.type === LINEAR) {
+      area += (seg.p0x * seg.p1y - seg.p1x * seg.p0y) / 2;
+      continue;
+    }
+    for (let k = 0; k < 3; k++) {
+      const t = GAUSS_T[k]!;
+      const u = 1 - t;
+      seg.point(t, _caPt);
+      let dx: number;
+      let dy: number;
+      if (seg.type === QUADRATIC) {
+        dx = 2 * (u * (seg.p1x - seg.p0x) + t * (seg.p2x - seg.p1x));
+        dy = 2 * (u * (seg.p1y - seg.p0y) + t * (seg.p2y - seg.p1y));
+      } else {
+        dx =
+          3 *
+          (u * u * (seg.p1x - seg.p0x) +
+            2 * u * t * (seg.p2x - seg.p1x) +
+            t * t * (seg.p3x - seg.p2x));
+        dy =
+          3 *
+          (u * u * (seg.p1y - seg.p0y) +
+            2 * u * t * (seg.p2y - seg.p1y) +
+            t * t * (seg.p3y - seg.p2y));
+      }
+      area += (GAUSS_W[k]! * (_caPt[0]! * dy - _caPt[1]! * dx)) / 2;
     }
   }
+  return area;
+}
+
+/**
+ * Winds the outer contours of one nonzero fill clockwise (y-up), as TrueType outlines and
+ * `orientContours` leave them, by reversing all of `contours` when its largest contour runs
+ * counter-clockwise. Holes keep their direction against the outer contours, so the fill does
+ * not change. What changes is that fills drawn in opposite directions no longer cancel out
+ * where they overlap once their contours are concatenated into one nonzero shape. The largest
+ * contour decides: a path that winds its own outer contours in both directions stays as it is.
+ *
+ * @param contours Contours of one nonzero fill (mutated in place).
+ */
+export function alignWinding(contours: Contour[]): void {
+  let largest = 0;
+  for (const contour of contours) {
+    if (contour.length === 0) continue;
+    const area = contourArea(contour);
+    if (Math.abs(area) > Math.abs(largest)) largest = area;
+  }
+  if (largest > 0) contours.forEach(reverseContour);
 }

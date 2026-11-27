@@ -119,6 +119,46 @@ describe("parseSvg", () => {
     );
     expect(Math.sign(plain[0]!)).toBe(Math.sign(plain[1]!));
   });
+
+  it("unions overlapping paths wound in opposite directions instead of cancelling them out", () => {
+    // Two squares drawn against each other (clockwise, then counter-clockwise on screen),
+    // overlapping in x 10..14, y 6..14 (SVG units).
+    const { shape } = parseSvg(
+      `<svg viewBox="0 0 24 24"><path d="M2 2h12v12h-12z"/><path d="M22 6h-12v12h12z"/></svg>`,
+    );
+    const n = 24;
+    const w = windings(shape, n); // one cell per SVG unit, rows y-up
+    const at = (x: number, y: number): number => w[(n - 1 - y) * n + x]!;
+    expect(at(12, 10)).not.toBe(0); // inside both squares
+    expect(at(5, 5)).not.toBe(0); // inside the first only
+    expect(at(18, 15)).not.toBe(0); // inside the second only
+    expect(at(20, 3)).toBe(0); // inside neither
+  });
+
+  it("winds curved and straight elements the same way, whatever their curves look like at four samples", () => {
+    // A thin crescent drawn with quadratic curves (true signed area -4/3, y-up) over a small
+    // rectangle. Sampling each curve at four points puts the crescent's area at +1.8, which would
+    // reverse it against the rectangle and cancel their overlap.
+    const { shape } = parseSvg(
+      `<svg viewBox="0 0 24 24"><path d="M2 12Q12 2 22 12Q17 7.1 12 7.1Q7 7.1 2 12z"/><path d="M11 6h2v2h-2z"/></svg>`,
+    );
+    const p: number[] = [0, 0];
+    const area = (contour: (typeof shape.contours)[number]): number => {
+      let a = 0;
+      let [x0, y0] = [contour[0]!.p0x, contour[0]!.p0y];
+      for (const seg of contour) {
+        for (let k = 1; k <= 256; k++) {
+          seg.point(k / 256, p);
+          a += x0 * p[1]! - p[0]! * y0;
+          [x0, y0] = [p[0]!, p[1]!];
+        }
+      }
+      return a / 2;
+    };
+    const signs = shape.contours.map((c) => Math.sign(area(c)));
+    expect(signs).toHaveLength(2);
+    expect(signs[0]).toBe(signs[1]);
+  });
 });
 
 describe("parseSvgLayers", () => {

@@ -566,26 +566,46 @@ function reverseContour(contour: Contour): void {
 /** Scratch point for `contourArea`. */
 const _caPt: number[] = [0, 0];
 
+/** Three-point Gauss-Legendre rule on [0, 1]: exact up to degree 5, and the integrand of a cubic is degree 4. */
+const GAUSS_T = [0.5 - Math.sqrt(0.6) / 2, 0.5, 0.5 + Math.sqrt(0.6) / 2];
+const GAUSS_W = [5 / 18, 8 / 18, 5 / 18];
+
 /**
- * Signed area of a closed contour, positive when it runs counter-clockwise (y-up). Curves are
- * sampled four times per segment: enough for the sign and the rough size, which is all
- * `alignWinding` uses.
+ * Signed area of a closed contour, positive when it runs counter-clockwise (y-up): the integral
+ * of (x dy - y dx) / 2 along it (Green's theorem), exact for linear, quadratic and cubic segments.
  */
 function contourArea(contour: Contour): number {
   let area = 0;
-  let x0 = contour[0]!.p0x;
-  let y0 = contour[0]!.p0y;
   for (const seg of contour) {
-    for (let k = 1; k <= 4; k++) {
-      seg.point(k / 4, _caPt);
-      const x1 = _caPt[0]!;
-      const y1 = _caPt[1]!;
-      area += x0 * y1 - x1 * y0;
-      x0 = x1;
-      y0 = y1;
+    if (seg.type === LINEAR) {
+      area += (seg.p0x * seg.p1y - seg.p1x * seg.p0y) / 2;
+      continue;
+    }
+    for (let k = 0; k < 3; k++) {
+      const t = GAUSS_T[k]!;
+      const u = 1 - t;
+      seg.point(t, _caPt);
+      let dx: number;
+      let dy: number;
+      if (seg.type === QUADRATIC) {
+        dx = 2 * (u * (seg.p1x - seg.p0x) + t * (seg.p2x - seg.p1x));
+        dy = 2 * (u * (seg.p1y - seg.p0y) + t * (seg.p2y - seg.p1y));
+      } else {
+        dx =
+          3 *
+          (u * u * (seg.p1x - seg.p0x) +
+            2 * u * t * (seg.p2x - seg.p1x) +
+            t * t * (seg.p3x - seg.p2x));
+        dy =
+          3 *
+          (u * u * (seg.p1y - seg.p0y) +
+            2 * u * t * (seg.p2y - seg.p1y) +
+            t * t * (seg.p3y - seg.p2y));
+      }
+      area += (GAUSS_W[k]! * (_caPt[0]! * dy - _caPt[1]! * dx)) / 2;
     }
   }
-  return area / 2;
+  return area;
 }
 
 /**

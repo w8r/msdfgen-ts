@@ -134,6 +134,31 @@ describe("parseSvg", () => {
     expect(at(18, 15)).not.toBe(0); // inside the second only
     expect(at(20, 3)).toBe(0); // inside neither
   });
+
+  it("winds curved and straight elements the same way, whatever their curves look like at four samples", () => {
+    // A thin crescent drawn with quadratic curves (true signed area -4/3, y-up) over a small
+    // rectangle. Sampling each curve at four points puts the crescent's area at +1.8, which would
+    // reverse it against the rectangle and cancel their overlap.
+    const { shape } = parseSvg(
+      `<svg viewBox="0 0 24 24"><path d="M2 12Q12 2 22 12Q17 7.1 12 7.1Q7 7.1 2 12z"/><path d="M11 6h2v2h-2z"/></svg>`,
+    );
+    const p: number[] = [0, 0];
+    const area = (contour: (typeof shape.contours)[number]): number => {
+      let a = 0;
+      let [x0, y0] = [contour[0]!.p0x, contour[0]!.p0y];
+      for (const seg of contour) {
+        for (let k = 1; k <= 256; k++) {
+          seg.point(k / 256, p);
+          a += x0 * p[1]! - p[0]! * y0;
+          [x0, y0] = [p[0]!, p[1]!];
+        }
+      }
+      return a / 2;
+    };
+    const signs = shape.contours.map((c) => Math.sign(area(c)));
+    expect(signs).toHaveLength(2);
+    expect(signs[0]).toBe(signs[1]);
+  });
 });
 
 describe("parseSvgLayers", () => {
